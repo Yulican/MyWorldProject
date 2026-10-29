@@ -32,13 +32,21 @@ Builds are signed with the project keystore from the repository secrets `ANDROID
 
 ```
 src/
+  sim/         simulation core, plain TypeScript (no React): hex grid, noise, world generation
+  map/         Skia map rendering: pre-recorded pictures, vector biome icons, pan/zoom/tap
+  state/       stores that hold simulation state outside React
   components/  reusable UI building blocks
   context/     UI state (AppContext)
   hooks/       custom hooks
   screens/     screens
   theme/       colors, spacing
-  types/       shared types
-  utils/       helpers
+tools/         dev tools (world preview PNGs)
 Design Documents/
   sim-prototyp/  performance prototype of the simulation core (placeholder rules)
+```
+
+```bash
+npm test                 # simulation tests (Node)
+npm run world:preview    # renders worlds to world-previews/*.png with stats
+npx tsx tools/renderWorld.ts out 1 2 3 --size=128   # specific seeds and size
 ```
