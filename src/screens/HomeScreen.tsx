@@ -10,7 +10,7 @@ export function HomeScreen() {
     <Screen style={styles.center}>
       <Text style={styles.title}>MyWorldProject</Text>
       <Text style={styles.subtitle}>
-        {userName ? `Hallo, ${userName}!` : 'Setup erfolgreich.'}
+        {userName ? `Hello, ${userName}!` : 'Setup complete.'}
       </Text>
     </Screen>
   );

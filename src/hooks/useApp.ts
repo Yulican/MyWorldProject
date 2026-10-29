@@ -4,7 +4,7 @@ import { AppContext, type AppContextValue } from '../context/AppContext';
 export function useApp(): AppContextValue {
   const ctx = useContext(AppContext);
   if (!ctx) {
-    throw new Error('useApp muss innerhalb von <AppProvider> verwendet werden.');
+    throw new Error('useApp must be used inside <AppProvider>.');
   }
   return ctx;
 }
