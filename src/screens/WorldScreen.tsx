@@ -17,6 +17,9 @@ export function WorldScreen() {
     if (!world) createNewWorld();
   }, [world]);
 
+  // Tapping the selected hex again closes the info bar.
+  const onTapCell = (cell: number) => setSelectedCell((current) => (cell === current ? -1 : cell));
+
   const newWorld = () => {
     setSelectedCell(-1);
     createNewWorld();
@@ -37,7 +40,7 @@ export function WorldScreen() {
       </View>
 
       <View style={styles.mapArea}>
-        {world && <WorldMap world={world} selectedCell={selectedCell} onSelectCell={setSelectedCell} />}
+        {world && <WorldMap world={world} selectedCell={selectedCell} onTapCell={onTapCell} />}
         {world && selectedCell >= 0 && (
           <HexInfoPanel world={world} cell={selectedCell} onClose={() => setSelectedCell(-1)} />
         )}

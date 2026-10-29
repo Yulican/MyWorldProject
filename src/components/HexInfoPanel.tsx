@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   BIOMES,
@@ -16,8 +17,12 @@ type Props = {
   onClose: () => void;
 };
 
-/** Bottom panel with everything the world knows about one hex. */
+/**
+ * Info about one hex. Starts as a slim bar with the key facts so the map
+ * stays usable; tapping the bar expands it to all stats.
+ */
 export function HexInfoPanel({ world, cell, onClose }: Props) {
+  const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
   const biome = BIOMES[world.biome[cell]];
@@ -25,56 +30,72 @@ export function HexInfoPanel({ world, cell, onClose }: Props) {
   const river = world.riverFlow[cell];
   const meters = elevationMeters(world, cell);
 
+  const facts = [
+    `${world.temperature[cell].toFixed(0)} °C`,
+    meters >= 0 ? `${meters} m` : `${-meters} m deep`,
+    river > 0 ? riverSize(river) : null,
+  ].filter(Boolean);
+  const highlights = [
+    cell === world.startCell ? 'Your tribe starts here' : null,
+    deposit ? deposit.name : null,
+  ].filter(Boolean);
+
   return (
     <View style={styles.panel}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>{biome.name}</Text>
-          <Text style={styles.subtitle}>
-            Hex {col}, {row}
-            {cell === world.startCell ? ' · Your tribe starts here' : ''}
+      <View style={styles.bar}>
+        <Pressable style={styles.summary} onPress={() => setExpanded((v) => !v)}>
+          <Text style={styles.title} numberOfLines={1}>
+            {biome.name}
+            <Text style={styles.facts}>{'  ' + facts.join(' · ')}</Text>
           </Text>
-        </View>
-        <Pressable onPress={onClose} hitSlop={12} style={styles.close}>
+          {highlights.length > 0 && (
+            <Text style={styles.highlight} numberOfLines={1}>
+              {highlights.join(' · ')}
+            </Text>
+          )}
+          <Text style={styles.more}>{expanded ? 'Less ▾' : 'Details ▴'}</Text>
+        </Pressable>
+        <Pressable onPress={onClose} style={styles.close} hitSlop={8}>
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
       </View>
 
-      <ScrollView style={styles.scroll}>
-        <Row label={meters >= 0 ? 'Elevation' : 'Depth'} value={`${Math.abs(meters)} m`} />
-        <Row label="Temperature" value={`${world.temperature[cell].toFixed(0)} °C`} />
-        {!biome.water && <Row label="Moisture" value={percent(world.moisture[cell])} />}
-        {!biome.water && (
-          <Row label="River" value={river > 0 ? riverSize(river) : hasFreshWater(world, cell) ? 'Nearby' : 'None'} />
-        )}
-        <Row label="Danger" value={percent(world.danger[cell])} />
-        <Row label="Travel cost" value={`×${world.moveCost[cell]}`} />
-        {deposit && <Row label="Deposit" value={`${deposit.name} (${deposit.category})`} highlight />}
+      {expanded && (
+        <ScrollView style={styles.details}>
+          <Row label="Hex" value={`${col}, ${row}`} />
+          {!biome.water && <Row label="Moisture" value={percent(world.moisture[cell])} />}
+          {!biome.water && (
+            <Row label="Fresh water" value={river > 0 || hasFreshWater(world, cell) ? 'Yes' : 'No'} />
+          )}
+          <Row label="Danger" value={percent(world.danger[cell])} />
+          <Row label="Travel cost" value={`×${world.moveCost[cell]}`} />
+          {deposit && <Row label="Deposit" value={`${deposit.name} (${deposit.category})`} />}
 
-        <Text style={styles.section}>Resources</Text>
-        {RESOURCE_NAMES.map((name, r) => (
-          <Bar
-            key={name}
-            label={name}
-            value={world.resources[cell * RESOURCE_COUNT + r]}
-            capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
-          />
-        ))}
+          <Text style={styles.section}>Resources</Text>
+          {RESOURCE_NAMES.map((name, r) => (
+            <Bar
+              key={name}
+              label={name}
+              value={world.resources[cell * RESOURCE_COUNT + r]}
+              capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
+            />
+          ))}
 
-        <Text style={styles.section}>People</Text>
-        <Row label="Civilization" value={world.owner[cell] ? `#${world.owner[cell]}` : 'Nobody'} />
-        <Row label="Population" value={String(Math.round(world.population[cell]))} />
-        <Row label="Faith in you" value={world.population[cell] > 0 ? percent(world.faith[cell]) : '–'} />
-      </ScrollView>
+          <Text style={styles.section}>People</Text>
+          <Row label="Civilization" value={world.owner[cell] ? `#${world.owner[cell]}` : 'Nobody'} />
+          <Row label="Population" value={String(Math.round(world.population[cell]))} />
+          <Row label="Faith in you" value={world.population[cell] > 0 ? percent(world.faith[cell]) : '–'} />
+        </ScrollView>
+      )}
     </View>
   );
 }
 
-function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.row}>
       <Text style={styles.label}>{label}</Text>
-      <Text style={[styles.value, highlight && styles.highlight]}>{value}</Text>
+      <Text style={styles.value}>{value}</Text>
     </View>
   );
 }
@@ -100,23 +121,24 @@ const styles = StyleSheet.create({
     left: spacing.sm,
     right: spacing.sm,
     bottom: spacing.sm,
-    maxHeight: '45%',
+    maxHeight: '50%',
     backgroundColor: colors.panel,
-    borderRadius: 14,
-    padding: spacing.md,
+    borderRadius: 12,
+    opacity: 0.96,
   },
-  header: { flexDirection: 'row', alignItems: 'flex-start' },
-  headerText: { flex: 1 },
-  title: { color: colors.panelText, fontSize: 20, fontWeight: '700' },
-  subtitle: { color: colors.panelMuted, fontSize: 13, marginTop: 2 },
-  close: { padding: spacing.xs },
-  closeText: { color: colors.panelMuted, fontSize: 18 },
-  scroll: { marginTop: spacing.sm },
+  bar: { flexDirection: 'row', alignItems: 'center' },
+  summary: { flex: 1, paddingVertical: spacing.sm, paddingLeft: spacing.md },
+  title: { color: colors.panelText, fontSize: 16, fontWeight: '700' },
+  facts: { color: colors.panelMuted, fontSize: 14, fontWeight: '400' },
+  highlight: { color: colors.accent, fontSize: 13, marginTop: 2 },
+  more: { color: colors.panelMuted, fontSize: 12, marginTop: 2 },
+  close: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  closeText: { color: colors.panelMuted, fontSize: 20 },
+  details: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   section: { color: colors.panelText, fontSize: 14, fontWeight: '700', marginTop: spacing.md, marginBottom: spacing.xs },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
   label: { color: colors.panelMuted, fontSize: 14, width: 110 },
   value: { color: colors.panelText, fontSize: 14, flex: 1 },
-  highlight: { color: colors.accent, fontWeight: '600' },
   barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.barTrack, overflow: 'hidden' },
   barCapacity: { position: 'absolute', top: 0, bottom: 0, left: 0, backgroundColor: colors.barCapacity },
   barFill: { position: 'absolute', top: 0, bottom: 0, left: 0, backgroundColor: colors.accent },
