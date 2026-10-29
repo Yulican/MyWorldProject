@@ -71,7 +71,10 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
-          OUT="MyWorld-${TAG//\//-}.apk"
+          # The commit in the name keeps file names unique: re-downloading a
+          # name that is already on the phone makes the browser ask to download
+          # it again and leaves two APKs behind.
+          OUT="MyWorld-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}.apk"
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "::warning::No keystore secrets set - APK is debug-signed. Installing it over a build with a different signature requires uninstalling first."
             cp "$APK" "$OUT"

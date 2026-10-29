@@ -1,4 +1,4 @@
-import { Canvas, Group, Image, Path, Picture, Skia } from '@shopify/react-native-skia';
+import { Canvas, Group, Image, Path, Picture, Skia, createPicture } from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -8,7 +8,7 @@ import {
   useSimultaneousGestures,
   useTapGesture,
 } from 'react-native-gesture-handler';
-import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { useDerivedValue, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
@@ -37,6 +37,10 @@ type Props = {
  *
  * Which tiles are visible lives in <TileLayer>, so crossing a tile border
  * re-renders only the tiles and never the gesture setup mid-gesture.
+ *
+ * Icons and outlines are hidden while pinching: redrawing thousands of icon
+ * paths at a new scale every frame made zooming stutter. They return as soon
+ * as the fingers lift.
  */
 export function WorldMap({ world, selectedCell, onTapCell }: Props) {
   const layers = useMemo(() => buildWorldLayers(world), [world]);
@@ -48,6 +52,7 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
   const minScale = useSharedValue(0.2);
   const lastView = useSharedValue<ViewTiles>(NO_TILES);
   const lastMoveAt = useSharedValue(0);
+  const zooming = useSharedValue(false);
 
   // The tile layer registers its state setter here; the stable forwarder can
   // be called from gesture worklets without re-creating them.
@@ -101,6 +106,14 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
   });
 
   const pinch = usePinchGesture({
+    onActivate: () => {
+      'worklet';
+      zooming.value = true;
+    },
+    onFinalize: () => {
+      'worklet';
+      zooming.value = false;
+    },
     onUpdate: (e) => {
       'worklet';
       const next = Math.min(MAX_SCALE, Math.max(minScale.value, scale.value * e.scaleChange));
@@ -157,7 +170,7 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
                 fit="fill"
               />
             ))}
-            <TileLayer layers={layers} listener={tileListener} />
+            <TileLayer layers={layers} listener={tileListener} zooming={zooming} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -174,13 +187,31 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
 type TileLayerProps = {
   layers: WorldLayers;
   listener: { current: (view: ViewTiles) => void };
+  zooming: SharedValue<boolean>;
 };
 
 /** The vector tiles near the screen. Owns the visible-tile state so only it re-renders. */
-const TileLayer = memo(function TileLayer({ layers, listener }: TileLayerProps) {
+const TileLayer = memo(function TileLayer({ layers, listener, zooming }: TileLayerProps) {
   const [view, setView] = useState<ViewTiles>(NO_TILES);
   listener.current = setView;
   const tiles = useMemo(() => visibleTiles(view, layers), [view, layers]);
+  // All visible icons in one picture, drawn after all fills so no tile covers
+  // the icons of its neighbor. Swapped for an empty one on the UI thread while
+  // pinching, without a React render.
+  const empty = useMemo(() => createPicture(() => {}), []);
+  const allIcons = useMemo(
+    () =>
+      createPicture((canvas) => {
+        for (const t of tiles) {
+          canvas.save();
+          canvas.translate(t.offsetX, 0);
+          canvas.drawPicture(layers.chunks[t.chunk].icons);
+          canvas.restore();
+        }
+      }),
+    [tiles, layers],
+  );
+  const icons = useDerivedValue(() => (zooming.value ? empty : allIcons), [zooming, empty, allIcons]);
   return (
     <>
       {tiles.map((t) => (
@@ -188,12 +219,7 @@ const TileLayer = memo(function TileLayer({ layers, listener }: TileLayerProps) 
           <Picture picture={layers.chunks[t.chunk].fills} />
         </Group>
       ))}
-      {/* Icons after all fills, so no tile covers the icons of its neighbor. */}
-      {tiles.map((t) => (
-        <Group key={`i${t.key}`} transform={[{ translateX: t.offsetX }]}>
-          <Picture picture={layers.chunks[t.chunk].icons} />
-        </Group>
-      ))}
+      <Picture picture={icons} />
     </>
   );
 });
