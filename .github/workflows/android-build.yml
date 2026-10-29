@@ -40,7 +40,9 @@ jobs:
 
       - run: npm ci
 
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
+
+      - run: npm test
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
