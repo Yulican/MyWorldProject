@@ -8,7 +8,14 @@ import {
   useSimultaneousGestures,
   useTapGesture,
 } from 'react-native-gesture-handler';
-import { useDerivedValue, useSharedValue, type SharedValue } from 'react-native-reanimated';
+import {
+  cancelAnimation,
+  useAnimatedReaction,
+  useDerivedValue,
+  useSharedValue,
+  withDecay,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
@@ -20,6 +27,10 @@ const MAX_SCALE = 3;
 const START_SCALE = 1;
 /** A tap right after dragging or pinching is almost always a finger lifting off, not a tap. */
 const TAP_COOLDOWN_MS = 300;
+/** Slower releases just stop; faster ones let the map glide on. */
+const MIN_FLING_VELOCITY = 150;
+/** Lifting the fingers after a pinch reports a pan velocity that isn't a fling. */
+const FLING_AFTER_PINCH_MS = 150;
 const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false };
 
 type Props = {
@@ -38,6 +49,10 @@ type Props = {
  * Which tiles are visible lives in <TileLayer>, so crossing a tile border
  * re-renders only the tiles and never the gesture setup mid-gesture.
  *
+ * Releasing a drag lets the map glide on and slow down, so short repeated
+ * swipes flow into each other instead of stopping hard. Touching the map
+ * catches it.
+ *
  * Icons and outlines are hidden while pinching: redrawing thousands of icon
  * paths at a new scale every frame made zooming stutter. They return as soon
  * as the fingers lift.
@@ -53,6 +68,10 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
   const lastView = useSharedValue<ViewTiles>(NO_TILES);
   const lastMoveAt = useSharedValue(0);
   const zooming = useSharedValue(false);
+  const pinchEndedAt = useSharedValue(0);
+  // Glide after a drag: decaying offsets whose per-frame change moves the map.
+  const glideX = useSharedValue(0);
+  const glideY = useSharedValue(0);
 
   // The tile layer registers its state setter here; the stable forwarder can
   // be called from gesture worklets without re-creating them.
@@ -93,9 +112,41 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
     scheduleOnRN(onViewChange, next);
   };
 
+  const stopGlide = () => {
+    'worklet';
+    cancelAnimation(glideX);
+    cancelAnimation(glideY);
+  };
+
+  useAnimatedReaction(
+    () => [glideX.value, glideY.value],
+    (cur, prev) => {
+      if (!prev) return;
+      const dx = cur[0] - prev[0];
+      const dy = cur[1] - prev[1];
+      if (dx === 0 && dy === 0) return;
+      tx.value = wrapX(tx.value + dx, mapWidth * scale.value);
+      ty.value = clampY(ty.value + dy, mapHeight * scale.value, viewH);
+      lastMoveAt.value = Date.now();
+      reportView();
+    },
+    [mapWidth, mapHeight, viewW, viewH],
+  );
+
   const pan = usePanGesture({
     // Follow the average of all fingers, so lifting one finger after a pinch doesn't jump.
     averageTouches: true,
+    onBegin: () => {
+      'worklet';
+      stopGlide();
+    },
+    onDeactivate: (e) => {
+      'worklet';
+      if (zooming.value || Date.now() - pinchEndedAt.value < FLING_AFTER_PINCH_MS) return;
+      if (Math.hypot(e.velocityX, e.velocityY) < MIN_FLING_VELOCITY) return;
+      glideX.value = withDecay({ velocity: e.velocityX });
+      glideY.value = withDecay({ velocity: e.velocityY });
+    },
     onUpdate: (e) => {
       'worklet';
       tx.value = wrapX(tx.value + e.changeX, mapWidth * scale.value);
@@ -106,12 +157,17 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
   });
 
   const pinch = usePinchGesture({
+    onBegin: () => {
+      'worklet';
+      stopGlide();
+    },
     onActivate: () => {
       'worklet';
       zooming.value = true;
     },
     onFinalize: () => {
       'worklet';
+      if (zooming.value) pinchEndedAt.value = Date.now();
       zooming.value = false;
     },
     onUpdate: (e) => {
