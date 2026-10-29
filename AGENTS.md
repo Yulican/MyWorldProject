@@ -1,4 +1,10 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is an Expo/React Native mobile game (Android only), a sandbox god game. Prioritize mobile performance. The game design lives in `Design Documents/` (German) and must be kept up to date when design decisions change. Game text is English.
+
+## Project architecture
+
+- The simulation core is plain TypeScript with no React or React Native imports. It is deterministic per seed, stores data in flat typed arrays and will later be ported to C++ via JSI, so keep it port-friendly.
+- Simulation state lives outside React. React Context only holds UI-related state.
+- The map renders compact per-hex snapshots, not individual inhabitants.
 
 ## Expo has changed — do not trust your training data
 
@@ -23,11 +29,9 @@ npx expo install --fix      # fix incompatible package versions
 
 Run lint and typecheck before declaring any task done.
 
-## Navigation & Routing
+## Navigation
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- The app currently has a single screen rendered from `App.tsx` (`src/screens/`). No router is set up yet; decide on one when a second screen is needed.
 
 ## Building with EAS
 
@@ -36,6 +40,6 @@ Docs: https://docs.expo.dev/eas/index.md
 
 ## Rules
 
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
+- The `android/` directory is generated (Continuous Native Generation). Never create or edit it by hand — configure native behavior in `app.json` and config plugins.
+- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:android` locally, or `eas build --profile development --platform android`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md

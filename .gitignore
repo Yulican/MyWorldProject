@@ -36,6 +36,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# generated native folders (Expo prebuild)
 /ios
 /android
+
+# Office lock files
+~$*
