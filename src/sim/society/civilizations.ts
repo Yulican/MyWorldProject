@@ -11,6 +11,29 @@ export const MAX_CIVS = 6;
 /** How a civilization came to be. */
 export type CivOrigin = 'start' | 'secession' | 'tribe';
 
+/**
+ * Why a civilization's believers changed over one year, so faith gains and
+ * losses can be shown and explained. All values are numbers of people.
+ */
+export type FaithLedger = {
+  /** Children born as believers. */
+  born: number;
+  /** Believers who died. */
+  died: number;
+  /** Became believers through their own devotion (worshipping civilizations only). */
+  grewDevout: number;
+  /** Became believers because the people around them believe. */
+  wonByNeighbors: number;
+  /** Stopped believing because the people around them believe less. */
+  lostToNeighbors: number;
+  /** Stopped believing because their civilization doesn't worship the player. */
+  forgot: number;
+};
+
+export function emptyFaithLedger(): FaithLedger {
+  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0 };
+}
+
 export type Civilization = {
   id: number;
   name: string;
@@ -33,6 +56,11 @@ export type Civilization = {
   territory: number;
   /** Inhabitants with faith in the player of at least BELIEVER_FAITH. */
   believers: number;
+  /** Mean faith in the player 0..1. */
+  averageFaith: number;
+  /** Believer changes in the running year, and in the last complete year. */
+  faithYear: FaithLedger;
+  faithLastYear: FaithLedger;
 };
 
 /** Number of distinct civilization colors the map offers. */
@@ -59,6 +87,9 @@ export function createCivilization(
     population: 0,
     territory: 0,
     believers: 0,
+    averageFaith: 0,
+    faithYear: emptyFaithLedger(),
+    faithLastYear: emptyFaithLedger(),
   };
 }
 

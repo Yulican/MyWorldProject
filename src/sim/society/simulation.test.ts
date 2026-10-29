@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import { MAX_CIVS } from './civilizations';
@@ -72,6 +73,43 @@ for (const seed of [1, 3, 1234]) {
     }
   });
 }
+
+test('breakaways are paused', () => {
+  const sim = createSimulation(generateWorld({ seed: 1 }));
+  runYears(sim, 200);
+  assert.ok(livingCivilizations(sim).every((c) => c.origin !== 'secession'));
+});
+
+test('the faith ledger explains every change in believers', () => {
+  const sim = createSimulation(generateWorld({ seed: 42 }));
+  const player = livingCivilizations(sim)[0];
+  runYears(sim, 30);
+  for (let year = 0; year < 40; year++) {
+    const before = player.believers;
+    runYears(sim, 1);
+    const l = player.faithLastYear;
+    const net = l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot;
+    assert.equal(player.believers - before, net, `year ${31 + year}: ${JSON.stringify(l)}`);
+  }
+  assert.equal(sim.history.believers.length, 70);
+  assert.equal(sim.history.believers.at(-1), sim.believers);
+});
+
+test('settlements stay close to their people', () => {
+  const sim = createSimulation(generateWorld({ seed: 3 }));
+  runYears(sim, 120);
+  const { world } = sim;
+  // Every settled hex has a hex of the same civilization within 3 hexes.
+  for (let c = 0; c < world.cellCount; c++) {
+    const owner = world.owner[c];
+    if (!owner) continue;
+    let near = false;
+    for (let o = 0; o < world.cellCount && !near; o++) {
+      if (o !== c && world.owner[o] === owner && hexDistance(world, c, o) <= 3) near = true;
+    }
+    assert.ok(near || sim.civs[owner]!.territory === 1, `isolated settlement at hex ${c}`);
+  }
+});
 
 test('100 years of a grown world simulate fast enough', () => {
   const sim = createSimulation(generateWorld({ seed: 99 }));

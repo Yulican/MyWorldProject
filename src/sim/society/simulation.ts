@@ -1,4 +1,4 @@
-import { DIRECTION_COUNT } from '../hex';
+import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { BIOMES, Biome, RESOURCE_COUNT, Resource, isWaterBiome } from '../world/biomes';
 import { clamp } from '../world/climate';
@@ -7,6 +7,7 @@ import {
   CIV_COLOR_COUNT,
   MAX_CIVS,
   createCivilization,
+  emptyFaithLedger,
   generateCivName,
   type CivOrigin,
   type Civilization,
@@ -30,9 +31,24 @@ const PEOPLE_PER_FOOD = 30;
 /** Civilization slots per cell in `cellCivPop` (index 0 = nobody). */
 const CIV_SLOTS = MAX_CIVS + 1;
 const TARGET_UNKNOWN = -2;
+/**
+ * Breakaways are paused for now: they made test games hard to follow
+ * without adding much. The rules stay in place for when we return to them.
+ */
+const SECESSION_ENABLED = false;
 /** Settlements further than this many hexes from the capital may break away. */
 const SECESSION_REACH = 7;
 const SECESSION_CHANCE = 0.08;
+/** Hexes are crowded, and people start moving on, from this share of their capacity. */
+const CROWDED = 0.6;
+/** Settlers only leave once the civilization's land as a whole is this full. */
+const SETTLERS_LAND_FULL = 0.7;
+/** Settler groups found new villages at most this many hexes beyond their land. */
+const SETTLER_GAP = 2;
+/** Score lost per hex of distance from the capital; keeps peoples together. */
+const COHESION = 0.03;
+/** Years of population and believer counts kept for the trend chart. */
+const HISTORY_YEARS = 200;
 const NEW_TRIBE_MIN_YEAR = 25;
 const NEW_TRIBE_CHANCE = 0.02;
 /** New tribes appear at least this many hexes from anyone else. */
@@ -59,6 +75,8 @@ export type Simulation = {
   chronicle: ChronicleEntry[];
   /** Believers in all civilizations at the last refresh. */
   believers: number;
+  /** Totals at the end of each year, oldest first, at most HISTORY_YEARS. */
+  history: { population: number[]; believers: number[] };
   /** Nobody prays to the player anymore (design doc, section 9). */
   gameOver: boolean;
   /** Increases whenever the map snapshot in `world` changes. */
@@ -80,6 +98,7 @@ export function createSimulation(world: World): Simulation {
     moveTarget: new Int32Array(n * CIV_SLOTS).fill(TARGET_UNKNOWN),
     chronicle: [],
     believers: 0,
+    history: { population: [], believers: [] },
     gameOver: false,
     snapshotVersion: 0,
   };
@@ -105,8 +124,25 @@ export function stepSimulation(sim: Simulation): void {
     if (pop.alive[i]) updateInhabitant(sim, i);
   }
   sim.tick++;
-  if (sim.tick % TICKS_PER_YEAR === 0) updateCivilizations(sim);
+  const yearEnd = sim.tick % TICKS_PER_YEAR === 0;
+  if (yearEnd) updateCivilizations(sim);
   if (sim.tick % REFRESH_TICKS === 0) refreshSnapshot(sim);
+  if (yearEnd) closeYear(sim);
+}
+
+/** Keeps the year's totals for the trend chart and starts new faith ledgers. */
+function closeYear(sim: Simulation): void {
+  const { history } = sim;
+  history.population.push(sim.pop.count);
+  history.believers.push(sim.believers);
+  if (history.population.length > HISTORY_YEARS) {
+    history.population.shift();
+    history.believers.shift();
+  }
+  for (const civ of livingCivilizations(sim)) {
+    civ.faithLastYear = civ.faithYear;
+    civ.faithYear = emptyFaithLedger();
+  }
 }
 
 /** In-game year, starting at 1. */
@@ -181,28 +217,42 @@ function updateInhabitant(sim: Simulation, i: number): void {
   // Hunger kills once a hex holds more people than it can feed.
   const crowding = sim.cellPop[cell] / Math.max(1, sim.cellCapacity[cell]);
   const death = ageMortality(age) + world.danger[cell] * 0.01 + (crowding > 1 ? (crowding - 1) * 0.3 : 0);
+  const ledger = civ.faithYear;
   if (rng() < death) {
+    if (pop.faith[i] >= BELIEVER_FAITH) ledger.died++;
     removeInhabitant(sim, i);
     return;
   }
 
   // Faith follows the neighbors. The player's own people grow more devout,
-  // everyone else slowly forgets the player.
-  let faith = pop.faith[i];
-  const neighborFaith = world.population[cell] > 0 ? world.faith[cell] : faith;
-  faith += (neighborFaith - faith) * 0.1;
-  faith += civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 : -0.005;
-  faith = clamp(faith, 0, 1);
+  // everyone else slowly forgets the player. Crossing the believer line is
+  // booked under whichever of these pulled hardest.
+  const before = pop.faith[i];
+  const neighborFaith = world.population[cell] > 0 ? world.faith[cell] : before;
+  const pull = (neighborFaith - before) * 0.1;
+  const devotion = civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 : 0;
+  const fading = civ.worshipsPlayer ? 0 : 0.005;
+  const faith = clamp(before + pull + devotion - fading, 0, 1);
   pop.faith[i] = faith;
+  const wasBeliever = before >= BELIEVER_FAITH;
+  if (wasBeliever !== faith >= BELIEVER_FAITH) {
+    if (wasBeliever) {
+      if (-pull > fading) ledger.lostToNeighbors++;
+      else ledger.forgot++;
+    } else if (pull > devotion) ledger.wonByNeighbors++;
+    else ledger.grewDevout++;
+  }
 
-  if (age >= 16 && age <= 42 && rng() < 0.17 * clamp(1.15 - crowding, 0, 1)) {
+  // Full birth rate up to half the hex's capacity, none once it is overfull.
+  if (age >= 16 && age <= 42 && rng() < 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1)) {
     const childFaith = clamp(faith * 0.9 + neighborFaith * 0.1 + (rng() - 0.5) * 0.1, 0, 1);
+    if (childFaith >= BELIEVER_FAITH) ledger.born++;
     addInhabitant(sim, cell, civId, 0, childFaith);
   }
 
-  if (age >= 15) {
-    const wandering = civ.culture[Culture.Wandering];
-    const urge = crowding > 0.75 ? (crowding - 0.75) * (0.5 + wandering) : 0.004 * wandering;
+  // Only crowding makes people move on; the more wandering the culture, the sooner.
+  if (age >= 15 && crowding > CROWDED) {
+    const urge = (crowding - CROWDED) * (0.5 + civ.culture[Culture.Wandering]);
     if (rng() < urge) {
       const target = moveTargetFor(sim, cell, civId);
       if (target >= 0) moveInhabitant(sim, i, target);
@@ -219,6 +269,7 @@ function room(sim: Simulation, cell: number): number {
 /** How much a civilization wants to live in a hex right now. */
 function settleScore(sim: Simulation, civ: Civilization, cell: number): number {
   let score = terrainAppeal(sim.world, civ.culture, cell) + room(sim, cell);
+  score -= COHESION * hexDistance(sim.world, civ.capital, cell);
   // Until war and diplomacy exist, peoples avoid each other's land.
   const owner = sim.world.owner[cell];
   if (owner !== 0 && owner !== civ.id) score -= 0.6;
@@ -227,8 +278,8 @@ function settleScore(sim: Simulation, civ: Civilization, cell: number): number {
 
 /**
  * Where people of `civ` leaving `cell` go: the best neighboring hex, or the
- * first land across a short stretch of water for seafaring peoples. -1 if
- * nowhere is better than staying. Cached until the next snapshot refresh.
+ * land across a one-hex strait for seafaring peoples. -1 if nowhere is
+ * better than staying. Cached until the next snapshot refresh.
  */
 function moveTargetFor(sim: Simulation, cell: number, civId: number): number {
   const key = cell * CIV_SLOTS + civId;
@@ -237,8 +288,7 @@ function moveTargetFor(sim: Simulation, cell: number, civId: number): number {
 
   const { world } = sim;
   const civ = sim.civs[civId]!;
-  const seafaring = civ.culture[Culture.Seafaring];
-  const maxWaterHops = seafaring >= 0.3 ? 1 + Math.floor(seafaring * 3) : 0;
+  const maxWaterHops = civ.culture[Culture.Seafaring] >= 0.5 ? 1 : 0;
   let best = -1;
   let bestScore = settleScore(sim, civ, cell) + 0.05;
   for (let d = 0; d < DIRECTION_COUNT; d++) {
@@ -297,9 +347,11 @@ function refreshSnapshot(sim: Simulation): void {
 
   const faithSum = new Float64Array(world.cellCount);
   const believers = new Int32Array(CIV_SLOTS);
+  const civFaithSum = new Float64Array(CIV_SLOTS);
   for (let i = 0; i < pop.end; i++) {
     if (!pop.alive[i]) continue;
     faithSum[pop.cell[i]] += pop.faith[i];
+    civFaithSum[pop.civ[i]] += pop.faith[i];
     if (pop.faith[i] >= BELIEVER_FAITH) believers[pop.civ[i]]++;
   }
 
@@ -330,6 +382,7 @@ function refreshSnapshot(sim: Simulation): void {
     civ.population = civPop[id];
     civ.territory = territory[id];
     civ.believers = believers[id];
+    civ.averageFaith = civ.population > 0 ? civFaithSum[id] / civ.population : 0;
     sim.believers += believers[id];
     if (civ.population === 0) {
       record(sim, `The ${civ.name} have vanished.`);
@@ -372,8 +425,8 @@ function updateCivilizations(sim: Simulation): void {
     if (cells.length === 0) continue;
     landCulture(sim.world, cells, weights, target);
     driftCulture(civ.culture, target);
-    sendSettlers(sim, civ);
-    trySecession(sim, civ);
+    sendSettlers(sim, civ, cells);
+    if (SECESSION_ENABLED) trySecession(sim, civ);
   }
   tryNewTribe(sim);
 }
@@ -392,15 +445,23 @@ function civCells(sim: Simulation, civId: number): { cells: number[]; weights: n
 }
 
 /**
- * Now and then a group leaves the most crowded settlement to found a new one
- * a few hexes away, possibly across water. This is how peoples spread beyond
- * their neighbors and how distant colonies (future breakaways) come about.
+ * Once a people's land as a whole fills up, a group may leave the most
+ * crowded settlement to found a village on the best free land close to its
+ * borders, across a strait for seafaring peoples. Moving hex by hex can't
+ * cross gaps such as a strip of desert or water; settlers can, but only a
+ * short way.
  */
-function sendSettlers(sim: Simulation, civ: Civilization): void {
+function sendSettlers(sim: Simulation, civ: Civilization, cells: readonly number[]): void {
   const { world, rng, pop } = sim;
-  if (civ.population < 30) return;
-  const wandering = civ.culture[Culture.Wandering];
-  if (rng() >= 0.25 + 0.35 * wandering) return;
+  if (civ.population < 60) return;
+  let people = 0;
+  let capacity = 0;
+  for (const c of cells) {
+    people += sim.cellPop[c];
+    capacity += sim.cellCapacity[c];
+  }
+  if (people < capacity * SETTLERS_LAND_FULL) return;
+  if (rng() >= 0.2 + 0.3 * civ.culture[Culture.Wandering]) return;
 
   let source = -1;
   let worstRoom = Infinity;
@@ -414,19 +475,18 @@ function sendSettlers(sim: Simulation, civ: Civilization): void {
   }
   if (source < 0) return;
 
-  const seafaring = civ.culture[Culture.Seafaring];
-  const radius = 3 + Math.round(3 * wandering) + (seafaring >= 0.3 ? 2 : 0);
-  const distance = distanceField(world, [source], radius, (c) => {
+  const seafaring = civ.culture[Culture.Seafaring] >= 0.5;
+  const distance = distanceField(world, cells, SETTLER_GAP, (c) => {
     const biome = world.biome[c];
-    if (!isWaterBiome(biome)) return true;
-    return biome === Biome.DeepOcean ? seafaring >= 0.7 : seafaring >= 0.3;
+    return !isWaterBiome(biome) || (seafaring && biome !== Biome.DeepOcean);
   });
   let target = -1;
   let bestScore = -Infinity;
   for (let c = 0; c < world.cellCount; c++) {
     const d = distance[c];
-    if (d < 2 || isWaterBiome(world.biome[c]) || sim.cellPop[c] > 0) continue;
-    const score = terrainAppeal(world, civ.culture, c) - d * 0.03 + rng() * 0.1;
+    if (d < 1 || isWaterBiome(world.biome[c]) || sim.cellPop[c] > 0 || world.owner[c] !== 0) continue;
+    const score =
+      terrainAppeal(world, civ.culture, c) - d * 0.1 - COHESION * hexDistance(world, civ.capital, c) + rng() * 0.05;
     if (score > bestScore) {
       bestScore = score;
       target = c;
