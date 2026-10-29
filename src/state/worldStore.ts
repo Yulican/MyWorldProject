@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { createSimulation, generateWorld, randomSeed, stepSimulation, type Simulation, type World } from '../sim';
+import { recordSimWork } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
 // simulation state lives outside React, components subscribe to what they
@@ -80,11 +81,15 @@ function runFrame(now: number) {
   const seconds = Math.min(0.25, (now - lastFrameTime) / 1000);
   lastFrameTime = now;
   pendingTicks += ticksPerSecond * seconds;
-  const deadline = performance.now() + FRAME_BUDGET_MS;
+  const start = performance.now();
+  const deadline = start + FRAME_BUDGET_MS;
+  let ticks = 0;
   while (pendingTicks >= 1 && !sim.gameOver && performance.now() < deadline) {
     stepSimulation(sim);
     pendingTicks--;
+    ticks++;
   }
+  recordSimWork(performance.now() - start, ticks);
   // Drop what didn't fit instead of piling up a backlog.
   pendingTicks = Math.min(pendingTicks, 2);
 

@@ -26,6 +26,8 @@ npm run typecheck
 
 Every pushed branch is built by GitHub Actions ([`.github/workflows/android-build.yml`](.github/workflows/android-build.yml)). The APK is published as a pre-release named `Build: <branch>` under the repository's **Releases**; open it on the phone and install the APK. The build label at the bottom of the home screen shows which branch and commit is installed. Deleting a branch removes its release.
 
+To keep builds fast, CI compiles native code for 64-bit ARM phones only (`arm64-v8a`), and commits that only touch `Design Documents/`, Markdown files or `LICENSE` don't trigger a build. Local builds are unaffected and still include all CPU types.
+
 Builds are signed with the project keystore from the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS`, so new builds install over old ones and keep save data. Without the secrets the APK is debug-signed.
 
 ## Structure
