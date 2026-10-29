@@ -22,21 +22,25 @@ Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
 npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
 npx expo start              # start the dev server
 npx expo lint               # lint
-npx tsc --noEmit            # typecheck
+npm run typecheck           # app + tests/tools
+npm test                    # simulation and map logic tests (Node)
+npm run world:preview       # render generated worlds to PNG to check the generator
 npx expo-doctor             # diagnose dependency and config issues
 npx expo install --fix      # fix incompatible package versions
 ```
 
-Run lint and typecheck before declaring any task done.
+Run typecheck and tests before declaring any task done.
 
 ## Navigation
 
 - The app currently has a single screen rendered from `App.tsx` (`src/screens/`). No router is set up yet; decide on one when a second screen is needed.
 
-## Building with EAS
+## Builds and testing
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+- Every change happens on its own branch. Pushing a branch makes GitHub Actions (`.github/workflows/android-build.yml`) build a signed release APK and publish it as the pre-release `build-<branch>`; the user installs that on their phone to test.
+- CI builds native code for `arm64-v8a` only (passed as `-PreactNativeArchitectures=arm64-v8a`). Don't hard-code CPU architectures in `app.json` or config plugins; when adding a native library, make sure it supports arm64-v8a.
+- Commits that only touch `Design Documents/`, `*.md` or `LICENSE` don't trigger a build. To get an APK anyway, run the workflow manually (`workflow_dispatch`).
+- EAS is not used for builds.
 
 ## Rules
 

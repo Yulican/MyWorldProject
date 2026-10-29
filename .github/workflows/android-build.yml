@@ -6,6 +6,11 @@ name: Android build
 on:
   push:
     branches: ['**']
+    # Docs-only commits don't change the app, so they don't need a new APK.
+    paths-ignore:
+      - 'Design Documents/**'
+      - '**/*.md'
+      - 'LICENSE'
   delete:
   workflow_dispatch:
 
@@ -47,12 +52,15 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
 
-      # Shown in the app so it's clear which build is installed.
+      # Test builds only target 64-bit ARM (practically every phone of the
+      # last years). Compiling native code for all four CPU types took most of
+      # the build time. Local builds still use the project default (all types).
+      # The build label is shown in the app so it's clear which build is installed.
       - name: Build release APK
         env:
           EXPO_PUBLIC_BUILD_LABEL: ${{ github.ref_name }} · ${{ github.sha }}
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       # Re-sign with the project keystore so new builds install over old ones
       # (keeps save games). Without the secrets the APK stays debug-signed.
