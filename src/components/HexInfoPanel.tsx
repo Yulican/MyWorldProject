@@ -13,11 +13,13 @@ import { colors, spacing } from '../theme';
 type Props = {
   world: World;
   cell: number;
+  /** Name of the civilization living in the hex, if any. */
+  civName?: string | null;
   onClose: () => void;
 };
 
 /** Bottom panel with everything the world knows about one hex. */
-export function HexInfoPanel({ world, cell, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
   const biome = BIOMES[world.biome[cell]];
@@ -62,7 +64,7 @@ export function HexInfoPanel({ world, cell, onClose }: Props) {
         ))}
 
         <Text style={styles.section}>People</Text>
-        <Row label="Civilization" value={world.owner[cell] ? `#${world.owner[cell]}` : 'Nobody'} />
+        <Row label="Civilization" value={civName ?? 'Nobody'} />
         <Row label="Population" value={String(Math.round(world.population[cell]))} />
         <Row label="Faith in you" value={world.population[cell] > 0 ? percent(world.faith[cell]) : '–'} />
       </ScrollView>

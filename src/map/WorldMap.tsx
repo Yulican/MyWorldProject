@@ -1,4 +1,4 @@
-import { Canvas, Group, Path, Picture, Skia } from '@shopify/react-native-skia';
+import { Canvas, Group, Path, Picture, Skia, type SkPicture } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -23,6 +23,8 @@ type Props = {
   world: World;
   selectedCell: number;
   onSelectCell: (cell: number) => void;
+  /** Changing layer drawn above the terrain, e.g. territories. Same coordinates as the world pictures. */
+  overlay?: SkPicture | null;
 };
 
 /**
@@ -31,7 +33,7 @@ type Props = {
  * right: three copies are drawn side by side and the horizontal offset is
  * kept within one map width.
  */
-export function WorldMap({ world, selectedCell, onSelectCell }: Props) {
+export function WorldMap({ world, selectedCell, onSelectCell, overlay }: Props) {
   const pictures = useMemo(() => buildWorldPictures(world), [world]);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -135,6 +137,7 @@ export function WorldMap({ world, selectedCell, onSelectCell }: Props) {
                 <Group opacity={detailOpacity}>
                   <Picture picture={pictures.detail} />
                 </Group>
+                {overlay && <Picture picture={overlay} />}
                 {selection && (
                   <Path path={selection} style="stroke" strokeWidth={3} color={SELECTION_COLOR} />
                 )}
