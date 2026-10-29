@@ -1,25 +1,31 @@
 // Dev tool: renders generated worlds to PNG files and prints stats, to check
-// the generator without a phone.
-//   npx tsx tools/renderWorld.ts <outDir> [seed ...] [--size=64]
+// the generator without a phone. With --years, the civilizations are
+// simulated first and drawn on top.
+//   npx tsx tools/renderWorld.ts <outDir> [seed ...] [--size=64] [--years=0]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import {
   BIOMES,
   DEPOSITS,
+  TICKS_PER_YEAR,
   cellAtPoint,
+  createSimulation,
   generateWorld,
   hexCenterX,
   hexCenterY,
+  livingCivilizations,
   mapHeight,
+  stepSimulation,
   wrapWidth,
+  type Simulation,
   type World,
 } from '../src/sim';
-import { BIOME_COLORS, DEPOSIT_COLORS } from '../src/map/palette';
+import { BIOME_COLORS, CIV_COLORS, DEPOSIT_COLORS } from '../src/map/palette';
 
 const HEX_PX = 6;
 
-function render(world: World): Buffer {
+function render(world: World, sim: Simulation | null): Buffer {
   const w = Math.round(wrapWidth(world) * HEX_PX);
   const h = Math.round(mapHeight(world) * HEX_PX);
   const rgb = Buffer.alloc(w * h * 3);
@@ -39,6 +45,11 @@ function render(world: World): Buffer {
       if (world.riverFlow[c] > 0 && d < 0.3) color = '#3f7fd0';
       if (world.deposit[c] && d < 0.25) color = DEPOSIT_COLORS[DEPOSITS[world.deposit[c]].category];
       if (c === world.startCell && d < 0.6) color = '#ff2030';
+      const owner = sim ? world.owner[c] : 0;
+      if (owner) {
+        const civColor = CIV_COLORS[sim!.civs[owner]?.color ?? 0];
+        color = d < 0.12 + Math.min(0.2, world.population[c] / 120) ? civColor : mix(color, civColor, d > 0.75 ? 0.7 : 0.3);
+      }
       const [r, g, b] = hex(color);
       const i = (py * w + px) * 3;
       rgb[i] = r;
@@ -54,6 +65,12 @@ function shade(color: string, e: number): string {
   const f = e >= 0 ? 1.1 - e * 0.35 : 1 + e * 0.25;
   const to = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
   return `#${[to(r), to(g), to(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function mix(a: string, b: string, t: number): string {
+  const ca = hex(a);
+  const cb = hex(b);
+  return `#${ca.map((v, i) => Math.round(v + (cb[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
 }
 
 function hex(color: string): [number, number, number] {
@@ -113,6 +130,7 @@ function stats(world: World, ms: number): string {
 const args = process.argv.slice(2);
 const outDir = args[0] ?? 'world-previews';
 const size = Number(args.find((a) => a.startsWith('--size='))?.slice(7) ?? 64);
+const years = Number(args.find((a) => a.startsWith('--years='))?.slice(8) ?? 0);
 const seeds = args.slice(1).filter((a) => !a.startsWith('--')).map(Number);
 if (seeds.length === 0) seeds.push(1, 2, 3, 4);
 mkdirSync(outDir, { recursive: true });
@@ -120,6 +138,15 @@ for (const seed of seeds) {
   const t0 = performance.now();
   const world = generateWorld({ seed, width: size, height: size });
   const ms = performance.now() - t0;
-  writeFileSync(join(outDir, `world-${seed}.png`), render(world));
+  let sim: Simulation | null = null;
+  if (years > 0) {
+    sim = createSimulation(world);
+    for (let t = 0; t < years * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  }
+  writeFileSync(join(outDir, `world-${seed}.png`), render(world, sim));
   console.log(stats(world, ms));
+  if (sim) {
+    const civs = livingCivilizations(sim).map((c) => `${c.name} ${c.population} (${c.territory} hexes)`);
+    console.log(`  after ${years} years: ${sim.pop.count} people, ${sim.believers} believers; ${civs.join(', ')}`);
+  }
 }

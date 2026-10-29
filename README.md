@@ -33,8 +33,9 @@ Builds are signed with the project keystore from the repository secrets `ANDROID
 ```
 src/
   sim/         simulation core, plain TypeScript (no React): hex grid, noise, world generation
-  map/         Skia map rendering: pre-recorded pictures, vector biome icons, pan/zoom/tap
-  state/       stores that hold simulation state outside React
+    society/   inhabitants, civilizations and culture; one tick = one week
+  map/         Skia map rendering: pre-recorded pictures, vector biome icons, territories, pan/zoom/tap
+  state/       stores that hold simulation state outside React, game clock
   components/  reusable UI building blocks
   context/     UI state (AppContext)
   hooks/       custom hooks
@@ -49,4 +50,5 @@ Design Documents/
 npm test                 # simulation tests (Node)
 npm run world:preview    # renders worlds to world-previews/*.png with stats
 npx tsx tools/renderWorld.ts out 1 2 3 --size=128   # specific seeds and size
+npx tsx tools/renderWorld.ts out 1 --years=150      # simulate 150 years, draw civilizations
 ```
