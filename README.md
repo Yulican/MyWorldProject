@@ -22,6 +22,12 @@ npm run typecheck
 
 `android/` is generated from `app.json` (Continuous Native Generation) and not committed.
 
+## Test builds
+
+Every pushed branch is built by GitHub Actions ([`.github/workflows/android-build.yml`](.github/workflows/android-build.yml)). The APK is published as a pre-release named `Build: <branch>` under the repository's **Releases**; open it on the phone and install the APK. The build label at the bottom of the home screen shows which branch and commit is installed. Deleting a branch removes its release.
+
+Builds are signed with the project keystore from the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS`, so new builds install over old ones and keep save data. Without the secrets the APK is debug-signed.
+
 ## Structure
 
 ```

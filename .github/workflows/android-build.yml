@@ -1,0 +1,98 @@
+# Builds an installable APK for every pushed branch and publishes it on a
+# GitHub release named after the branch, so it can be downloaded on the phone.
+# Deleting a branch removes its release again.
+name: Android build
+
+on:
+  push:
+    branches: ['**']
+  delete:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.event.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: build-${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - run: npx tsc --noEmit
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Shown in the app so it's clear which build is installed.
+      - name: Build release APK
+        env:
+          EXPO_PUBLIC_BUILD_LABEL: ${{ github.ref_name }} · ${{ github.sha }}
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      # Re-sign with the project keystore so new builds install over old ones
+      # (keeps save games). Without the secrets the APK stays debug-signed.
+      - name: Sign APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          OUT="MyWorld-${TAG//\//-}.apk"
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No keystore secrets set - APK is debug-signed. Installing it over a build with a different signature requires uninstalling first."
+            cp "$APK" "$OUT"
+          else
+            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+            BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+            "$BUILD_TOOLS/zipalign" -f -p 4 "$APK" aligned.apk
+            "$BUILD_TOOLS/apksigner" sign --ks release.keystore --ks-pass env:KEYSTORE_PASSWORD \
+              --ks-key-alias "$KEY_ALIAS" --out "$OUT" aligned.apk
+            rm release.keystore
+          fi
+          echo "APK_FILE=$OUT" >> "$GITHUB_ENV"
+
+      - name: Publish release for this branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" "$APK_FILE" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Build: $GITHUB_REF_NAME" \
+            --notes "Branch \`$GITHUB_REF_NAME\` at ${GITHUB_SHA::7}: $COMMIT_MESSAGE"
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove the deleted branch's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release delete "build-${{ github.event.ref }}" --cleanup-tag --yes || true
