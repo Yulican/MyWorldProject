@@ -1,5 +1,5 @@
 import { Canvas, Group, Image, Path, Picture, Skia } from '@shopify/react-native-skia';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
   GestureDetector,
@@ -14,12 +14,13 @@ import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
 import { SELECTION_COLOR } from './palette';
 import { sameViewTiles, viewTiles, visibleTiles, type ViewTiles } from './viewport';
-import { buildWorldLayers } from './worldPicture';
+import { buildWorldLayers, type WorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
 const START_SCALE = 1;
 /** A tap right after dragging or pinching is almost always a finger lifting off, not a tap. */
 const TAP_COOLDOWN_MS = 300;
+const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false };
 
 type Props = {
   world: World;
@@ -33,19 +34,30 @@ type Props = {
  * vector tiles near the screen are drawn on top of it. The map wraps left and
  * right: the horizontal offset is kept within one map width and the next map
  * copy is drawn beside the first.
+ *
+ * Which tiles are visible lives in <TileLayer>, so crossing a tile border
+ * re-renders only the tiles and never the gesture setup mid-gesture.
  */
 export function WorldMap({ world, selectedCell, onTapCell }: Props) {
   const layers = useMemo(() => buildWorldLayers(world), [world]);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const [view, setView] = useState<ViewTiles>({ x0: 0, x1: -1, y0: 0, y1: -1, detail: false });
-  const tiles = useMemo(() => visibleTiles(view, layers), [view, layers]);
 
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
   const scale = useSharedValue(START_SCALE);
   const minScale = useSharedValue(0.2);
-  const lastView = useSharedValue<ViewTiles>(view);
+  const lastView = useSharedValue<ViewTiles>(NO_TILES);
   const lastMoveAt = useSharedValue(0);
+
+  // The tile layer registers its state setter here; the stable forwarder can
+  // be called from gesture worklets without re-creating them.
+  const tileListener = useRef<(view: ViewTiles) => void>(() => {});
+  const onViewChange = useCallback((view: ViewTiles) => tileListener.current(view), []);
+
+  // Latest tap handler, called through a stable function for the same reason.
+  const tapHandler = useRef<(x: number, y: number) => void>(() => {});
+  tapHandler.current = (x, y) => onTapCell(cellAtPoint(world, x / HEX_PX, y / HEX_PX));
+  const onTap = useCallback((x: number, y: number) => tapHandler.current(x, y), []);
 
   const mapWidth = layers.width;
   const mapHeight = layers.height;
@@ -61,21 +73,24 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
     scale.value = START_SCALE;
     tx.value = wrapX(viewW / 2 - hexCenterX(col) * HEX_PX * START_SCALE, mapWidth * START_SCALE);
     ty.value = clampY(viewH / 2 - hexCenterY(col, row) * HEX_PX * START_SCALE, mapHeight * START_SCALE, viewH);
-    const next = viewTiles(tx.value, ty.value, START_SCALE, viewW, viewH);
+    const next = viewTiles(tx.value, ty.value, START_SCALE, viewW, viewH, false);
     lastView.value = next;
-    setView(next);
-  }, [world, mapWidth, mapHeight, viewW, viewH, tx, ty, scale, minScale, lastView]);
+    onViewChange(next);
+  }, [world, mapWidth, mapHeight, viewW, viewH, tx, ty, scale, minScale, lastView, onViewChange]);
 
-  /** Tells React when the view crosses a tile border, so the visible tiles get updated. */
+  /** Tells the tile layer when the view crosses a tile border or the detail threshold. */
   const reportView = () => {
     'worklet';
-    const next = viewTiles(tx.value, ty.value, scale.value, viewW, viewH);
-    if (sameViewTiles(next, lastView.value)) return;
+    const prev = lastView.value;
+    const next = viewTiles(tx.value, ty.value, scale.value, viewW, viewH, prev.detail);
+    if (sameViewTiles(next, prev)) return;
     lastView.value = next;
-    scheduleOnRN(setView, next);
+    scheduleOnRN(onViewChange, next);
   };
 
   const pan = usePanGesture({
+    // Follow the average of all fingers, so lifting one finger after a pinch doesn't jump.
+    averageTouches: true,
     onUpdate: (e) => {
       'worklet';
       tx.value = wrapX(tx.value + e.changeX, mapWidth * scale.value);
@@ -99,17 +114,13 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
     },
   });
 
-  const handleTap = (x: number, y: number) => {
-    onTapCell(cellAtPoint(world, x / HEX_PX, y / HEX_PX));
-  };
-
   const tap = useTapGesture({
     maxDistance: 8,
     maxDuration: 250,
     onActivate: (e) => {
       'worklet';
       if (e.numberOfPointers > 1 || Date.now() - lastMoveAt.value < TAP_COOLDOWN_MS) return;
-      scheduleOnRN(handleTap, (e.x - tx.value) / scale.value, (e.y - ty.value) / scale.value);
+      scheduleOnRN(onTap, (e.x - tx.value) / scale.value, (e.y - ty.value) / scale.value);
     },
   });
 
@@ -146,17 +157,7 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
                 fit="fill"
               />
             ))}
-            {tiles.map((t) => (
-              <Group key={`f${t.key}`} transform={[{ translateX: t.offsetX }]}>
-                <Picture picture={layers.chunks[t.chunk].fills} />
-              </Group>
-            ))}
-            {/* Icons after all fills, so no tile covers the icons of its neighbor. */}
-            {tiles.map((t) => (
-              <Group key={`i${t.key}`} transform={[{ translateX: t.offsetX }]}>
-                <Picture picture={layers.chunks[t.chunk].icons} />
-              </Group>
-            ))}
+            <TileLayer layers={layers} listener={tileListener} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -169,6 +170,33 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
     </View>
   );
 }
+
+type TileLayerProps = {
+  layers: WorldLayers;
+  listener: { current: (view: ViewTiles) => void };
+};
+
+/** The vector tiles near the screen. Owns the visible-tile state so only it re-renders. */
+const TileLayer = memo(function TileLayer({ layers, listener }: TileLayerProps) {
+  const [view, setView] = useState<ViewTiles>(NO_TILES);
+  listener.current = setView;
+  const tiles = useMemo(() => visibleTiles(view, layers), [view, layers]);
+  return (
+    <>
+      {tiles.map((t) => (
+        <Group key={`f${t.key}`} transform={[{ translateX: t.offsetX }]}>
+          <Picture picture={layers.chunks[t.chunk].fills} />
+        </Group>
+      ))}
+      {/* Icons after all fills, so no tile covers the icons of its neighbor. */}
+      {tiles.map((t) => (
+        <Group key={`i${t.key}`} transform={[{ translateX: t.offsetX }]}>
+          <Picture picture={layers.chunks[t.chunk].icons} />
+        </Group>
+      ))}
+    </>
+  );
+});
 
 function hexOutline(world: World, cell: number) {
   const col = cell % world.width;
