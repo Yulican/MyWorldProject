@@ -1,4 +1,4 @@
-import { Canvas, Group, Path, Picture, Skia } from '@shopify/react-native-skia';
+import { Canvas, Group, Image, Path, Picture, Skia } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -11,57 +11,77 @@ import {
 import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
+import { HEX_PX } from './mapGeometry';
 import { SELECTION_COLOR } from './palette';
-import { HEX_PX, buildWorldPictures } from './worldPicture';
+import { sameViewTiles, viewTiles, visibleTiles, type ViewTiles } from './viewport';
+import { buildWorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
-/** Below this zoom hex outlines and icons fade out (they'd only be noise). */
-const DETAIL_FADE_START = 0.3;
-const DETAIL_FADE_END = 0.5;
+const START_SCALE = 1;
+/** A tap right after dragging or pinching is almost always a finger lifting off, not a tap. */
+const TAP_COOLDOWN_MS = 300;
 
 type Props = {
   world: World;
   selectedCell: number;
-  onSelectCell: (cell: number) => void;
+  onTapCell: (cell: number) => void;
 };
 
 /**
- * Pannable, zoomable hex map. The world is pre-rendered into pictures once;
- * gestures only change a transform on the UI thread. The map wraps left and
- * right: three copies are drawn side by side and the horizontal offset is
- * kept within one map width.
+ * Pannable, zoomable hex map. Gestures only change a transform on the UI
+ * thread. Zoomed out, a single pre-rendered image is drawn; zoomed in, sharp
+ * vector tiles near the screen are drawn on top of it. The map wraps left and
+ * right: the horizontal offset is kept within one map width and the next map
+ * copy is drawn beside the first.
  */
-export function WorldMap({ world, selectedCell, onSelectCell }: Props) {
-  const pictures = useMemo(() => buildWorldPictures(world), [world]);
+export function WorldMap({ world, selectedCell, onTapCell }: Props) {
+  const layers = useMemo(() => buildWorldLayers(world), [world]);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [view, setView] = useState<ViewTiles>({ x0: 0, x1: -1, y0: 0, y1: -1, detail: false });
+  const tiles = useMemo(() => visibleTiles(view, layers), [view, layers]);
 
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
-  const scale = useSharedValue(1);
+  const scale = useSharedValue(START_SCALE);
   const minScale = useSharedValue(0.2);
+  const lastView = useSharedValue<ViewTiles>(view);
+  const lastMoveAt = useSharedValue(0);
+
+  const mapWidth = layers.width;
+  const mapHeight = layers.height;
+  const viewW = size.width;
+  const viewH = size.height;
 
   // Center the start location whenever a new world appears.
   useEffect(() => {
-    if (size.width === 0) return;
-    const fit = size.height / pictures.height;
-    minScale.value = Math.min(1, fit);
-    const s = 1;
+    if (viewW === 0) return;
+    minScale.value = Math.min(1, viewH / mapHeight);
     const col = world.startCell % world.width;
     const row = Math.floor(world.startCell / world.width);
-    scale.value = s;
-    tx.value = wrapX(size.width / 2 - hexCenterX(col) * HEX_PX * s, pictures.width * s);
-    ty.value = clampY(size.height / 2 - hexCenterY(col, row) * HEX_PX * s, pictures.height * s, size.height);
-  }, [world, pictures, size, tx, ty, scale, minScale]);
+    scale.value = START_SCALE;
+    tx.value = wrapX(viewW / 2 - hexCenterX(col) * HEX_PX * START_SCALE, mapWidth * START_SCALE);
+    ty.value = clampY(viewH / 2 - hexCenterY(col, row) * HEX_PX * START_SCALE, mapHeight * START_SCALE, viewH);
+    const next = viewTiles(tx.value, ty.value, START_SCALE, viewW, viewH);
+    lastView.value = next;
+    setView(next);
+  }, [world, mapWidth, mapHeight, viewW, viewH, tx, ty, scale, minScale, lastView]);
 
-  const viewHeight = size.height;
-  const mapWidth = pictures.width;
-  const mapHeight = pictures.height;
+  /** Tells React when the view crosses a tile border, so the visible tiles get updated. */
+  const reportView = () => {
+    'worklet';
+    const next = viewTiles(tx.value, ty.value, scale.value, viewW, viewH);
+    if (sameViewTiles(next, lastView.value)) return;
+    lastView.value = next;
+    scheduleOnRN(setView, next);
+  };
 
   const pan = usePanGesture({
     onUpdate: (e) => {
       'worklet';
       tx.value = wrapX(tx.value + e.changeX, mapWidth * scale.value);
-      ty.value = clampY(ty.value + e.changeY, mapHeight * scale.value, viewHeight);
+      ty.value = clampY(ty.value + e.changeY, mapHeight * scale.value, viewH);
+      lastMoveAt.value = Date.now();
+      reportView();
     },
   });
 
@@ -72,19 +92,23 @@ export function WorldMap({ world, selectedCell, onSelectCell }: Props) {
       const k = next / scale.value;
       // Zoom around the point between the fingers.
       tx.value = wrapX(e.focalX - (e.focalX - tx.value) * k, mapWidth * next);
-      ty.value = clampY(e.focalY - (e.focalY - ty.value) * k, mapHeight * next, viewHeight);
+      ty.value = clampY(e.focalY - (e.focalY - ty.value) * k, mapHeight * next, viewH);
       scale.value = next;
+      lastMoveAt.value = Date.now();
+      reportView();
     },
   });
 
   const handleTap = (x: number, y: number) => {
-    const cell = cellAtPoint(world, x / HEX_PX, y / HEX_PX);
-    onSelectCell(cell);
+    onTapCell(cellAtPoint(world, x / HEX_PX, y / HEX_PX));
   };
 
   const tap = useTapGesture({
+    maxDistance: 8,
+    maxDuration: 250,
     onActivate: (e) => {
       'worklet';
+      if (e.numberOfPointers > 1 || Date.now() - lastMoveAt.value < TAP_COOLDOWN_MS) return;
       scheduleOnRN(handleTap, (e.x - tx.value) / scale.value, (e.y - ty.value) / scale.value);
     },
   });
@@ -96,28 +120,9 @@ export function WorldMap({ world, selectedCell, onSelectCell }: Props) {
     { translateY: ty.value },
     { scale: scale.value },
   ]);
-  const detailOpacity = useDerivedValue(() =>
-    Math.min(1, Math.max(0, (scale.value - DETAIL_FADE_START) / (DETAIL_FADE_END - DETAIL_FADE_START))),
-  );
 
-  const selection = useMemo(() => {
-    if (selectedCell < 0) return null;
-    const col = selectedCell % world.width;
-    const row = Math.floor(selectedCell / world.width);
-    const x = hexCenterX(col) * HEX_PX;
-    const y = hexCenterY(col, row) * HEX_PX;
-    const r = HEX_PX * 0.92;
-    const h = (Math.sqrt(3) / 2) * r;
-    return Skia.PathBuilder.Make()
-      .moveTo(x + r, y)
-      .lineTo(x + r / 2, y + h)
-      .lineTo(x - r / 2, y + h)
-      .lineTo(x - r, y)
-      .lineTo(x - r / 2, y - h)
-      .lineTo(x + r / 2, y - h)
-      .close()
-      .detach();
-  }, [selectedCell, world]);
+  const selection = useMemo(() => (selectedCell < 0 ? null : hexOutline(world, selectedCell)), [selectedCell, world]);
+  const { overview, overviewRect: o } = layers;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -129,22 +134,58 @@ export function WorldMap({ world, selectedCell, onSelectCell }: Props) {
       <GestureDetector gesture={gesture}>
         <Canvas style={styles.canvas}>
           <Group transform={transform}>
-            {[-1, 0, 1].map((copy) => (
-              <Group key={copy} transform={[{ translateX: copy * mapWidth }]}>
-                <Picture picture={pictures.base} />
-                <Group opacity={detailOpacity}>
-                  <Picture picture={pictures.detail} />
-                </Group>
-                {selection && (
-                  <Path path={selection} style="stroke" strokeWidth={3} color={SELECTION_COLOR} />
-                )}
+            {/* Two copies cover any view: the offset stays within one map width. */}
+            {[0, 1].map((copy) => (
+              <Image
+                key={copy}
+                image={overview}
+                x={o.x + copy * mapWidth}
+                y={o.y}
+                width={o.width}
+                height={o.height}
+                fit="fill"
+              />
+            ))}
+            {tiles.map((t) => (
+              <Group key={`f${t.key}`} transform={[{ translateX: t.offsetX }]}>
+                <Picture picture={layers.chunks[t.chunk].fills} />
               </Group>
             ))}
+            {/* Icons after all fills, so no tile covers the icons of its neighbor. */}
+            {tiles.map((t) => (
+              <Group key={`i${t.key}`} transform={[{ translateX: t.offsetX }]}>
+                <Picture picture={layers.chunks[t.chunk].icons} />
+              </Group>
+            ))}
+            {selection &&
+              [0, 1].map((copy) => (
+                <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
+                  <Path path={selection} style="stroke" strokeWidth={3} color={SELECTION_COLOR} />
+                </Group>
+              ))}
           </Group>
         </Canvas>
       </GestureDetector>
     </View>
   );
+}
+
+function hexOutline(world: World, cell: number) {
+  const col = cell % world.width;
+  const row = Math.floor(cell / world.width);
+  const x = hexCenterX(col) * HEX_PX;
+  const y = hexCenterY(col, row) * HEX_PX;
+  const r = HEX_PX * 0.92;
+  const h = (Math.sqrt(3) / 2) * r;
+  return Skia.PathBuilder.Make()
+    .moveTo(x + r, y)
+    .lineTo(x + r / 2, y + h)
+    .lineTo(x - r / 2, y + h)
+    .lineTo(x - r, y)
+    .lineTo(x - r / 2, y - h)
+    .lineTo(x + r / 2, y - h)
+    .close()
+    .detach();
 }
 
 /** Keeps the horizontal offset within one (scaled) map width; the map repeats. */
