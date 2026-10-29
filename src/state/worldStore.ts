@@ -60,6 +60,15 @@ export function useGameState(): GameState {
   return useSyncExternalStore(subscribe, () => state);
 }
 
+/**
+ * The society snapshot as an external store for the map: changes only when a
+ * new snapshot is shown, not on speed changes or other updates.
+ */
+export const snapshotStore = {
+  subscribe,
+  getVersion: (): number => notifiedSnapshot,
+};
+
 function startClock() {
   if (frame !== null) return;
   lastFrameTime = performance.now();

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CivPanel } from '../components/CivPanel';
 import { FpsMeter } from '../components/FpsMeter';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
-import { WorldMap } from '../map/WorldMap';
+import { WorldMap, type TerritorySource } from '../map/WorldMap';
 import { CIV_COLORS } from '../map/palette';
 import { simulationYear } from '../sim';
-import { createNewWorld, setSpeed, useGameState } from '../state/worldStore';
+import { createNewWorld, setSpeed, snapshotStore, useGameState } from '../state/worldStore';
 import { colors, spacing } from '../theme';
 
 // Set by the CI build (branch · commit) so testers can see which build is installed.
@@ -25,7 +25,11 @@ export function WorldScreen() {
     if (!sim) createNewWorld();
   }, [sim]);
 
-  const civColor = useMemo(() => (id: number) => CIV_COLORS[sim?.civs[id]?.color ?? 0], [sim]);
+  // Stable per world, so the map doesn't re-render with every simulation update.
+  const territory = useMemo<TerritorySource>(
+    () => ({ ...snapshotStore, civColor: (id) => CIV_COLORS[sim?.civs[id]?.color ?? 0] }),
+    [sim],
+  );
 
   const newWorld = () => {
     setPanel({ kind: 'none' });
@@ -34,8 +38,13 @@ export function WorldScreen() {
 
   const selectedCell = panel.kind === 'hex' ? panel.cell : -1;
   // Tapping the selected hex again (or off the map) closes the info bar.
-  const onTapCell = (cell: number) =>
-    setPanel(cell < 0 || cell === selectedCell ? { kind: 'none' } : { kind: 'hex', cell });
+  const onTapCell = useCallback(
+    (cell: number) =>
+      setPanel((open) =>
+        cell < 0 || (open.kind === 'hex' && open.cell === cell) ? { kind: 'none' } : { kind: 'hex', cell },
+      ),
+    [],
+  );
   const closePanel = () => setPanel({ kind: 'none' });
 
   return (
@@ -54,13 +63,7 @@ export function WorldScreen() {
 
       <View style={styles.mapArea}>
         {world && (
-          <WorldMap
-            world={world}
-            selectedCell={selectedCell}
-            onTapCell={onTapCell}
-            territoryVersion={sim?.snapshotVersion ?? 0}
-            civColor={civColor}
-          />
+          <WorldMap world={world} selectedCell={selectedCell} onTapCell={onTapCell} territory={territory} />
         )}
         <FpsMeter />
         {sim && panel.kind === 'hex' && (

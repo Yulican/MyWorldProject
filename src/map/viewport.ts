@@ -3,8 +3,13 @@ import { CHUNK_H, CHUNK_W } from './mapGeometry';
 /** The parts of the map layers the tile math needs. */
 type TileGrid = { width: number; chunkCols: number; chunkRows: number };
 
-/** Zoom from which the sharp vector tiles with icons are drawn on top of the overview image. */
-export const DETAIL_SCALE = 0.7;
+/**
+ * Zoom range in which the sharp vector tiles with icons switch on/off. Detail
+ * turns on above DETAIL_ON and only turns off again below DETAIL_OFF, so a
+ * pinch hovering around one value doesn't toggle all tiles every frame.
+ */
+export const DETAIL_ON = 0.75;
+export const DETAIL_OFF = 0.65;
 
 /**
  * The visible area quantized to tile units, plus whether detail is shown.
@@ -13,14 +18,21 @@ export const DETAIL_SCALE = 0.7;
  */
 export type ViewTiles = { x0: number; x1: number; y0: number; y1: number; detail: boolean };
 
-export function viewTiles(tx: number, ty: number, scale: number, viewW: number, viewH: number): ViewTiles {
+export function viewTiles(
+  tx: number,
+  ty: number,
+  scale: number,
+  viewW: number,
+  viewH: number,
+  detailBefore: boolean,
+): ViewTiles {
   'worklet';
   return {
     x0: Math.floor(-tx / scale / CHUNK_W),
     x1: Math.floor((viewW - tx) / scale / CHUNK_W),
     y0: Math.floor(-ty / scale / CHUNK_H),
     y1: Math.floor((viewH - ty) / scale / CHUNK_H),
-    detail: scale >= DETAIL_SCALE,
+    detail: detailBefore ? scale >= DETAIL_OFF : scale >= DETAIL_ON,
   };
 }
 
