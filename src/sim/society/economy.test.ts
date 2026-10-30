@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sumTerms } from '../terms';
+import { yieldFactor } from './satisfaction';
 import { isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import {
@@ -154,11 +155,13 @@ test('a ruin is repaired for half the cost and half the time', () => {
   const b = BUILDINGS[type];
   economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 1000;
   economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 1000;
-  sim.satisfaction[cell] = 0; // harvest without the satisfaction factor
+  // Content enough that growth comes before comfort (satisfaction first only below 5).
+  sim.satisfaction[cell] = 10;
   runEconomy(sim, false);
   assert.equal(economy.state[slot], SlotState.Repair);
   assert.ok(Math.abs(economy.work[slot] - b.years / 2) < 1e-6);
-  const harvest = (good: number) => withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) / 4;
+  const harvest = (good: number) =>
+    (withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(10)) / 4;
   assert.ok(Math.abs(economy.stock[cell * MATERIAL_COUNT + Material.Wood] - (1000 + harvest(Good.Wood) - b.wood / 2)) < 1e-2);
   assert.ok(Math.abs(economy.stock[cell * MATERIAL_COUNT + Material.Stone] - (1000 + harvest(Good.Stone) - b.stone / 2)) < 1e-2);
 });

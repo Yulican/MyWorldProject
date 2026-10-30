@@ -7,7 +7,6 @@ import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
-import { PROTO } from './tuning';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
 // Internal trade (design doc, section 5; agreed requirement: "Design
@@ -45,6 +44,13 @@ const LOSS_LAND = 0.02;
 const LOSS_WATER = 0.06;
 const LOSS_DANGER = 0.04;
 const LOSS_SHARE = 0.25;
+/**
+ * Merchants keep the provinces happy: when they pick a trip, goods count
+ * FOCUS_LUXURY times for a luxury good the settlement lacks and FOCUS_UNHAPPY
+ * times for an unhappy settlement.
+ */
+const FOCUS_LUXURY = 3;
+const FOCUS_UNHAPPY = 2;
 /** A trip must be worth this much money (goods both ways) to go. */
 const MIN_TRIP_VALUE = 5;
 /** Wood and stone a settlement keeps for this many years of upkeep before it sells. */
@@ -241,7 +247,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     // supply route, it asks for RESERVE_YEARS of the shortfall.
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
-    const shortfall = PROTO.seatUpkeepRealm ? Math.max(0, upkeep - harvest) * RESERVE_YEARS : 0;
+    const shortfall = Math.max(0, upkeep - harvest) * RESERVE_YEARS;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
   }
@@ -488,8 +494,8 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   let load = MERCHANT_LOAD;
   let worth = 0;
   dealPriority = 0;
-  const unhappyTarget = sim.satisfaction[target] < 0 ? PROTO.focusUnhappy : 1;
-  const unhappyHome = sim.satisfaction[home] < 0 ? PROTO.focusUnhappy : 1;
+  const unhappyTarget = sim.satisfaction[target] < 0 ? FOCUS_UNHAPPY : 1;
+  const unhappyHome = sim.satisfaction[home] < 0 ? FOCUS_UNHAPPY : 1;
   for (const g of BY_VALUE) {
     if (g === TradeGood.Money || load <= 0) continue;
     const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], trade.want[target * TRADE_GOODS + g], load / WEIGHT[g]);
@@ -517,10 +523,10 @@ function planDeal(sim: Simulation, home: number, target: number): number {
 /** How much a deal matters, from the last planDeal: its worth, more for luxury goods a settlement lacks and for unhappy settlements. */
 let dealPriority = 0;
 
-/** PROTO.focusLuxury for a luxury good the settlement's stock didn't cover last year, else 1. */
+/** FOCUS_LUXURY for a luxury good the settlement's stock didn't cover last year, else 1. */
 function lacking(eco: Economy, cell: number, good: number): number {
   if (good < TradeGood.Luxury) return 1;
-  return eco.luxuryCovered[cell] & (1 << (good - TradeGood.Luxury)) ? 1 : PROTO.focusLuxury;
+  return eco.luxuryCovered[cell] & (1 << (good - TradeGood.Luxury)) ? 1 : FOCUS_LUXURY;
 }
 
 /** Trade goods by price per weight, dearest first. */
@@ -832,7 +838,7 @@ export function buildTradeRoad(sim: Simulation, home: number, year: number): boo
 }
 
 /**
- * A supply road (prototype): a settlement the expansion stop holds back
+ * A supply road: a settlement the expansion stop holds back
  * builds the next missing segment of a road over its people's land to the
  * nearest seat of government (`seat`), when the road makes that way
  * ROAD_SAVING shorter than today (`now`, its travel cost to the seat).

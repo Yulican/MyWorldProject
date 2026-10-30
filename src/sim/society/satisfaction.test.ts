@@ -151,7 +151,7 @@ test('comfort buildings, luxury goods and seats of government raise satisfaction
   const comfort = satisfactionTerms(sim, cell, civ).find((t) => t.label.startsWith('Comfort'))!;
   assert.ok(Math.abs(comfort.value - 15 * Math.min(1, 50 / people)) < 1e-6);
 
-  // A year of salt from a salt works covers the people's need.
+  // A year of salt from a salt works (25) covers the people's need.
   sim.world.deposit[cell] = Deposit.Salt;
   place(sim, cell, typeOf('Salt works'));
   sim.satisfaction[cell] = 0;
@@ -159,7 +159,8 @@ test('comfort buildings, luxury goods and seats of government raise satisfaction
   runEconomy(sim, true);
   const salt = Good.Salt - FIRST_LUXURY;
   assert.equal(sim.economy.luxuryCovered[cell], 1 << salt);
-  assert.ok(Math.abs(sim.economy.luxury[cell * LUXURY_COUNT + salt] - (10 - people * LUXURY_PER_PERSON)) < 1e-3);
+  const made = BUILDINGS[typeOf('Salt works')].amount;
+  assert.ok(Math.abs(sim.economy.luxury[cell * LUXURY_COUNT + salt] - (made - people * LUXURY_PER_PERSON)) < 1e-3);
   assert.ok(Math.abs(satisfactionTarget(sim, cell, civ) - before - comfort.value - 5) < 1e-6);
 
   // A seat of government in a settlement makes it as well connected as the capital.

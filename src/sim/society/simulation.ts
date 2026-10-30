@@ -20,6 +20,7 @@ import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from
 import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
+  EXPAND_MIN_CONNECTION,
   capacityAfterRepair,
   cellModifiers,
   isSettlementTarget,
@@ -44,7 +45,6 @@ import {
   updateSatisfaction,
 } from './satisfaction';
 import { WORKSHOP_OF, buildSupplyRoad, advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
-import { PROTO } from './tuning';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
@@ -59,6 +59,10 @@ import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 export const TICKS_PER_YEAR = 52;
 /** Map snapshot and civilization stats are refreshed this often (quarterly). */
 const REFRESH_TICKS = 13;
+/** Weeks of the year (0..51, none a refresh) for seats of government, deposit capture and supply roads. */
+const SEATS_WEEK = 6;
+const CAPTURE_WEEK = 19;
+const SUPPLY_ROADS_WEEK = 32;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
 export const BELIEVER_FAITH = 0.5;
 const START_TRIBE_SIZE = 20;
@@ -80,6 +84,16 @@ const SATISFACTION_APPEAL = 0.5;
 const TRAVEL_EFFORT = 0.05;
 /** Score per unit of wood and stone the new hex yields per year: building material is worth having. */
 const RAW_MATERIAL_APPEAL = 0.02;
+/**
+ * A people lacking a luxury good sends groups of CAPTURE_GROUP towards a
+ * free deposit of it within CAPTURE_REACH hexes, one hex a year, once it
+ * has CAPTURE_MIN_PEOPLE (smaller peoples hardly need luxury goods), from
+ * settlements of CAPTURE_MIN_SOURCE.
+ */
+export const CAPTURE_GROUP = 10;
+const CAPTURE_REACH = 4;
+const CAPTURE_MIN_PEOPLE = 100;
+export const CAPTURE_MIN_SOURCE = 2 * EXPANSION_GROUP;
 /** Space supply of the best land; normalizes how much a new hex can hold. */
 const GOOD_LAND_PEOPLE = 150;
 /** Years of population and believer counts kept for the trend chart. */
@@ -134,11 +148,11 @@ export type Simulation = {
   /**
    * Settlements chosen for their people's next seat of government: the year
    * they were chosen + 1 (0 = none); a plan expires after SAVE_UP_YEARS
-   * (economy.ts, prototype). A failed site is skipped for a while (seatRetry: year it may be chosen again + 1).
+   * (economy.ts). A failed site is skipped for a while (seatRetry: year it may be chosen again + 1).
    */
   seatSite: Uint16Array;
   seatRetry: Uint16Array;
-  /** Year + 1 a settlement last wanted to send settlers but the expansion stop held it back (prototype). */
+  /** Year + 1 a settlement last wanted to send settlers but the expansion stop held it back. */
   frontierBlocked: Uint16Array;
   /** Merchants on their way and what settlements ask for and spare (see trade.ts). */
   trade: Trade;
@@ -233,11 +247,14 @@ export function stepSimulation(sim: Simulation): void {
     sumCivWants(sim, owner);
     emigrate(sim, owner);
     breakAway(sim, owner);
-    if (yearEnd) planSeats(sim, owner);
-    if (yearEnd && PROTO.capture) captureDeposits(sim, owner);
-    if (yearEnd && PROTO.supplyRoads && PROTO.expandOnlyHappy) buildSupplyRoads(sim, owner);
     refreshSnapshot(sim);
   }
+  // The people's yearly plans each get a week of their own, away from the
+  // refreshes, so no single tick carries them all.
+  const weekOfYear = sim.tick % TICKS_PER_YEAR;
+  if (weekOfYear === SEATS_WEEK) planSeats(sim, sim.world.owner);
+  else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, sim.world.owner);
+  else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
   if (yearEnd) closeYear(sim);
 }
 
@@ -391,8 +408,12 @@ export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
  * of EXPANSION_GROUP of the civilization living there to the best free
  * neighboring hex that can hold them (counting repairable ruins), and a road
  * links the two. The best hex has room, appeals to the people's culture and
- * yields building material. Without such a neighbor the people stay; they
- * build (see economy.ts), and shortage thins them out.
+ * yields building material. No settlers go where the connection to the
+ * nearest seat of government would be below EXPAND_MIN_CONNECTION: such a
+ * settlement is marked as held back, and its people first extend their
+ * reach (a seat nearby, roads to the seat; planSeats, buildSupplyRoads).
+ * Without a neighbor the people stay; they build (see economy.ts), and
+ * shortage thins them out.
  */
 function expandSettlements(sim: Simulation): void {
   const { world } = sim;
@@ -414,7 +435,7 @@ function expandSettlements(sim: Simulation): void {
         if (target < 0 || !isSettlementTarget(sim, target)) continue;
         const step = stepCost(world, source, d);
         // Rather stop spreading than found a settlement that is unhappy from the start.
-        if (PROTO.expandOnlyHappy && connectionValue(sim.seatCost[source] + step) < PROTO.expandMinConnection) {
+        if (connectionValue(sim.seatCost[source] + step) < EXPAND_MIN_CONNECTION) {
           held = true;
           continue;
         }
@@ -440,7 +461,10 @@ function expandSettlements(sim: Simulation): void {
   }
 }
 
-/** Yearly: every settlement the expansion stop held back this or last year builds on a road to its nearest seat (prototype). */
+/** Breadth-first predecessors for captureDeposits, all -2 between calls. */
+let capturePrev = new Int32Array(0);
+
+/** Yearly: every settlement the expansion stop held back this or last year builds on a road to its nearest seat. */
 function buildSupplyRoads(sim: Simulation, owner: Uint8Array): void {
   const year = Math.floor(sim.tick / TICKS_PER_YEAR);
   const seats = seatsOf(sim, owner);
@@ -454,16 +478,16 @@ function buildSupplyRoads(sim: Simulation, owner: Uint8Array): void {
 }
 
 /**
- * Yearly, per people that lacks a luxury good whose deposit lies on free land
- * within PROTO.captureReach hexes: a group of PROTO.captureGroup from the
- * nearest settlement big enough (twice the group) moves one hex towards it,
+ * Yearly, per people of CAPTURE_MIN_PEOPLE that lacks a luxury good whose
+ * deposit lies on free land within CAPTURE_REACH hexes: a group of
+ * CAPTURE_GROUP from the nearest settlement of CAPTURE_MIN_SOURCE moves one hex towards it,
  * with a road, over hexes that hold such a group. Year by year the people
  * reaches the deposit and builds its workshop there.
  */
 function captureDeposits(sim: Simulation, owner: Uint8Array): void {
   const { world, economy } = sim;
   const n = world.cellCount;
-  const group = PROTO.captureGroup;
+  const group = CAPTURE_GROUP;
   // The luxury goods each people makes (workshops standing or being built).
   const makes = new Uint8Array(sim.civSlots);
   for (let c = 0; c < n; c++) {
@@ -476,20 +500,22 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
     }
   }
   const free = (c: number) => owner[c] === 0 && sim.cellPop[c] === 0 && !isWaterBiome(world.biome[c]) && sim.cellCapacity[c] >= group;
-  const prev = new Int32Array(n).fill(-2);
+  if (capturePrev.length !== n) capturePrev = new Int32Array(n).fill(-2);
+  const prev = capturePrev;
   for (const civ of livingCivilizations(sim)) {
+    if (civ.population < CAPTURE_MIN_PEOPLE) continue;
     // Breadth-first from the people's big enough settlements over free land.
     let frontier: number[] = [];
     const touched: number[] = [];
     for (let c = 0; c < n; c++) {
-      if (owner[c] === civ.id && sim.cellCivPop[c * sim.civSlots + civ.id] >= 2 * group) {
+      if (owner[c] === civ.id && sim.cellCivPop[c * sim.civSlots + civ.id] >= CAPTURE_MIN_SOURCE) {
         prev[c] = -1;
         touched.push(c);
         frontier.push(c);
       }
     }
     let found = -1;
-    for (let step = 1; step <= PROTO.captureReach && found < 0 && frontier.length > 0; step++) {
+    for (let step = 1; step <= CAPTURE_REACH && found < 0 && frontier.length > 0; step++) {
       const next: number[] = [];
       for (const c of frontier) {
         for (let d = 0; d < DIRECTION_COUNT && found < 0; d++) {

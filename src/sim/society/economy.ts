@@ -33,7 +33,6 @@ import {
   yieldFactor,
 } from './satisfaction';
 import type { Simulation } from './simulation';
-import { PROTO } from './tuning';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
 import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
@@ -67,10 +66,21 @@ const MIN_SATISFACTION_GAIN = 1;
 const SEAT_MIN_COST = 2 * CONNECTION_NEAR;
 /** A seat is only worth it if the settlements it serves gain this much satisfaction together. */
 const SEAT_MIN_BENEFIT = 40;
-/** Years before a seat site that was not built in time may be chosen again (prototype). */
+/** Years before a seat site that was not built in time may be chosen again. */
 const SEAT_RETRY_YEARS = 10;
-/** Seats of government a people considers per year (its worst-connected settlements). */
-const SEAT_CANDIDATES = 3;
+/** Settlements a people compares per year for its next seat of government. */
+const SEAT_CANDIDATES = 12;
+/** Seat planning counts this much for each settlement the expansion stop holds back that the seat would free. */
+const FRONTIER_BONUS = 20;
+/**
+ * Settlers only go where the connection term would be at least this (about
+ * 3.4 travel cost from a seat): a people rather stops spreading than founds
+ * settlements that turn unhappy and break away; seats of government and
+ * roads to them extend its reach (design doc, section 5).
+ */
+export const EXPAND_MIN_CONNECTION = -15;
+/** Below this satisfaction a settlement builds for it before it builds for growth: a lost settlement costs many people. */
+const SATISFACTION_FIRST_BELOW = 5;
 
 const NO_MODIFIERS: readonly SupplyModifier[] = [];
 
@@ -181,8 +191,7 @@ function harvestWith(sim: Simulation, cell: number, good: number, extraA: number
 function upkeepWith(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
   const { economy } = sim;
   let sum = 0;
-  const of = (t: number) =>
-    PROTO.seatUpkeepMoney > 0 && t === SEAT_TYPE ? 0 : material === Material.Wood ? BUILDINGS[t].upkeepWood : BUILDINGS[t].upkeepStone;
+  const of = (t: number) => (material === Material.Wood ? BUILDINGS[t].upkeepWood : BUILDINGS[t].upkeepStone);
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     if (economy.state[s] === SlotState.Standing) sum += of(economy.type[s]);
   }
@@ -236,16 +245,6 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
           economy.unpaid[s] = 0;
           supplyChanged = true;
         }
-      } else if (st === SlotState.Standing && yearEnd && PROTO.seatUpkeepMoney > 0 && economy.type[s] === SEAT_TYPE) {
-        // Prototype: a seat's upkeep in money.
-        if (people > 0 && economy.money[c] >= PROTO.seatUpkeepMoney) {
-          economy.money[c] -= PROTO.seatUpkeepMoney;
-          economy.unpaid[s] = 0;
-        } else if (++economy.unpaid[s] > UPKEEP_GRACE_YEARS) {
-          economy.state[s] = SlotState.Ruin;
-          economy.unpaid[s] = 0;
-          supplyChanged = true;
-        }
       } else if (st === SlotState.Standing && yearEnd) {
         const b = BUILDINGS[economy.type[s]];
         // Nobody maintains an empty hex's buildings.
@@ -276,12 +275,12 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       economy.goal[stock + Material.Wood] = 0;
       economy.goal[stock + Material.Stone] = 0;
       // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
-      const moodFirst = PROTO.satisfactionFirst && sim.satisfaction[c] < PROTO.satisfactionFirstBelow;
+      const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
       const started =
         !busy &&
         (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c));
       if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
-      if (PROTO.seatsV2 && sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
+      if (sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
         buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
@@ -493,8 +492,7 @@ function hasGood(sim: Simulation, cell: number, good: number): boolean {
 function planSatisfaction(sim: Simulation, cell: number): boolean {
   const { economy } = sim;
   const people = sim.cellPop[cell];
-  const below = PROTO.satisfactionFirst ? PROTO.satisfactionFirstBelow : 0;
-  if (sim.satisfaction[cell] >= below || people > sim.cellCapacity[cell]) return false;
+  if (sim.satisfaction[cell] >= SATISFACTION_FIRST_BELOW || people > sim.cellCapacity[cell]) return false;
   let free = 0;
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
@@ -542,72 +540,18 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
 const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 
 /**
- * Yearly, per people: a seat of government in the settlement whose
- * settlements would gain the most connection satisfaction together (at
- * least SEAT_MIN_BENEFIT), among its SEAT_CANDIDATES worst-connected
- * settlements that keep SEAT_MIN_COST from every seat. The settlement pays
- * it from its own stock (or repairs a ruined seat); one seat at a time.
+ * Yearly, per people without a planned or unfinished seat of government:
+ * the site for the next one. Candidates are its settlements of 25+ people
+ * at least SEAT_MIN_COST from every seat; those the expansion stop holds
+ * back come first, then the worst connected, SEAT_CANDIDATES in all. The
+ * site is the one whose seat raises its people's connection most (at least
+ * SEAT_MIN_BENEFIT), counting only gains over today's connection, so a seat
+ * covers new ground rather than ground another seat covers, plus
+ * FRONTIER_BONUS for each held-back settlement it frees. The site saves up
+ * for it (merchants bring the rest) and builds it in the economy step
+ * (buildPlannedSeat); a plan not built within SAVE_UP_YEARS goes elsewhere.
  */
 export function planSeats(sim: Simulation, owner: Uint8Array): void {
-  if (PROTO.seatsV2) return planSeatSites(sim, owner);
-  const { economy, world } = sim;
-  const n = world.cellCount;
-  // One pass: peoples already building a seat, and every people's candidates.
-  const busy = new Uint8Array(sim.civSlots);
-  const candidates: number[][] = [];
-  for (let c = 0; c < n; c++) {
-    const id = owner[c];
-    if (id === 0) continue;
-    if (sim.hasBuildings[c]) {
-      for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
-        const st = economy.state[s];
-        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[id] = 1;
-      }
-    }
-    if (sim.cellPop[c] < EXPANSION_GROUP || sim.seatCost[c] < SEAT_MIN_COST || seatSlot(sim, c) === null) continue;
-    (candidates[id] ??= []).push(c);
-  }
-  const field = scratchField(n);
-  for (let id = 1; id < sim.civSlots; id++) {
-    const list = candidates[id];
-    if (!sim.civs[id] || busy[id] || !list) continue;
-    // Its worst-connected settlements.
-    list.sort((a, b) => sim.seatCost[b] - sim.seatCost[a] || a - b);
-    let best = -1;
-    let bestBenefit = SEAT_MIN_BENEFIT;
-    for (const c of list.slice(0, SEAT_CANDIDATES)) {
-      const reached = seatField(sim, owner, id, [c], field);
-      let benefit = 0;
-      for (const k of reached) {
-        benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
-        field[k] = Infinity;
-      }
-      if (benefit > bestBenefit) {
-        bestBenefit = benefit;
-        best = c;
-      }
-    }
-    if (best < 0) continue;
-    const slot = seatSlot(sim, best)!;
-    const b = BUILDINGS[SEAT_TYPE];
-    const share = slot >= 0 ? REPAIR_SHARE : 1;
-    if (economy.stock[best * MATERIAL_COUNT + Material.Wood] < b.wood * share) continue;
-    if (economy.stock[best * MATERIAL_COUNT + Material.Stone] < b.stone * share) continue;
-    if (netWith(sim, best, Material.Wood, SEAT_TYPE, -1) < 0 || netWith(sim, best, Material.Stone, SEAT_TYPE, -1) < 0) continue;
-    startConstruction(sim, best, slot, SEAT_TYPE);
-  }
-}
-
-/**
- * Seats, second version (prototype): yearly, per people without a planned
- * or unfinished seat, the settlement (25+ people, SEAT_MIN_COST from every
- * seat) whose seat would raise its people's connection most, among its
- * PROTO.seatCandidates worst connected. Counting only gains over today's
- * connection favors sites that cover new ground, not ground a seat covers.
- * The site saves up for it (merchants bring the rest) and builds it in the
- * economy step (buildPlannedSeat).
- */
-function planSeatSites(sim: Simulation, owner: Uint8Array): void {
   const { economy, world } = sim;
   const n = world.cellCount;
   const busy = new Uint8Array(sim.civSlots);
@@ -620,7 +564,6 @@ function planSeatSites(sim: Simulation, owner: Uint8Array): void {
       // Not built in time: try elsewhere, and this site again only later.
       sim.seatSite[c] = 0;
       sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
-      PROTO.debug.expired++;
     }
     if (id === 0) continue;
     if (sim.seatSite[c]) busy[id] = 1;
@@ -643,13 +586,13 @@ function planSeatSites(sim: Simulation, owner: Uint8Array): void {
     list.sort((a, b) => held(b) - held(a) || sim.seatCost[b] - sim.seatCost[a] || a - b);
     let best = -1;
     let bestBenefit = SEAT_MIN_BENEFIT;
-    for (const c of list.slice(0, PROTO.seatCandidates)) {
+    for (const c of list.slice(0, SEAT_CANDIDATES)) {
       const reached = seatField(sim, owner, id, [c], field);
       let benefit = 0;
       for (const k of reached) {
         benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
         // A settlement held back whose next step would pass the stop with this seat.
-        if (held(k) && connectionValue(field[k] + 1) >= PROTO.expandMinConnection) benefit += PROTO.frontierBonus;
+        if (held(k) && connectionValue(field[k] + 1) >= EXPAND_MIN_CONNECTION) benefit += FRONTIER_BONUS;
         field[k] = Infinity;
       }
       if (benefit > bestBenefit) {
@@ -657,10 +600,7 @@ function planSeatSites(sim: Simulation, owner: Uint8Array): void {
         best = c;
       }
     }
-    if (best >= 0) {
-      sim.seatSite[best] = year + 1;
-      PROTO.debug.planned++;
-    } else PROTO.debug.lowBenefit++;
+    if (best >= 0) sim.seatSite[best] = year + 1;
   }
 }
 
@@ -678,18 +618,12 @@ function buildPlannedSeat(sim: Simulation, cell: number): boolean {
   const share = slot !== null && slot >= 0 ? REPAIR_SHARE : 1;
   economy.goal[cell * MATERIAL_COUNT + Material.Wood] = b.wood * share;
   economy.goal[cell * MATERIAL_COUNT + Material.Stone] = b.stone * share;
-  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood * share || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone * share) {
-    PROTO.debug.noMaterial++;
-    return false;
-  }
+  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood * share) return false;
+  if (economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone * share) return false;
   // Upkeep first: freeing a slot only ever lowers it. The realm keeps the
   // seat up when the site can't: its people must spare RESERVE years of it.
-  if (!seatUpkeepCovered(sim, cell)) {
-    PROTO.debug.noUpkeep++;
-    return false;
-  }
+  if (!seatUpkeepCovered(sim, cell)) return false;
   if (slot === null) {
-    PROTO.debug.replaced++;
     // Replace the least needed building.
     const capacity = sim.cellCapacity[cell];
     let bestCost = Infinity;
@@ -715,18 +649,21 @@ function buildPlannedSeat(sim: Simulation, cell: number): boolean {
     slot = -1;
   }
   sim.seatSite[cell] = 0;
-  PROTO.debug.built++;
   economy.goal[cell * MATERIAL_COUNT + Material.Wood] = 0;
   economy.goal[cell * MATERIAL_COUNT + Material.Stone] = 0;
   return startConstruction(sim, cell, slot, SEAT_TYPE);
 }
 
-/** Whether a seat's upkeep at `cell` is covered: by the site's harvest, or (PROTO.seatUpkeepRealm) by what its people spare. */
+/**
+ * Whether a seat's upkeep at `cell` is covered: by the site's harvest, or by
+ * its realm. The realm wants the seat, so it keeps it up through a supply
+ * route (merchants bring what the site lacks, see trade.ts) as long as its
+ * people spare SEAT_REALM_YEARS of the missing upkeep.
+ */
 function seatUpkeepCovered(sim: Simulation, cell: number): boolean {
   const ownWood = netWith(sim, cell, Material.Wood, SEAT_TYPE, -1);
   const ownStone = netWith(sim, cell, Material.Stone, SEAT_TYPE, -1);
   if (ownWood >= 0 && ownStone >= 0) return true;
-  if (!PROTO.seatUpkeepRealm) return false;
   const civ = sim.world.owner[cell];
   const spare = sim.trade.civSpare;
   const i = civ * TRADE_GOODS;
@@ -734,7 +671,7 @@ function seatUpkeepCovered(sim: Simulation, cell: number): boolean {
   return spare[i] >= -ownWood * SEAT_REALM_YEARS && spare[i + 1] >= -ownStone * SEAT_REALM_YEARS;
 }
 
-/** Years of a seat's missing upkeep its people must spare before the realm takes it on (prototype). */
+/** Years of a seat's missing upkeep its people must spare before the realm takes it on. */
 const SEAT_REALM_YEARS = 2;
 
 let scratch = new Float32Array(0);

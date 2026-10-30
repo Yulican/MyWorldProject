@@ -3,10 +3,12 @@ import { test } from 'node:test';
 import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
-import { ROAD_TRAVEL_FACTOR, addRoad, hasRoad, travelCostField } from '../world/roads';
+import { ROAD_TRAVEL_FACTOR, addRoad, hasRoad, stepCost, travelCostField } from '../world/roads';
 import { MAX_CIVS, hueOf, ledgerNet } from './civilizations';
 import {
   BELIEVER_FAITH,
+  CAPTURE_GROUP,
+  CAPTURE_MIN_SOURCE,
   EXPANSION_GROUP,
   TICKS_PER_YEAR,
   createSimulation,
@@ -15,6 +17,8 @@ import {
   stepSimulation,
   type Simulation,
 } from './simulation';
+import { EXPAND_MIN_CONNECTION } from './economy';
+import { connectionValue } from './satisfaction';
 import { SUPPLY_KINDS, SupplyKind, supplyTerms } from './supply';
 import { sumTerms } from '../terms';
 import { resourceCapacityTerms } from '../world/features';
@@ -148,7 +152,7 @@ test('a hex supports as many people as its scarcest supply allows', () => {
   assert.ok(rivers > 0 && riverWater / rivers >= 70);
 });
 
-test('an overloaded hex sends 25 people to a free neighbor and builds a road', () => {
+test('an overloaded hex sends 25 people to a free neighbor (or 10 towards a luxury deposit) and builds a road', () => {
   const sim = createSimulation(generateWorld({ seed: 42 }));
   const { world } = sim;
   let roads = 0;
@@ -161,11 +165,16 @@ test('an overloaded hex sends 25 people to a free neighbor and builds a road', (
     const fresh = [...sim.cellPop.keys()].filter((c) => before[c] === 0 && sim.cellPop[c] > 0);
     assert.equal(fresh.length, 1);
     const target = fresh[0];
-    assert.equal(sim.cellPop[target], EXPANSION_GROUP);
     const linked = [0, 1, 2, 3, 4, 5].filter((d) => hasRoad(world, target, d));
     assert.equal(linked.length, 1);
     const source = world.neighbors[target * DIRECTION_COUNT + linked[0]];
-    assert.ok(before[source] > sim.cellCapacity[source], 'the source hex was overloaded');
+    if (sim.cellPop[target] === CAPTURE_GROUP) {
+      // A group on its way to a luxury deposit, from a big enough settlement.
+      assert.ok(before[source] >= CAPTURE_MIN_SOURCE, 'the source hex is big enough');
+    } else {
+      assert.equal(sim.cellPop[target], EXPANSION_GROUP);
+      assert.ok(before[source] > sim.cellCapacity[source], 'the source hex was overloaded');
+    }
     assert.ok(sim.cellPop[source] > 0, 'some people stay behind');
   }
   assert.equal(roads, 1, 'the first expansion happened within 200 years');
@@ -251,9 +260,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement of the Kakoru is cut off in year 140.
-  const sim = createSimulation(generateWorld({ seed: 24 }));
-  for (let year = 1; year <= 145; year++) {
+  // In this world a settlement is cut off in year 207.
+  const sim = createSimulation(generateWorld({ seed: 103 }));
+  for (let year = 1; year <= 210; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
@@ -291,4 +300,35 @@ test('every people gets its own random color, the same for the same seed', () =>
   // Hues are spread out: no two living peoples share nearly the same hue.
   const hues = a.map(hueOf).sort((x, y) => x - y);
   for (let i = 1; i < hues.length; i++) assert.ok(hues[i] - hues[i - 1] > 5, hues.join(', '));
+});
+
+test('settlers never go where the connection to a seat would fall below the stop', () => {
+  const sim = createSimulation(generateWorld({ seed: 7 }));
+  const { world } = sim;
+  for (let t = 0; t < 250 * TICKS_PER_YEAR; t++) {
+    const before = Int32Array.from(sim.cellPop);
+    const seatCost = Float32Array.from(sim.seatCost);
+    stepSimulation(sim);
+    if (sim.tick % 13 !== 0) continue;
+    for (let c = 0; c < world.cellCount; c++) {
+      if (before[c] !== 0 || sim.cellPop[c] !== EXPANSION_GROUP) continue;
+      // A regular group: some neighbor with a road was overloaded and sent it.
+      for (let d = 0; d < DIRECTION_COUNT; d++) {
+        const source = world.neighbors[c * DIRECTION_COUNT + d];
+        if (source < 0 || !hasRoad(world, c, d) || before[source] <= sim.cellCapacity[source]) continue;
+        const step = stepCost(world, source, (d + 3) % DIRECTION_COUNT);
+        assert.ok(connectionValue(seatCost[source] + step) >= EXPAND_MIN_CONNECTION, `settlers to ${c} in year ${Math.floor(sim.tick / TICKS_PER_YEAR)}`);
+      }
+    }
+  }
+});
+
+test('a people of 100 lacking a luxury good settles a free deposit of it nearby', () => {
+  // In this world it happens in year 68.
+  const sim = createSimulation(generateWorld({ seed: 102 }));
+  runYears(sim, 70);
+  const settled = sim.chronicle.filter((e) => / settled the /.test(e.text));
+  assert.ok(settled.length > 0, 'a deposit was settled');
+  const cell = settled[0].cell!;
+  assert.ok(sim.world.deposit[cell] !== 0);
 });

@@ -179,3 +179,65 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
   unterwegs, die Ein- und Ausfuhr; „Grain in stock“ erscheint als Zeile
   bei der Nahrung.
 - Häfen bekommen ein Icon auf der Karte.
+
+## 12. Folgeentscheidungen: stabile Reiche, die über Handel zusammenarbeiten
+
+Ziel des Nutzers: Reiche sollen stabiler sein und sich mehr auf Handel
+stützen; Siedlungen arbeiten zusammen, spezialisieren sich und bringen
+Waren zueinander. Nach der Bevölkerung ist die Zufriedenheit der
+zweitwichtigste Wert, weil eine verlorene Siedlung sofort viele Menschen
+kostet. Erst als Prototyp mit Schaltern gemessen, dann so freigegeben:
+
+- **Händler und Ertrag:** Handelszentrum und Hafen geben je 4 Händler,
+  Abbaugebäude für Luxusgüter liefern 25 pro Jahr (versorgen etwa 2.500
+  Menschen).
+- **Händler halten die Provinzen zufrieden:** Bei der Wahl der Fahrt zählt
+  eine Ware dreifach, wenn sie einer Siedlung ein fehlendes Luxusgut
+  bringt, und doppelt für unzufriedene Siedlungen.
+- **Vorkommen erobern:** Ein Volk ab 100 Menschen, dem ein Luxusgut fehlt,
+  schickt jedes Jahr eine Gruppe von 10 aus einer Siedlung ab 50 Einwohnern
+  ein Feld weiter zu einem freien Vorkommen dieses Guts in höchstens 4
+  Feldern Entfernung (über freies Land, das 10 Menschen trägt). Keine
+  Strafe ohne Luxusquelle.
+- **Zufriedenheit zuerst:** Siedlungen unter 5 Zufriedenheit bauen erst für
+  die Zufriedenheit, dann für das Wachstum.
+- **Ausbreitungsstopp:** Keine Siedler, wo die Anbindung unter −15 läge
+  (etwa 3,4 Reisekosten vom nächsten Regierungssitz, 5–6 Felder auf
+  Straße). Eine so zurückgehaltene Siedlung baut zuerst ihre Versorgung
+  aus: Straßenstücke zum nächsten Sitz und einen Sitz an der Grenze.
+- **Regierungssitze:** Jedes Volk wählt jährlich den Standort für seinen
+  nächsten Sitz unter 12 Siedlungen ab 25 Einwohnern (zurückgehaltene
+  zuerst, dann die schlechtest angebundenen): den, der die meiste neue
+  Anbindung bringt, ohne Gebiet doppelt abzudecken, plus 20 Punkte für
+  jede zurückgehaltene Siedlung, die er freigibt. Die Siedlung spart darauf
+  wie auf jedes Gebäude, Händler bringen den Rest; ist kein Platz frei,
+  ersetzt sie ihr am wenigsten gebrauchtes Gebäude. Nicht in 5 Jahren
+  gebaut, geht die Planung woanders hin.
+- **Das Reich unterhält seine Sitze:** Ein Sitz darf auch dort stehen, wo
+  die Ernte des Standorts den Unterhalt nicht trägt, solange das Volk
+  2 Jahre davon übrig hat. Jede Siedlung, deren Ernte ihren Unterhalt
+  nicht deckt, verlangt den Fehlbetrag für 2 Jahre per Händler (eine
+  Versorgungsroute).
+- **Rechenzeit:** Sitzplanung, Eroberung und Versorgungsstraßen laufen je in
+  einer eigenen Woche des Jahres, nicht im Quartals-Refresh.
+
+Ergebnis (12 Welten, je 300 Jahre, pro Welt):
+
+| | vorher | nachher |
+|---|---|---|
+| Volk des Spielers | 1.860 Menschen auf 25 Feldern | 2.920 auf 38 Feldern |
+| Menschen gesamt | 5.460 | 6.300 |
+| Völker | 9,6 | 5,6 |
+| Völker mit Luxusquelle | 9 % | 30 % |
+| Luxusgüter je Stadt ab 100 | 0,07 | 0,33 |
+| Regierungssitze | 1,8 | 8,0 |
+| schlecht angebunden (Anbindung < 0) | 34 % | 17 % |
+| unzufriedene Siedlungen | 8 % | 3 % |
+| Revolutionen | 3,8 | 0,4 |
+| Abwanderungen | 8,8 | 2,9 |
+| Handelsfahrten | 810 | 2.460 |
+
+Verworfene Varianten aus dem Prototyp: Stopp schon unter 0 oder −10 (Reiche
+deutlich kleiner), Sitz-Unterhalt durch die Siedlung selbst (kaum Sitze,
+weil die Ernte den Unterhalt nicht trägt), Sitz-Unterhalt in Geld (gut, aber
+der Nutzer will, dass das Reich den Sitz versorgt).

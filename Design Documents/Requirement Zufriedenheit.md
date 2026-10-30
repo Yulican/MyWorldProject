@@ -259,3 +259,12 @@ Nach 100 und 200 Jahren gibt es noch keine Revolution; die ersten kommen,
 wenn Reiche groß genug für schlecht angebundene Ränder sind. Die Rechenzeit
 ist gesunken, weil die Expansion die überfüllten Felder jetzt einmal sucht
 statt einmal pro Volk.
+
+
+## Nachtrag: Regierungssitze und Ausbreitung (mit dem Handel)
+
+Die Regeln für Regierungssitze, den Ausbreitungsstopp bei Anbindung unter
+−15 und „Zufriedenheit zuerst“ (unter 5) sind im Requirement Handel,
+Abschnitt 12, beschrieben; sie ersetzen hier die alte Sitzplanung (drei
+schlechtest angebundene Siedlungen, Bezahlung nur aus dem eigenen Vorrat,
+Unterhalt nur aus der eigenen Ernte).
