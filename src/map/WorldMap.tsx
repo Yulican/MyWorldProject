@@ -1,4 +1,4 @@
-import { Canvas, Group, Image, Path, Skia, type SkImage } from '@shopify/react-native-skia';
+import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage } from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -33,7 +33,7 @@ import {
   territoryTileSignature,
 } from './territoryLayers';
 import { TileImages } from './tileImages';
-import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
+import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type TileRef, type ViewTiles } from './viewport';
 import { buildWorldLayers, renderTile, TILE_BLEED, type WorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
@@ -333,6 +333,27 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   );
 });
 
+const tilePaint = Skia.Paint();
+
+/**
+ * Territory tiles are semi-transparent, so unlike the opaque terrain tiles
+ * they must not overlap: a strip drawn twice would show darker. Each image is
+ * drawn exactly into its own tile; its bleed pixels only feed the smoothing
+ * at the edges.
+ */
+function territoryPicture(tiles: readonly (readonly [TileRef, SkImage | null])[]) {
+  return createPicture((canvas) => {
+    for (const [t, image] of tiles) {
+      if (!image) continue;
+      const sx = image.width() / (CHUNK_W + 2 * TILE_BLEED);
+      const sy = image.height() / (CHUNK_H + 2 * TILE_BLEED);
+      const src = Skia.XYWHRect(TILE_BLEED * sx, TILE_BLEED * sy, CHUNK_W * sx, CHUNK_H * sy);
+      const dst = Skia.XYWHRect(t.col * CHUNK_W + t.offsetX, t.row * CHUNK_H, CHUNK_W, CHUNK_H);
+      canvas.drawImageRect(image, src, dst, tilePaint, true);
+    }
+  });
+}
+
 type TileLayerProps = {
   world: World;
   layers: WorldLayers;
@@ -406,7 +427,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory }
   return (
     <>
       {tiles.map((t) => tileImage(`g${t.key}`, terrainTiles.get(t.chunk, view.tier), t))}
-      {tiles.map((t) => tileImage(`t${t.key}`, territoryTiles.get(t.chunk, view.tier), t))}
+      <Picture picture={territoryPicture(tiles.map((t) => [t, territoryTiles.get(t.chunk, view.tier)] as const))} />
       {overview &&
         [0, 1].map((copy) => (
           <Image
