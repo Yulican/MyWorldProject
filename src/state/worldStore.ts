@@ -32,7 +32,7 @@ export type GameState = {
    * is paused and the chronicle dialog shows the next one.
    */
   chronicleSeen: number;
-  /** Speed the game continues at once the chronicle dialog is closed. */
+  /** Speed the game continues at once the chronicle dialog is closed (chosen meanwhile in the time controls). */
   resumeSpeed: number;
   /** Off while the benchmark runs: no dialogs, no pauses. */
   chronicleDialogs: boolean;

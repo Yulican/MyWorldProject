@@ -1,15 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { TICKS_PER_YEAR, type ChronicleEntry } from '../sim';
 import { colors, spacing } from '../theme';
-import { TimeControls } from './TimeControls';
 
 type Props = {
   entry: ChronicleEntry;
   /** Entries still waiting after this one. */
   more: number;
-  /** Speed the game continues at when the dialog closes; the player can change it here (pause keeps it paused). */
-  resumeSpeed: number;
-  onResumeSpeed: (speed: number) => void;
   /** Jumps to the entry's hex (only for entries that have one). */
   onGoTo: (cell: number) => void;
   onOk: () => void;
@@ -17,16 +13,15 @@ type Props = {
 
 /**
  * A notable event of the chronicle. The game pauses while it is open and
- * continues at the speed chosen in it.
+ * continues at the speed chosen meanwhile in the time controls below it.
  */
-export function ChronicleDialog({ entry, more, resumeSpeed, onResumeSpeed, onGoTo, onOk }: Props) {
+export function ChronicleDialog({ entry, more, onGoTo, onOk }: Props) {
   return (
     <View style={styles.backdrop}>
       <View style={styles.dialog}>
         <Text style={styles.year}>Year {Math.floor(entry.tick / TICKS_PER_YEAR) + 1}</Text>
         <Text style={styles.text}>{entry.text}</Text>
-        <Text style={styles.note}>Paused. The game continues at this speed:</Text>
-        <TimeControls speed={resumeSpeed} onChange={onResumeSpeed} />
+        <Text style={styles.note}>Paused. The game continues at the speed chosen below.</Text>
         <View style={styles.buttons}>
           {entry.cell >= 0 && (
             <Pressable
