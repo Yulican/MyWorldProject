@@ -40,6 +40,8 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
   /** Frames since the map last moved; added to the move if it continues. */
   const pause = useSharedValue(newMotionStats());
   const moving = useSharedValue(false);
+  /** Shortest frame interval seen so far: the display's refresh interval. */
+  const refresh = useSharedValue(Infinity);
 
   useFrameCallback((frame) => {
     'worklet';
@@ -51,6 +53,7 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
     const dy = ty.value - p.ty;
     prev.value = { tx: tx.value, ty: ty.value, scale: s };
     if (dt === null || dt <= 0) return;
+    if (dt < refresh.value) refresh.value = dt;
 
     const distance = zoomed ? 0 : Math.hypot(dx, dy);
     const k = 1 - Math.exp(-dt / SPEED_SMOOTHING_MS);
@@ -60,7 +63,7 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
       'worklet';
       addFrame(w, dt, distance, speed.value);
       if (w.timeMs >= WINDOW_MS) {
-        const sum = summarize(w);
+        const sum = summarize(w, refresh.value);
         scheduleOnRN(setLive, {
           uiFps: sum.fps,
           worstMs: sum.worstMs,
@@ -97,7 +100,7 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
         return g;
       }, false);
       if (pause.value.timeMs >= MOVE_GAP_MS) {
-        scheduleOnRN(setLast, summarize(move.value));
+        scheduleOnRN(setLast, summarize(move.value, refresh.value));
         move.value = newMotionStats();
         pause.value = newMotionStats();
         moving.value = false;

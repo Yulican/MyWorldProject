@@ -41,10 +41,15 @@ export function addFrame(s: MotionStats, dtMs: number, distance: number, speed: 
   if (speed > s.peakSpeed) s.peakSpeed = speed;
 }
 
-export function summarize(s: MotionStats): MotionSummary {
+/**
+ * `refreshMs` is the display's refresh interval if known (learned from all
+ * frames, including idle ones). Without it the shortest frame of `s` is used,
+ * which overstates the interval when every frame of `s` was slow.
+ */
+export function summarize(s: MotionStats, refreshMs: number = Infinity): MotionSummary {
   'worklet';
   const secs = s.timeMs / 1000;
-  const interval = Math.max(MIN_INTERVAL_MS, s.minMs);
+  const interval = Math.max(MIN_INTERVAL_MS, Math.min(s.minMs, refreshMs));
   // Frames the display would have shown at its refresh rate in the same time.
   const expected = Math.max(s.frames, Math.round(s.timeMs / interval));
   return {

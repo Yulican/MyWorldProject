@@ -30,10 +30,15 @@ To keep builds fast, CI compiles native code for 64-bit ARM phones only (`arm64-
 
 Builds are signed with the project keystore from the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS`, so new builds install over old ones and keep save data. Without the secrets the APK is debug-signed.
 
+## Performance test
+
+Every push also runs the map benchmark on an Android emulator (job `benchmark`): 5 random worlds at zoom ×2, 80 swipes each at 1500 pt/s in all 8 directions; every swipe needs ≥ 60 fps and no frame over 25 ms. A change is only done when it passes; see `AGENTS.md`. The **Bench** button in the app runs the same test on the phone.
+
 ## Structure
 
 ```
 src/
+  bench/       mandatory map performance benchmark
   sim/         simulation core, plain TypeScript (no React): hex grid, noise, world generation
   map/         Skia map rendering: pre-recorded pictures, vector biome icons, pan/zoom/tap
   state/       stores that hold simulation state outside React

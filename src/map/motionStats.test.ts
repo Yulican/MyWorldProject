@@ -25,3 +25,10 @@ test('the wrap of the map offset is not counted as movement', () => {
   assert.equal(wrappedDelta(995, 1000), -5);
   assert.equal(wrappedDelta(-995, 1000), 5);
 });
+
+test('a known refresh rate counts missed frames even when every frame was slow', () => {
+  const s = newMotionStats();
+  for (let i = 0; i < 30; i++) addFrame(s, 1000 / 30, 0, 0); // 30 fps on a 120 Hz display
+  assert.equal(Math.round(summarize(s).missedPct), 0); // unknown refresh: looks smooth
+  assert.equal(Math.round(summarize(s, 1000 / 120).missedPct), 75);
+});

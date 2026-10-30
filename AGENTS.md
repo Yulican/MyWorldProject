@@ -42,6 +42,21 @@ Run typecheck and tests before declaring any task done.
 - Commits that only touch `Design Documents/`, `*.md` or `LICENSE` don't trigger a build. To get an APK anyway, run the workflow manually (`workflow_dispatch`).
 - EAS is not used for builds.
 
+## Mandatory performance test
+
+Every push runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`):
+
+- 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world.
+- **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
+
+Rules for every agent and every change:
+
+- Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for the `benchmark` job.
+- A task is not done, and its branch must not be merged into `main`, until the `benchmark` job passes. If it fails, keep optimizing and push again; don't hand the task back as finished.
+- Never weaken the thresholds, skip swipes or worlds, or disable the job to get it green. Only the user changes the rules.
+- New features extend the benchmark (new scenarios in `src/bench/`); all scenarios must always pass.
+- The failing swipes, their seeds and directions are in the job summary and the `benchmark-results` artifact. The **Bench** button in the app runs the same benchmark on a phone.
+
 ## Rules
 
 - The `android/` directory is generated (Continuous Native Generation). Never create or edit it by hand — configure native behavior in `app.json` and config plugins.

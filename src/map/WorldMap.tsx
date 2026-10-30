@@ -10,13 +10,18 @@ import {
 } from 'react-native-gesture-handler';
 import {
   cancelAnimation,
+  Easing,
+  ReduceMotion,
   useAnimatedReaction,
   useDerivedValue,
+  useFrameCallback,
   useSharedValue,
   withDecay,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
+import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
+import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
 import { MapPerfMeter } from './MapPerfMeter';
@@ -34,10 +39,19 @@ const MIN_FLING_VELOCITY = 150;
 const FLING_AFTER_PINCH_MS = 150;
 const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false };
 
+/** Drives the map from code, for the performance benchmark. */
+export type MapController = {
+  /** Zooms to `scale` and centers the map. */
+  zoomToCenter: (scale: number) => void;
+  /** Moves the map at constant speed, like a drag, and measures its frames. */
+  swipe: (swipe: Swipe) => Promise<SwipeStats>;
+};
+
 type Props = {
   world: World;
   selectedCell: number;
   onTapCell: (cell: number) => void;
+  controller?: { current: MapController | null };
 };
 
 /**
@@ -58,7 +72,7 @@ type Props = {
  * paths at a new scale every frame made zooming stutter. They return as soon
  * as the fingers lift.
  */
-export function WorldMap({ world, selectedCell, onTapCell }: Props) {
+export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) {
   const layers = useMemo(() => buildWorldLayers(world), [world]);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -133,6 +147,53 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
     },
     [mapWidth, mapHeight, viewW, viewH],
   );
+
+  // Benchmark swipes: frames are counted on the UI thread while one runs.
+  const benchSwipe = useSharedValue({ active: false, frames: 0, timeMs: 0, worstMs: 0 });
+  const swipeDone = useRef<(stats: SwipeStats) => void>(() => {});
+  const onSwipeDone = useCallback((stats: SwipeStats) => swipeDone.current(stats), []);
+  useFrameCallback((frame) => {
+    'worklet';
+    const dt = frame.timeSincePreviousFrame;
+    if (!benchSwipe.value.active || dt === null) return;
+    benchSwipe.modify((b) => {
+      'worklet';
+      b.frames += 1;
+      b.timeMs += dt;
+      if (dt > b.worstMs) b.worstMs = dt;
+      return b;
+    }, false);
+  });
+  if (controller) {
+    controller.current = {
+      zoomToCenter: (z) =>
+        scheduleOnUI(() => {
+          'worklet';
+          stopGlide();
+          scale.value = z;
+          tx.value = wrapX(viewW / 2 - (mapWidth / 2) * z, mapWidth * z);
+          ty.value = clampY(viewH / 2 - (mapHeight / 2) * z, mapHeight * z, viewH);
+          reportView();
+        }),
+      swipe: ({ dx, dy, durationMs }) =>
+        new Promise((resolve) => {
+          swipeDone.current = resolve;
+          scheduleOnUI(() => {
+            'worklet';
+            benchSwipe.value = { active: true, frames: 0, timeMs: 0, worstMs: 0 };
+            // Ignore the system's reduce-motion setting (off on CI emulators),
+            // which would otherwise end the swipe at once.
+            const timing = { duration: durationMs, easing: Easing.linear, reduceMotion: ReduceMotion.Never };
+            glideY.value = withTiming(glideY.value + dy, timing);
+            glideX.value = withTiming(glideX.value + dx, timing, () => {
+              const b = benchSwipe.value;
+              benchSwipe.value = { ...b, active: false };
+              scheduleOnRN(onSwipeDone, { frames: b.frames, timeMs: b.timeMs, worstMs: b.worstMs });
+            });
+          });
+        }),
+    };
+  }
 
   const pan = usePanGesture({
     // Follow the average of all fingers, so lifting one finger after a pinch doesn't jump.
