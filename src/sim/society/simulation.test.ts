@@ -237,31 +237,3 @@ test('modifiers appear as their own line and supplies never go below zero', () =
   assert.ok(water.some((t) => t.label === 'Drought'));
   assert.equal(sumTerms(water), 0);
 });
-
-test('peoples never settle each other\'s land, not even where it has emptied', () => {
-  // In this world a hex of one people empties after year 1000; before the
-  // fix a neighbor moved in and the old roads led into foreign land.
-  const sim = createSimulation(generateWorld({ seed: 193155096 }));
-  const { world } = sim;
-  const everOwned = new Uint8Array(world.cellCount);
-  for (let year = 0; year < 1250; year++) {
-    runYears(sim, 1);
-    for (let c = 0; c < world.cellCount; c++) {
-      const owner = world.owner[c];
-      if (!owner) continue;
-      if (everOwned[c] && everOwned[c] !== owner && sim.civs[everOwned[c]]) {
-        assert.fail(`hex ${c} passed from a living people to another in year ${year + 1}`);
-      }
-      everOwned[c] = owner;
-    }
-  }
-  for (let c = 0; c < world.cellCount; c++) {
-    for (let d = 0; d < DIRECTION_COUNT; d++) {
-      if (!hasRoad(world, c, d)) continue;
-      const nb = world.neighbors[c * DIRECTION_COUNT + d];
-      const a = world.owner[c];
-      const b = world.owner[nb];
-      assert.ok(!a || !b || a === b, `road between peoples ${a} and ${b} at hex ${c}`);
-    }
-  }
-});

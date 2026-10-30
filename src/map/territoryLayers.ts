@@ -93,7 +93,7 @@ export function territoryTileSignature(
       mix(world.roads[c]);
       mix(owner);
       if (!owner) continue;
-      mix(world.population[c] > 0 ? 1 + dotSize(world.population[c]) : 0);
+      mix(dotSize(world.population[c]));
       const color = colorOf(owner);
       for (let k = 1; k < color.length; k++) mix(color.charCodeAt(k));
     }
@@ -167,8 +167,6 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       border.lineTo(x + bx * r, y + by * r);
     }
 
-    // Emptied hexes stay their people's land, but show no settlement.
-    if (world.population[c] <= 0) continue;
     const radius = HEX_PX * DOT_RADIUS[dotSize(world.population[c])];
     rim.addCircle(x, y, radius + HEX_PX * 0.06);
     pathFor(dots, owner).addCircle(x, y, radius);

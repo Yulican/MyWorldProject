@@ -289,10 +289,8 @@ export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
 /**
  * Quarterly: every hex whose people need more than it provides sends a group
  * of EXPANSION_GROUP of the civilization living there to the best free
- * neighboring hex that can hold them, and a road links the two. Free means
- * nobody lives there and it isn't another people's land (emptied hexes stay
- * their people's land). Without such a neighbor the people stay, and
- * shortage thins them out.
+ * neighboring hex that can hold them, and a road links the two. Without such
+ * a neighbor the people stay, and shortage thins them out.
  */
 function expandSettlements(sim: Simulation): void {
   const { world } = sim;
@@ -310,9 +308,6 @@ function expandSettlements(sim: Simulation): void {
       for (let d = 0; d < DIRECTION_COUNT; d++) {
         const target = world.neighbors[source * DIRECTION_COUNT + d];
         if (target < 0 || sim.cellPop[target] > 0 || sim.cellCapacity[target] < EXPANSION_GROUP) continue;
-        // Another people's land is off limits, even where it has emptied.
-        const owner = world.owner[target];
-        if (owner !== 0 && owner !== civ.id) continue;
         const score =
           sim.cellCapacity[target] / GOOD_LAND_PEOPLE +
           terrainAppeal(world, civ.culture, target) -
@@ -367,9 +362,7 @@ function refreshSnapshot(sim: Simulation): void {
     const people = sim.cellPop[c];
     world.population[c] = people;
     world.faith[c] = people > 0 ? faithSum[c] / people : 0;
-    // An emptied hex stays its people's land (no one else may settle it)
-    // until that people dies out.
-    let owner = people === 0 ? world.owner[c] : 0;
+    let owner = 0;
     let most = 0;
     for (let id = 1; id < CIV_SLOTS; id++) {
       const n = sim.cellCivPop[c * CIV_SLOTS + id];
@@ -399,9 +392,6 @@ function refreshSnapshot(sim: Simulation): void {
     }
     if (sim.cellCivPop[civ.capital * CIV_SLOTS + id] === 0) civ.capital = mostPopulousCell(sim, id, null);
   }
-
-  // Land of peoples that just vanished is free again.
-  for (let c = 0; c < world.cellCount; c++) if (world.owner[c] && !sim.civs[world.owner[c]]) world.owner[c] = 0;
 
   if (sim.believers === 0) {
     sim.gameOver = true;
@@ -514,7 +504,7 @@ function tryNewTribe(sim: Simulation): void {
   if (rng() >= NEW_TRIBE_CHANCE) return;
 
   const settled: number[] = [];
-  for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > 0 || world.owner[c] !== 0) settled.push(c);
+  for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > 0) settled.push(c);
   const near = distanceField(world, settled, NEW_TRIBE_DISTANCE - 1, () => true);
 
   let best = -1;
