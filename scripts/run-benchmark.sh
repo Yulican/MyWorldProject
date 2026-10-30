@@ -18,7 +18,17 @@ adb wait-for-device
 adb install -r "$APK"
 
 "$(dirname "$0")/settle-emulator.sh"
+adb logcat -G 16M || true
 adb logcat -c
+# The busiest processes every 5 s, to see what else uses the CPU when a
+# swipe fails (failures have clustered about 95 s after the app started).
+( while true; do
+    echo "=== $(date -u +%H:%M:%S.%3N) (runner clock, UTC)"
+    adb shell top -b -n 1 -m 12 2>/dev/null
+    sleep 5
+  done ) > "$OUT/top.txt" 2>&1 &
+TOP_PID=$!
+trap 'kill $TOP_PID 2>/dev/null || true; adb logcat -d > "$OUT/logcat-full.txt" 2>/dev/null || true' EXIT
 adb shell am start -W -a android.intent.action.VIEW -d "myworld://benchmark?scenario=$SCENARIO" "$PACKAGE"
 
 # Wait for the summary line, or for the app to die.
