@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
 import { CivPanel } from '../components/CivPanel';
-import { FpsMeter } from '../components/FpsMeter';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
-import { WorldMap, type TerritorySource } from '../map/WorldMap';
+import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
 import { CIV_COLORS } from '../map/palette';
 import { simulationYear } from '../sim';
 import { createNewWorld, setSpeed, snapshotStore, useGameState } from '../state/worldStore';
@@ -13,6 +13,8 @@ import { colors, spacing } from '../theme';
 
 // Set by the CI build (branch · commit) so testers can see which build is installed.
 const buildLabel = process.env.EXPO_PUBLIC_BUILD_LABEL ?? 'local dev build';
+// CI opens the app with this link to start the benchmark (scripts/run-benchmark.sh).
+const BENCHMARK_URL = 'myworld://benchmark';
 
 type OpenPanel = { kind: 'none' } | { kind: 'hex'; cell: number } | { kind: 'peoples' };
 
@@ -20,10 +22,22 @@ export function WorldScreen() {
   const { sim, speed } = useGameState();
   const world = sim?.world ?? null;
   const [panel, setPanel] = useState<OpenPanel>({ kind: 'none' });
+  const mapController = useRef<MapController | null>(null);
+  const benchmark = useBenchmark(mapController);
+  const benchmarkRunning = benchmark.status?.running === true;
 
   useEffect(() => {
     if (!sim) createNewWorld();
   }, [sim]);
+
+  const runBenchmark = benchmark.run;
+  const hasWorld = sim !== null;
+  useEffect(() => {
+    if (!hasWorld) return;
+    Linking.getInitialURL().then((url) => {
+      if (url?.startsWith(BENCHMARK_URL)) runBenchmark();
+    });
+  }, [hasWorld, runBenchmark]);
 
   // Stable per world, so the map doesn't re-render with every simulation update.
   const territory = useMemo<TerritorySource>(
@@ -56,16 +70,36 @@ export function WorldScreen() {
             {sim ? `${sim.pop.count} people · ${sim.believers} believe in you` : 'Creating world…'}
           </Text>
         </View>
-        <Pressable style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]} onPress={newWorld}>
+        <Pressable
+          style={({ pressed }) => [styles.button, styles.benchButton, pressed && styles.buttonPressed]}
+          disabled={benchmarkRunning}
+          onPress={() => {
+            setPanel({ kind: 'none' });
+            runBenchmark();
+          }}
+        >
+          <Text style={styles.buttonText}>Bench</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          disabled={benchmarkRunning}
+          onPress={newWorld}
+        >
           <Text style={styles.buttonText}>New world</Text>
         </Pressable>
       </View>
 
       <View style={styles.mapArea}>
         {world && (
-          <WorldMap world={world} selectedCell={selectedCell} onTapCell={onTapCell} territory={territory} />
+          <WorldMap
+            world={world}
+            selectedCell={selectedCell}
+            onTapCell={onTapCell}
+            territory={territory}
+            controller={mapController}
+          />
         )}
-        <FpsMeter />
+        {benchmark.status && <BenchmarkBanner status={benchmark.status} />}
         {sim && panel.kind === 'hex' && (
           <HexInfoPanel
             world={sim.world}
@@ -104,6 +138,29 @@ export function WorldScreen() {
   );
 }
 
+function BenchmarkBanner({ status }: { status: BenchmarkStatus }) {
+  if (status.running) {
+    return (
+      <View style={styles.bench} pointerEvents="none">
+        <Text style={styles.benchText}>
+          Benchmark · world {status.world + 1}/5 · swipe {status.swipe}/80 · failed {status.failed}
+        </Text>
+      </View>
+    );
+  }
+  const s = status.summary;
+  return (
+    <View style={[styles.bench, s.pass ? styles.benchPass : styles.benchFail]} pointerEvents="none">
+      <Text style={styles.benchText}>
+        Benchmark {s.pass ? 'PASSED' : 'FAILED'} · {s.failed}/{s.swipes} swipes failed
+      </Text>
+      <Text style={styles.benchText}>
+        fps min {s.minFps.toFixed(0)} · median {s.medianFps.toFixed(0)} · worst frame {s.worstMs.toFixed(0)} ms
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.panel },
   topBar: {
@@ -121,7 +178,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  benchButton: { marginRight: spacing.sm, backgroundColor: colors.panelMuted },
   buttonPressed: { opacity: 0.7 },
+  bench: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    bottom: 4,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  benchPass: { backgroundColor: 'rgba(30,110,50,0.9)' },
+  benchFail: { backgroundColor: 'rgba(140,30,30,0.9)' },
+  benchText: { color: '#ffffff', fontSize: 12, fontVariant: ['tabular-nums'] },
   buttonText: { color: colors.panel, fontWeight: '700', fontSize: 14 },
   mapArea: { flex: 1 },
   bottomBar: {

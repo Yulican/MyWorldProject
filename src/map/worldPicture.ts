@@ -1,11 +1,11 @@
 import {
+  ClipOp,
   Skia,
   createPicture,
   drawAsImageFromPicture,
   type SkCanvas,
   type SkImage,
   type SkPathBuilder,
-  type SkPicture,
 } from '@shopify/react-native-skia';
 import {
   Biome,
@@ -19,12 +19,17 @@ import {
   type World,
 } from '../sim';
 import { createIconLayers, drawBiomeIcon } from './hexIcons';
-import { CHUNK_H, CHUNK_HEXES, CHUNK_W, HEX_PX } from './mapGeometry';
+import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { fillPaint, strokePaint } from './paints';
 import { BIOME_COLORS, DEPOSIT_COLORS, RIVER_COLOR, START_COLOR } from './palette';
 
 /** Largest overview image side; stays within the texture limit of every phone. */
 const MAX_OVERVIEW_PX = 4096;
+/**
+ * Extra picture pixels rendered around each detail tile. Neighbors overlap by
+ * this much, so no seam shows where scaled tile images meet.
+ */
+export const TILE_BLEED = 2;
 /** Overview resolution in pixels per hex size; about the on-screen size where tiles take over. */
 const OVERVIEW_PX_PER_HEX = 18;
 
@@ -34,16 +39,15 @@ const OVERVIEW_PX_PER_HEX = 18;
  * - `overview`: the whole map (colors, rivers, deposits) as one image. Drawing
  *   a scaled image is almost free, so zoomed-out views and fast gestures stay
  *   smooth on any map size.
- * - `chunks`: vector tiles of CHUNK_HEXES² hexes with outlines and icons, used
- *   when zoomed in. Only tiles near the screen are drawn, so the cost depends
- *   on the screen, not on the map size.
+ * - Detail tiles of CHUNK_W x CHUNK_H with outlines and icons, used when
+ *   zoomed in. They are rendered on demand by renderTile (see tileImages.ts),
+ *   only near the screen, so the cost depends on the screen, not the map size.
  */
 export type WorldLayers = {
   overview: SkImage;
   /** Region of picture space the overview image covers. */
   overviewRect: { x: number; y: number; width: number; height: number };
-  /** Index = chunkRow * chunkCols + chunkCol. */
-  chunks: { fills: SkPicture; icons: SkPicture }[];
+  /** Detail tiles per map copy; tile index = row * chunkCols + col. */
   chunkCols: number;
   chunkRows: number;
   /** Size of one map copy in picture pixels (the map repeats horizontally). */
@@ -72,35 +76,93 @@ export function buildWorldLayers(world: World): WorldLayers {
   // A plain (non-GPU) copy can be drawn by any Skia canvas.
   const overview = image.makeNonTextureImage() ?? image;
 
-  const chunkCols = Math.ceil(world.width / CHUNK_HEXES);
-  const chunkRows = Math.ceil(world.height / CHUNK_HEXES);
-  const chunks: WorldLayers['chunks'] = [];
-  for (let cy = 0; cy < chunkRows; cy++) {
-    for (let cx = 0; cx < chunkCols; cx++) {
-      const cells = cellsInRange(
-        world,
-        cx * CHUNK_HEXES,
-        Math.min(world.width, (cx + 1) * CHUNK_HEXES),
-        cy * CHUNK_HEXES,
-        Math.min(world.height, (cy + 1) * CHUNK_HEXES),
-      );
-      const bounds = Skia.XYWHRect(
-        cx * CHUNK_W - 2 * HEX_PX,
-        cy * CHUNK_H - 2 * HEX_PX,
-        CHUNK_W + 4 * HEX_PX,
-        CHUNK_H + 4 * HEX_PX,
-      );
-      chunks.push({
-        fills: createPicture((canvas) => {
-          drawFills(canvas, world, cells);
-          drawFeatures(canvas, world, cells);
-        }, bounds),
-        icons: createPicture((canvas) => drawIcons(canvas, world, cells), bounds),
-      });
+  const chunkCols = Math.ceil(width / CHUNK_W);
+  const chunkRows = Math.ceil(height / CHUNK_H);
+  return { overview, overviewRect, chunkCols, chunkRows, width, height };
+}
+
+/**
+ * Renders one detail tile (colors, rivers, deposits, outlines and icons) into
+ * a CPU image at `pxPerUnit` pixels per picture pixel. CPU images can be drawn
+ * by the UI thread's canvas; rendering runs on the JS thread, off the frame.
+ * Hexes of neighboring tiles and map copies are drawn too and clipped; the
+ * image covers the tile plus TILE_BLEED on each side.
+ */
+export function renderTile(world: World, chunk: number, chunkCols: number, pxPerUnit: number): SkImage | null {
+  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [
+    (canvas, cells) => drawFills(canvas, world, cells),
+    (canvas, cells) => drawFeatures(canvas, world, cells),
+    // Icons after all fills, so no hex covers the icons of its neighbor.
+    (canvas, cells) => drawIcons(canvas, world, cells),
+  ]);
+}
+
+/**
+ * Hexes a tile has to draw, by map copy: those reaching into the tile plus
+ * TILE_BLEED (rivers reach up to one hex beyond their own). Columns outside
+ * the map belong to the neighboring map copies.
+ */
+export function tileCells(world: World, chunk: number, chunkCols: number): { offsetX: number; cells: Int32Array }[] {
+  const col = chunk % chunkCols;
+  const row = (chunk - col) / chunkCols;
+  const x = col * CHUNK_W - TILE_BLEED;
+  const y = row * CHUNK_H - TILE_BLEED;
+  const unitX = 1.5 * HEX_PX;
+  const unitY = Math.sqrt(3) * HEX_PX;
+  const c0 = Math.floor(x / unitX) - 2;
+  const c1 = Math.ceil((x + CHUNK_W + 2 * TILE_BLEED) / unitX) + 2;
+  const r0 = Math.max(0, Math.floor(y / unitY) - 2);
+  const r1 = Math.min(world.height - 1, Math.ceil((y + CHUNK_H + 2 * TILE_BLEED) / unitY) + 2);
+  const segments: { offsetX: number; cells: Int32Array }[] = [];
+  const copyWidth = wrapWidth(world) * HEX_PX;
+  for (let copy = Math.floor(c0 / world.width); copy <= Math.floor(c1 / world.width); copy++) {
+    const lo = Math.max(c0, copy * world.width) - copy * world.width;
+    const hi = Math.min(c1 + 1, (copy + 1) * world.width) - copy * world.width;
+    if (lo < hi && r0 <= r1) segments.push({ offsetX: copy * copyWidth, cells: cellsInRange(world, lo, hi, r0, r1 + 1) });
+  }
+  return segments;
+}
+
+/**
+ * Renders a tile into a CPU image by running each pass over the tile's hexes
+ * (all segments of a pass before the next pass), clipped to the tile plus
+ * TILE_BLEED.
+ */
+export function renderTileWith(
+  world: World,
+  chunk: number,
+  chunkCols: number,
+  pxPerUnit: number,
+  passes: ((canvas: SkCanvas, cells: Int32Array) => void)[],
+): SkImage | null {
+  const col = chunk % chunkCols;
+  const row = (chunk - col) / chunkCols;
+  const x = col * CHUNK_W - TILE_BLEED;
+  const y = row * CHUNK_H - TILE_BLEED;
+  const tileW = CHUNK_W + 2 * TILE_BLEED;
+  const tileH = CHUNK_H + 2 * TILE_BLEED;
+  const w = Math.ceil(tileW * pxPerUnit);
+  const h = Math.ceil(tileH * pxPerUnit);
+  const surface = Skia.Surface.Make(w, h);
+  if (!surface) return null;
+  const canvas = surface.getCanvas();
+  canvas.scale(w / tileW, h / tileH);
+  canvas.translate(-x, -y);
+  canvas.clipRect(Skia.XYWHRect(x, y, tileW, tileH), ClipOp.Intersect, true);
+  const segments = tileCells(world, chunk, chunkCols);
+  for (const pass of passes) {
+    for (const seg of segments) {
+      canvas.save();
+      canvas.translate(seg.offsetX, 0);
+      pass(canvas, seg.cells);
+      canvas.restore();
     }
   }
 
-  return { overview, overviewRect, chunks, chunkCols, chunkRows, width, height };
+  surface.flush();
+  const image = surface.makeImageSnapshot();
+  surface.dispose();
+  return image;
 }
 
 export function cellsInRange(world: World, col0: number, col1: number, row0: number, row1: number): Int32Array {

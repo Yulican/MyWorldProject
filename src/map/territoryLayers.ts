@@ -5,12 +5,11 @@ import {
   type SkCanvas,
   type SkImage,
   type SkPathBuilder,
-  type SkPicture,
 } from '@shopify/react-native-skia';
 import { DIRECTION_COUNT, DIRECTION_OFFSETS, hexCenterX, hexCenterY, type World } from '../sim';
-import { CHUNK_H, CHUNK_HEXES, CHUNK_W, HEX_PX } from './mapGeometry';
+import { HEX_PX } from './mapGeometry';
 import { fillPaint, strokePaint } from './paints';
-import { cellsInRange, type WorldLayers } from './worldPicture';
+import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
 
 /**
  * Territory overview resolution in pixels per hex size. Lower than the
@@ -28,23 +27,28 @@ const EDGE_CORNERS = DIRECTION_OFFSETS.map(([dx, dy]) => {
 });
 
 /**
- * Who lives where, drawn like the terrain layers: one image for zoomed-out
- * views, vector tiles near the screen when zoomed in. Rebuilt from the
- * world's society snapshot whenever it changes; tiles are only recorded when
- * first needed, since most of the time few or none are visible.
+ * Detail tiles of territories are rendered at this share of the terrain
+ * tiles' resolution: tints, borders and dots stay crisp enough, and they are
+ * rendered again with every snapshot.
  */
-export type TerritoryLayers = {
+export const TERRITORY_TILE_RESOLUTION = 0.5;
+
+/**
+ * Who lives where, drawn like the terrain: one image for zoomed-out views
+ * (built here, from the current society snapshot), transparent tile images
+ * near the screen when zoomed in (renderTerritoryTile, see tileImages.ts).
+ */
+export type TerritoryOverview = {
   overview: SkImage;
   /** Region of picture space the overview image covers (same as the terrain overview). */
   overviewRect: WorldLayers['overviewRect'];
-  chunk: (index: number) => SkPicture;
 };
 
-export function buildTerritoryLayers(
+export function buildTerritoryOverview(
   world: World,
   colorOf: (civ: number) => string,
   terrain: WorldLayers,
-): TerritoryLayers {
+): TerritoryOverview {
   const rect = terrain.overviewRect;
   const k = OVERVIEW_PX_PER_HEX / HEX_PX;
   const size = { width: Math.ceil(rect.width * k), height: Math.ceil(rect.height * k) };
@@ -56,29 +60,20 @@ export function buildTerritoryLayers(
   }, size);
   const image = drawAsImageFromPicture(picture, size);
   if (!image) throw new Error('Could not render the territory overview.');
-  const overview = image.makeNonTextureImage() ?? image;
+  return { overview: image.makeNonTextureImage() ?? image, overviewRect: rect };
+}
 
-  const chunks = new Map<number, SkPicture>();
-  const chunk = (index: number) => {
-    let recorded = chunks.get(index);
-    if (!recorded) {
-      const cx = index % terrain.chunkCols;
-      const cy = (index - cx) / terrain.chunkCols;
-      const cells = cellsInRange(
-        world,
-        cx * CHUNK_HEXES,
-        Math.min(world.width, (cx + 1) * CHUNK_HEXES),
-        cy * CHUNK_HEXES,
-        Math.min(world.height, (cy + 1) * CHUNK_HEXES),
-      );
-      const bounds = Skia.XYWHRect(cx * CHUNK_W - 2 * HEX_PX, cy * CHUNK_H - 2 * HEX_PX, CHUNK_W + 4 * HEX_PX, CHUNK_H + 4 * HEX_PX);
-      recorded = createPicture((canvas) => drawTerritory(canvas, world, cells, colorOf), bounds);
-      chunks.set(index, recorded);
-    }
-    return recorded;
-  };
-
-  return { overview, overviewRect: rect, chunk };
+/** One territory detail tile as a transparent image; null where nobody lives. */
+export function renderTerritoryTile(
+  world: World,
+  chunk: number,
+  chunkCols: number,
+  pxPerUnit: number,
+  colorOf: (civ: number) => string,
+): SkImage | null {
+  const settled = tileCells(world, chunk, chunkCols).some(({ cells }) => cells.some((c) => world.owner[c] !== 0));
+  if (!settled) return null;
+  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf)]);
 }
 
 /** A tint and a border per civilization and a dot per settlement, sized by population. */
