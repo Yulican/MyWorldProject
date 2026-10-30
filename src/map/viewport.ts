@@ -96,6 +96,7 @@ export type TileRef = {
  * one copy and the start of the next).
  */
 export function visibleTiles(view: ViewTiles, layers: TileGrid, margin = 0): TileRef[] {
+  'worklet';
   if (!view.detail) return [];
   const tiles: TileRef[] = [];
   const cx = (view.x0 + view.x1 + 1) / 2;

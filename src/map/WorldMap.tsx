@@ -1,5 +1,5 @@
 import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage } from '@shopify/react-native-skia';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
   GestureDetector,
@@ -18,6 +18,7 @@ import {
   useSharedValue,
   withDecay,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
@@ -33,7 +34,7 @@ import {
   territoryTileSignature,
 } from './territoryLayers';
 import { TileImages } from './tileImages';
-import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type TileRef, type ViewTiles } from './viewport';
+import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
 import { buildWorldLayers, renderTile, TILE_BLEED, type WorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
@@ -318,7 +319,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
                 fit="fill"
               />
             ))}
-            <TileLayer world={world} layers={layers} listener={tileListener} territory={territory} />
+            <TileLayer world={world} layers={layers} listener={tileListener} territory={territory} view={lastView} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -333,47 +334,42 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   );
 });
 
-const tilePaint = Skia.Paint();
-
-/**
- * Territory tiles are semi-transparent, so unlike the opaque terrain tiles
- * they must not overlap: a strip drawn twice would show darker. Each image is
- * drawn exactly into its own tile; its bleed pixels only feed the smoothing
- * at the edges.
- */
-function territoryPicture(tiles: readonly (readonly [TileRef, SkImage | null])[]) {
-  return createPicture((canvas) => {
-    for (const [t, image] of tiles) {
-      if (!image) continue;
-      const sx = image.width() / (CHUNK_W + 2 * TILE_BLEED);
-      const sy = image.height() / (CHUNK_H + 2 * TILE_BLEED);
-      const src = Skia.XYWHRect(TILE_BLEED * sx, TILE_BLEED * sy, CHUNK_W * sx, CHUNK_H * sy);
-      const dst = Skia.XYWHRect(t.col * CHUNK_W + t.offsetX, t.row * CHUNK_H, CHUNK_W, CHUNK_H);
-      canvas.drawImageRect(image, src, dst, tilePaint, true);
-    }
-  });
-}
-
 type TileLayerProps = {
   world: World;
   layers: WorldLayers;
   listener: { current: (view: ViewTiles) => void };
   territory: TerritorySource;
+  /** The current view, kept on the UI thread by the gestures. */
+  view: SharedValue<ViewTiles>;
 };
 
+/** Finished images the UI thread may draw, by tile, for the current zoom tier. */
+type TileSet = {
+  terrain: Record<number, SkImage>;
+  territory: Record<number, SkImage>;
+  /** Zoomed out: territories as one image. */
+  overview: SkImage | null;
+};
+const EMPTY_TILE_SET: TileSet = { terrain: {}, territory: {}, overview: null };
+
 /**
- * The detail tile images near the screen and the territories above them.
- * Owns the visible-tile state and follows the society snapshot, so only it
- * re-renders. Tiles not rendered yet at the current tier show a ready tier
- * meanwhile, or the overview image underneath; after a new snapshot the old
- * territory tiles stay until the new ones are ready.
+ * The detail tile images near the screen and the territories above them,
+ * drawn as one picture that the UI thread records again whenever the view
+ * crosses a tile border, so moving the map never re-renders React.
+ *
+ * The JS thread renders tiles in the background and publishes the finished
+ * ones for the view plus a ring around it (PREFETCH_TILES), so tiles coming
+ * into view are usually there already. New society snapshots and new tiles
+ * only update that set. Tiles not rendered yet at the current tier show a
+ * ready tier meanwhile, or the overview image underneath; after a snapshot
+ * the old territory tiles stay until the new ones are ready.
  */
-const TileLayer = memo(function TileLayer({ world, layers, listener, territory }: TileLayerProps) {
+const TileLayer = memo(function TileLayer({ world, layers, listener, territory, view }: TileLayerProps) {
   countEvent('tileLayerRenders');
-  const [view, setView] = useState<ViewTiles>(NO_TILES);
-  const [, setReady] = useState(0);
-  listener.current = setView;
-  const onReady = useCallback(() => setReady((n) => n + 1), []);
+  const tileSet = useSharedValue<TileSet>(EMPTY_TILE_SET);
+  const current = useRef<ViewTiles>(NO_TILES);
+  const publish = useRef<() => void>(() => {});
+  const onReady = useCallback(() => publish.current(), []);
   const scales = useMemo(() => TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()), []);
 
   const terrainTiles = useMemo(
@@ -405,57 +401,108 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory }
   useEffect(() => () => terrainTiles.dispose(), [terrainTiles]);
   useEffect(() => () => territoryTiles.dispose(), [territoryTiles]);
 
-  const version = useSyncExternalStore(territory.subscribe, territory.getVersion);
-  // Runs before the request below, so the visible territory tiles are redone.
-  useEffect(() => territoryTiles.invalidate(), [territoryTiles, version]);
-  useEffect(() => {
-    const wanted = visibleTiles(view, layers, PREFETCH_TILES).map((t) => ({ ...t, tier: view.tier }));
+  // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
+  const overview = useRef<{ version: number; image: SkImage } | null>(null);
+  const overviewFor = (version: number): SkImage => {
+    if (overview.current?.version !== version) {
+      const t0 = performance.now();
+      const built = buildTerritoryOverview(world, territory.civColor, layers);
+      recordMapBuild(performance.now() - t0);
+      countEvent('territoryOverviews');
+      overview.current = { version, image: built.overview };
+    }
+    return overview.current.image;
+  };
+
+  publish.current = () => {
+    const v = current.current;
+    const set: TileSet = { terrain: {}, territory: {}, overview: null };
+    if (v.detail) {
+      for (const t of visibleTiles(v, layers, PREFETCH_TILES)) {
+        const ground = terrainTiles.get(t.chunk, v.tier);
+        if (ground) set.terrain[t.chunk] = ground;
+        const people = territoryTiles.get(t.chunk, v.tier);
+        if (people) set.territory[t.chunk] = people;
+      }
+    } else {
+      set.overview = overviewFor(territory.getVersion());
+    }
+    tileSet.value = set;
+  };
+  listener.current = (v) => {
+    current.current = v;
+    const wanted = visibleTiles(v, layers, PREFETCH_TILES).map((t) => ({ ...t, tier: v.tier }));
     terrainTiles.want(wanted);
     territoryTiles.want(wanted);
-  }, [terrainTiles, territoryTiles, view, layers, version]);
+    publish.current();
+  };
 
-  // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
-  const overview = useMemo(() => {
-    if (view.detail) return null;
-    const t0 = performance.now();
-    const built = buildTerritoryOverview(world, territory.civColor, layers);
-    recordMapBuild(performance.now() - t0);
-    countEvent('territoryOverviews');
-    return built;
-    // `version` stands in for the world's mutable society arrays.
-  }, [world, layers, territory, version, view.detail]);
+  // A new world or tile cache: start over from the current view.
+  useEffect(() => {
+    overview.current = null;
+    listener.current(current.current);
+  }, [terrainTiles, territoryTiles, listener]);
 
-  const tiles = visibleTiles(view, layers);
-  const tileImage = (key: string, image: SkImage | null, t: (typeof tiles)[number]) =>
-    image && (
-      <Image
-        key={key}
-        image={image}
-        x={t.col * CHUNK_W + t.offsetX - TILE_BLEED}
-        y={t.row * CHUNK_H - TILE_BLEED}
-        width={CHUNK_W + 2 * TILE_BLEED}
-        height={CHUNK_H + 2 * TILE_BLEED}
-        fit="fill"
-      />
-    );
-  return (
-    <>
-      {tiles.map((t) => tileImage(`g${t.key}`, terrainTiles.get(t.chunk, view.tier), t))}
-      <Picture picture={territoryPicture(tiles.map((t) => [t, territoryTiles.get(t.chunk, view.tier)] as const))} />
-      {overview &&
-        [0, 1].map((copy) => (
-          <Image
-            key={`t${copy}`}
-            image={overview.overview}
-            x={overview.overviewRect.x + copy * layers.width}
-            y={overview.overviewRect.y}
-            width={overview.overviewRect.width}
-            height={overview.overviewRect.height}
-            fit="fill"
-          />
-        ))}
-    </>
-  );
+  // New society snapshots: redo the territory tiles that look different.
+  useEffect(() => {
+    let seen = territory.getVersion();
+    return territory.subscribe(() => {
+      const version = territory.getVersion();
+      if (version === seen) return;
+      seen = version;
+      territoryTiles.invalidate();
+      listener.current(current.current);
+    });
+  }, [territory, territoryTiles, listener]);
+
+  const grid = { width: layers.width, chunkCols: layers.chunkCols, chunkRows: layers.chunkRows };
+  const overviewRect = layers.overviewRect;
+  const picture = useDerivedValue(() => {
+    const v = view.value;
+    const set = tileSet.value;
+    return createPicture((canvas) => {
+      const paint = Skia.Paint();
+      if (!v.detail) {
+        const image = set.overview;
+        if (!image) return;
+        const src = Skia.XYWHRect(0, 0, image.width(), image.height());
+        // Two copies cover any view: the offset stays within one map width.
+        for (let copy = 0; copy < 2; copy++) {
+          const dst = Skia.XYWHRect(overviewRect.x + copy * grid.width, overviewRect.y, overviewRect.width, overviewRect.height);
+          canvas.drawImageRect(image, src, dst, paint, true);
+        }
+        return;
+      }
+      const tiles = visibleTiles(v, grid);
+      // Terrain tiles are opaque and overlap by their bleed, so no seam shows.
+      for (const t of tiles) {
+        const image = set.terrain[t.chunk];
+        if (!image) continue;
+        const src = Skia.XYWHRect(0, 0, image.width(), image.height());
+        const dst = Skia.XYWHRect(
+          t.col * CHUNK_W + t.offsetX - TILE_BLEED,
+          t.row * CHUNK_H - TILE_BLEED,
+          CHUNK_W + 2 * TILE_BLEED,
+          CHUNK_H + 2 * TILE_BLEED,
+        );
+        canvas.drawImageRect(image, src, dst, paint, true);
+      }
+      // Territory tiles are semi-transparent and must not overlap (a strip
+      // drawn twice would show darker): each is drawn exactly into its tile,
+      // its bleed pixels only feed the smoothing at the edges.
+      for (const t of tiles) {
+        const image = set.territory[t.chunk];
+        if (!image) continue;
+        const sx = image.width() / (CHUNK_W + 2 * TILE_BLEED);
+        const sy = image.height() / (CHUNK_H + 2 * TILE_BLEED);
+        const src = Skia.XYWHRect(TILE_BLEED * sx, TILE_BLEED * sy, CHUNK_W * sx, CHUNK_H * sy);
+        const dst = Skia.XYWHRect(t.col * CHUNK_W + t.offsetX, t.row * CHUNK_H, CHUNK_W, CHUNK_H);
+        canvas.drawImageRect(image, src, dst, paint, true);
+      }
+    });
+  });
+
+  return <Picture picture={picture} />;
 });
 
 function hexOutline(world: World, cell: number) {
