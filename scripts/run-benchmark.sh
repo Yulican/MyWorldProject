@@ -11,10 +11,22 @@ APK="$1"
 OUT="${2:-benchmark-results}"
 PACKAGE=com.example.myworldproject
 TIMEOUT_S=1500
+SETTLED_LOAD=1.0
 
 mkdir -p "$OUT"
 adb wait-for-device
 adb install -r "$APK"
+
+# A freshly booted emulator keeps the CPU busy with system work (app
+# optimization, package scans) for minutes. The emulator also draws on the
+# CPU, so that work would show up as dropped frames of the app. Wait until
+# the 1-minute load average has settled (at most 10 minutes).
+for _ in $(seq 1 60); do
+  load=$(adb shell cat /proc/loadavg | cut -d' ' -f1)
+  echo "Emulator load before start: $load"
+  if awk "BEGIN { exit !($load < $SETTLED_LOAD) }"; then break; fi
+  sleep 10
+done
 adb logcat -c
 adb shell am start -W -a android.intent.action.VIEW -d "myworld://benchmark" "$PACKAGE"
 
@@ -34,7 +46,7 @@ while true; do
     exit 1
   fi
   progress=$(grep -c 'MYWORLD_BENCH_SWIPE' "$OUT/logcat.txt" || true)
-  echo "Swipes measured: $progress/400"
+  echo "Swipes measured: $progress/400 · emulator load $(adb shell cat /proc/loadavg | cut -d' ' -f1-3)"
   sleep 15
 done
 

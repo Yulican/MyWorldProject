@@ -46,12 +46,20 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
   useFrameCallback((frame) => {
     'worklet';
     const dt = frame.timeSincePreviousFrame;
+    // Records are updated in place: allocating every frame invites garbage
+    // collection pauses on the UI thread, which would show up as long frames.
     const p = prev.value;
     const s = scale.value;
     const zoomed = s !== p.scale;
     const dx = wrappedDelta(tx.value - p.tx, mapWidth * s);
     const dy = ty.value - p.ty;
-    prev.value = { tx: tx.value, ty: ty.value, scale: s };
+    prev.modify((q) => {
+      'worklet';
+      q.tx = tx.value;
+      q.ty = ty.value;
+      q.scale = s;
+      return q;
+    }, false);
     if (dt === null || dt <= 0) return;
     if (dt < refresh.value) refresh.value = dt;
 
@@ -91,7 +99,7 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
         addFrame(m, dt, distance, speed.value);
         return m;
       }, false);
-      pause.value = newMotionStats();
+      if (pause.value.frames > 0) pause.value = newMotionStats();
       moving.value = true;
     } else if (moving.value) {
       pause.modify((g) => {
