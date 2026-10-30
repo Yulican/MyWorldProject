@@ -682,8 +682,9 @@ function buildPlannedSeat(sim: Simulation, cell: number): boolean {
     PROTO.debug.noMaterial++;
     return false;
   }
-  // Upkeep first: freeing a slot only ever lowers it.
-  if (netWith(sim, cell, Material.Wood, SEAT_TYPE, -1) < 0 || netWith(sim, cell, Material.Stone, SEAT_TYPE, -1) < 0) {
+  // Upkeep first: freeing a slot only ever lowers it. The realm keeps the
+  // seat up when the site can't: its people must spare RESERVE years of it.
+  if (!seatUpkeepCovered(sim, cell)) {
     PROTO.debug.noUpkeep++;
     return false;
   }
@@ -719,6 +720,22 @@ function buildPlannedSeat(sim: Simulation, cell: number): boolean {
   economy.goal[cell * MATERIAL_COUNT + Material.Stone] = 0;
   return startConstruction(sim, cell, slot, SEAT_TYPE);
 }
+
+/** Whether a seat's upkeep at `cell` is covered: by the site's harvest, or (PROTO.seatUpkeepRealm) by what its people spare. */
+function seatUpkeepCovered(sim: Simulation, cell: number): boolean {
+  const ownWood = netWith(sim, cell, Material.Wood, SEAT_TYPE, -1);
+  const ownStone = netWith(sim, cell, Material.Stone, SEAT_TYPE, -1);
+  if (ownWood >= 0 && ownStone >= 0) return true;
+  if (!PROTO.seatUpkeepRealm) return false;
+  const civ = sim.world.owner[cell];
+  const spare = sim.trade.civSpare;
+  const i = civ * TRADE_GOODS;
+  if (i + TRADE_GOODS > spare.length) return false;
+  return spare[i] >= -ownWood * SEAT_REALM_YEARS && spare[i + 1] >= -ownStone * SEAT_REALM_YEARS;
+}
+
+/** Years of a seat's missing upkeep its people must spare before the realm takes it on (prototype). */
+const SEAT_REALM_YEARS = 2;
 
 let scratch = new Float32Array(0);
 /** A reusable all-Infinity field of `n` cells (seatField users reset what they touched). */

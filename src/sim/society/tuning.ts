@@ -30,6 +30,12 @@ export const PROTO = {
   supplyRoads: true,
   /** >0: a seat's upkeep is this much money a year instead of wood and stone. */
   seatUpkeepMoney: 0,
+  /**
+   * The realm keeps its seats up: a seat may stand where the site's harvest
+   * doesn't cover its upkeep, while the people spare enough wood and stone;
+   * settlements short of upkeep ask merchants for it (a supply route).
+   */
+  seatUpkeepRealm: true,
   /** Counters for the prototype measurements. */
   debug: { planned: 0, built: 0, expired: 0, noMaterial: 0, noUpkeep: 0, replaced: 0, lowBenefit: 0 },
 };

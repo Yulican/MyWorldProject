@@ -4,8 +4,8 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
-import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, type Economy } from './buildings';
-import { LUXURY_PER_PERSON } from './satisfaction';
+import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { PROTO } from './tuning';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
@@ -235,8 +235,14 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   for (let m = 0; m < MATERIAL_COUNT; m++) {
     const stock = economy.stock[cell * MATERIAL_COUNT + m];
     const goal = economy.goal[cell * MATERIAL_COUNT + m];
-    const reserve = Math.max(RESERVE_MIN, RESERVE_YEARS * upkeepOf(economy, cell, m));
-    trade.want[t + m] = Math.max(0, goal - stock - trade.incoming[t + m]);
+    const upkeep = upkeepOf(economy, cell, m);
+    const reserve = Math.max(RESERVE_MIN, RESERVE_YEARS * upkeep);
+    // Upkeep its own harvest doesn't cover (e.g. a seat the realm wants): a
+    // supply route, it asks for RESERVE_YEARS of the shortfall.
+    const good = m === 0 ? Good.Wood : Good.Stone;
+    const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
+    const shortfall = PROTO.seatUpkeepRealm ? Math.max(0, upkeep - harvest) * RESERVE_YEARS : 0;
+    trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
   }
 
