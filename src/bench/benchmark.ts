@@ -2,6 +2,18 @@
 // Plain TypeScript so the rules are testable in Node. The app runs it (see
 // useBenchmark) and CI fails when it doesn't pass (scripts/run-benchmark.sh).
 
+/**
+ * Scenarios: the same swipes over young worlds (a single tribe) and over worlds
+ * simulated for 300 years first (many peoples, territories and roads).
+ */
+export const SCENARIOS = { young: { years: 0 }, aged: { years: 300 } } as const;
+export type ScenarioName = keyof typeof SCENARIOS;
+
+export function scenarioFromUrl(url: string): ScenarioName {
+  const match = /[?&]scenario=(\w+)/.exec(url);
+  return match && match[1] in SCENARIOS ? (match[1] as ScenarioName) : 'young';
+}
+
 export const BENCHMARK = {
   worlds: 5,
   zoom: 2,
@@ -74,6 +86,7 @@ export function evaluateSwipe(stats: SwipeStats): { fps: number; worstMs: number
 }
 
 export type BenchmarkSummary = {
+  scenario?: ScenarioName;
   pass: boolean;
   swipes: number;
   failed: number;

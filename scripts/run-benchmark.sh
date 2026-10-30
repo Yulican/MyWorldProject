@@ -2,33 +2,24 @@
 # Runs the map benchmark on a connected Android device or emulator and fails
 # unless every swipe passes (rules in src/bench/benchmark.ts).
 #
-# Usage: scripts/run-benchmark.sh <apk> [output dir]
-# The app is opened with the link myworld://benchmark, which starts the
-# benchmark; it logs MYWORLD_BENCH_* lines.
+# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged]
+# The app is opened with the link myworld://benchmark?scenario=..., which
+# starts the benchmark; it logs MYWORLD_BENCH_* lines.
 set -euo pipefail
 
 APK="$1"
 OUT="${2:-benchmark-results}"
+SCENARIO="${3:-young}"
 PACKAGE=com.example.myworldproject
 TIMEOUT_S=1500
-SETTLED_LOAD=1.0
 
 mkdir -p "$OUT"
 adb wait-for-device
 adb install -r "$APK"
 
-# A freshly booted emulator keeps the CPU busy with system work (app
-# optimization, package scans) for minutes. The emulator also draws on the
-# CPU, so that work would show up as dropped frames of the app. Wait until
-# the 1-minute load average has settled (at most 10 minutes).
-for _ in $(seq 1 60); do
-  load=$(adb shell cat /proc/loadavg | cut -d' ' -f1)
-  echo "Emulator load before start: $load"
-  if awk "BEGIN { exit !($load < $SETTLED_LOAD) }"; then break; fi
-  sleep 10
-done
+"$(dirname "$0")/settle-emulator.sh"
 adb logcat -c
-adb shell am start -W -a android.intent.action.VIEW -d "myworld://benchmark" "$PACKAGE"
+adb shell am start -W -a android.intent.action.VIEW -d "myworld://benchmark?scenario=$SCENARIO" "$PACKAGE"
 
 # Wait for the summary line, or for the app to die.
 start=$(date +%s)
@@ -53,13 +44,15 @@ done
 grep -o 'MYWORLD_BENCH_SWIPE .*' "$OUT/logcat.txt" | sed 's/^MYWORLD_BENCH_SWIPE //' > "$OUT/swipes.jsonl"
 grep -o 'MYWORLD_BENCH_DONE .*' "$OUT/logcat.txt" | tail -n 1 | sed 's/^MYWORLD_BENCH_DONE //' > "$OUT/summary.json"
 
-node - "$OUT" <<'EOF'
+node - "$OUT" "$SCENARIO" <<'EOF'
 const fs = require('fs');
 const out = process.argv[2];
+const scenario = process.argv[3];
+const scenarioText = { young: 'young worlds', aged: 'worlds after 300 simulated years' }[scenario] ?? scenario;
 const summary = JSON.parse(fs.readFileSync(`${out}/summary.json`, 'utf8'));
 const swipes = fs.readFileSync(`${out}/swipes.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 const lines = [
-  `## Map benchmark: ${summary.pass ? 'PASSED' : 'FAILED'}`,
+  `## Map benchmark, ${scenarioText}: ${summary.pass ? 'PASSED' : 'FAILED'}`,
   '',
   'Rule: 5 random worlds, zoom 2, 1500 pt/s, 10 swipes in each of 8 directions; every swipe needs >= 60 fps and no frame over 25 ms.',
   '',
@@ -106,7 +99,7 @@ fs.writeFileSync(`${out}/summary.md`, text);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
 console.log(text);
 if (!summary.pass) {
-  console.log(`::error::Map benchmark failed: ${summary.failed}/${summary.swipes} swipes below 60 fps or with a frame over 25 ms.`);
+  console.log(`::error::Map benchmark (${scenarioText}) failed: ${summary.failed}/${summary.swipes} swipes below 60 fps or with a frame over 25 ms.`);
   process.exit(1);
 }
 EOF
