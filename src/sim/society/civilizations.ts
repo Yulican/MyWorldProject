@@ -2,11 +2,16 @@ import type { Rng } from '../rng';
 import { CULTURE_COUNT } from './culture';
 
 /**
- * At most this many civilizations live at once (design doc: 3–6). Their ids
- * are slots 1..MAX_CIVS, stored per inhabitant in a Uint8Array; an extinct
- * civilization's slot is reused by the next one. Id 0 means "nobody".
+ * Soft cap: new tribes only appear while fewer civilizations than this live
+ * (design doc: 3–6). Peoples splitting off can go beyond it.
  */
 export const MAX_CIVS = 6;
+/**
+ * Hard limit of civilizations alive at once: ids 1..MAX_CIV_ID are stored per
+ * inhabitant and per hex in Uint8Arrays; an extinct civilization's id is
+ * reused by the next one. Id 0 means "nobody".
+ */
+export const MAX_CIV_ID = 255;
 
 /** How a civilization came to be. */
 export type CivOrigin = 'start' | 'secession' | 'tribe';
@@ -44,8 +49,8 @@ export function ledgerNet(l: FaithLedger): number {
 export type Civilization = {
   id: number;
   name: string;
-  /** Index into the map's civilization colors; stable for the civ's lifetime. */
-  color: number;
+  /** Map color "#rrggbb", picked at random when founded (see pickCivColor). */
+  color: string;
   origin: CivOrigin;
   /** Name of the civilization it broke away from (secession only). */
   parentName: string | null;
@@ -70,13 +75,62 @@ export type Civilization = {
   faithLastYear: FaithLedger;
 };
 
-/** Number of distinct civilization colors the map offers. */
-export const CIV_COLOR_COUNT = 8;
+/** Candidate colors drawn per new civilization; the one most unlike the others wins. */
+const COLOR_CANDIDATES = 12;
+
+/**
+ * A random, clearly visible color ("#rrggbb") whose hue differs as much as
+ * possible from the colors of `taken` (the living civilizations).
+ */
+export function pickCivColor(rng: Rng, taken: readonly string[]): string {
+  const takenHues = taken.map(hueOf);
+  let best = '';
+  let bestDistance = -1;
+  for (let i = 0; i < COLOR_CANDIDATES; i++) {
+    const hue = rng() * 360;
+    const color = hslToHex(hue, 0.65 + 0.25 * rng(), 0.5 + 0.12 * rng());
+    let distance = 360;
+    for (const h of takenHues) {
+      const d = Math.abs(hue - h) % 360;
+      distance = Math.min(distance, d > 180 ? 360 - d : d);
+    }
+    if (distance > bestDistance) {
+      bestDistance = distance;
+      best = color;
+    }
+  }
+  return best;
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const a = s * Math.min(l, 1 - l);
+  const channel = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
+/** Hue in degrees of a "#rrggbb" color. */
+export function hueOf(color: string): number {
+  const v = parseInt(color.slice(1), 16);
+  const r = ((v >> 16) & 255) / 255;
+  const g = ((v >> 8) & 255) / 255;
+  const b = (v & 255) / 255;
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
 
 export function createCivilization(
   id: number,
   name: string,
-  color: number,
+  color: string,
   origin: CivOrigin,
   foundedTick: number,
   capital: number,

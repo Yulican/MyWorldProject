@@ -6,7 +6,6 @@ import { CivPanel } from '../components/CivPanel';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { CIV_COLORS } from '../map/palette';
 import { hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
 import { createNewWorld, setSpeed, snapshotStore, useGameState } from '../state/worldStore';
 import { colors, spacing } from '../theme';
@@ -41,7 +40,7 @@ export function WorldScreen() {
 
   // Stable per world, so the map doesn't re-render with every simulation update.
   const territory = useMemo<TerritorySource>(
-    () => ({ ...snapshotStore, civColor: (id) => CIV_COLORS[sim?.civs[id]?.color ?? 0] }),
+    () => ({ ...snapshotStore, civColor: (id) => sim?.civs[id]?.color ?? '#ffffff' }),
     [sim],
   );
 

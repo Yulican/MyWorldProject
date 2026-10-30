@@ -10,7 +10,6 @@ import {
   type Civilization,
   type Simulation,
 } from '../sim';
-import { CIV_COLORS } from '../map/palette';
 import { colors, spacing } from '../theme';
 
 /** Chronicle entries shown, newest first. */
@@ -93,7 +92,7 @@ function CivRow({ civ }: { civ: Civilization }) {
   return (
     <View style={styles.civ}>
       <View style={styles.civHeader}>
-        <View style={[styles.swatch, { backgroundColor: CIV_COLORS[civ.color] }]} />
+        <View style={[styles.swatch, { backgroundColor: civ.color }]} />
         <Text style={styles.civName}>{civ.name}</Text>
         <Text style={[styles.tag, civ.worshipsPlayer && styles.tagHighlight]}>{originText(civ)}</Text>
       </View>

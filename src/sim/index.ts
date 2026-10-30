@@ -9,7 +9,7 @@ export { generateWorld, DEFAULT_WORLD_WIDTH, DEFAULT_WORLD_HEIGHT, type WorldOpt
 export { hasFreshWater } from './world/hydrology';
 export { ROAD_TRAVEL_FACTOR, hasRoad, stepCost, travelCostField } from './world/roads';
 export { elevationMeters, resourceAt, WORLD_VERSION, type World, type WorldShape } from './world/world';
-export { CIV_COLOR_COUNT, MAX_CIVS, ledgerNet, type CivOrigin, type Civilization } from './society/civilizations';
+export { MAX_CIVS, MAX_CIV_ID, ledgerNet, type CivOrigin, type Civilization } from './society/civilizations';
 export { CULTURE_COUNT, CULTURE_NAMES, Culture } from './society/culture';
 export { SUPPLY_KINDS, SUPPLY_NAMES, SupplyKind, type SupplyModifier } from './society/supply';
 export { sumTerms, type Term } from './terms';

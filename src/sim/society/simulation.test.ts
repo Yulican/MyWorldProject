@@ -4,7 +4,7 @@ import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import { ROAD_TRAVEL_FACTOR, addRoad, hasRoad, travelCostField } from '../world/roads';
-import { MAX_CIVS, ledgerNet } from './civilizations';
+import { MAX_CIVS, hueOf, ledgerNet } from './civilizations';
 import {
   BELIEVER_FAITH,
   EXPANSION_GROUP,
@@ -56,7 +56,7 @@ for (const seed of [1, 3, 1234]) {
     assert.ok(!sim.gameOver, 'the player still has believers');
     assert.ok(pop.count > 1000, `population grew to ${pop.count}`);
     const civs = livingCivilizations(sim);
-    assert.ok(civs.length > 1 && civs.length <= MAX_CIVS, `${civs.length} civilizations`);
+    assert.ok(civs.length > 1, `${civs.length} civilizations`);
 
     const cellPop = new Int32Array(world.cellCount);
     let alive = 0;
@@ -261,9 +261,7 @@ test('land cut off from its capital becomes its own people', () => {
   const sim = createSimulation(generateWorld({ seed: 77 }));
   for (let year = 1; year <= 260; year++) {
     runYears(sim, 1);
-    const civs = livingCivilizations(sim);
-    if (civs.length >= MAX_CIVS) continue;
-    for (const civ of civs) {
+    for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
     }
   }
@@ -271,4 +269,32 @@ test('land cut off from its capital becomes its own people', () => {
   assert.ok(split, 'a cut-off people was founded');
   const civ = livingCivilizations(sim).find((c) => split.text.includes(c.name) && c.origin === 'secession');
   assert.ok(civ && !civ.worshipsPlayer);
+});
+
+test('splinters may go beyond the soft cap, new tribes may not', () => {
+  const sim = createSimulation(generateWorld({ seed: 77 }));
+  let most = 0;
+  for (let year = 1; year <= 650 && most <= MAX_CIVS; year++) {
+    runYears(sim, 1);
+    const civs = livingCivilizations(sim);
+    most = Math.max(most, civs.length);
+    const unsplit = civs.filter((c) => c.origin !== 'secession').length;
+    assert.ok(unsplit <= MAX_CIVS, `${unsplit} tribes in year ${year}`);
+  }
+  assert.ok(most > MAX_CIVS, `at most ${most} civilizations`);
+});
+
+test('every people gets its own random color, the same for the same seed', () => {
+  const colors = (seed: number) => {
+    const sim = createSimulation(generateWorld({ seed }));
+    runYears(sim, 300);
+    return livingCivilizations(sim).map((c) => c.color);
+  };
+  const a = colors(3);
+  assert.deepEqual(colors(3), a);
+  assert.notDeepEqual(colors(4).slice(0, 1), a.slice(0, 1));
+  for (const c of a) assert.match(c, /^#[0-9a-f]{6}$/);
+  // Hues are spread out: no two living peoples share nearly the same hue.
+  const hues = a.map(hueOf).sort((x, y) => x - y);
+  for (let i = 1; i < hues.length; i++) assert.ok(hues[i] - hues[i - 1] > 5, hues.join(', '));
 });
