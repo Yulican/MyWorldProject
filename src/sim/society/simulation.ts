@@ -159,8 +159,11 @@ export function stepSimulation(sim: Simulation): void {
   sim.tick++;
   const yearEnd = sim.tick % TICKS_PER_YEAR === 0;
   if (yearEnd) updateCivilizations(sim);
+  // Every hex's economy runs once a quarter, a 13th of the hexes each week;
+  // upkeep is due in the year's last quarter.
+  const week = sim.tick - 1;
+  runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
   if (sim.tick % REFRESH_TICKS === 0) {
-    runEconomy(sim, yearEnd);
     expandSettlements(sim);
     splitCutOffLand(sim);
     refreshSnapshot(sim);

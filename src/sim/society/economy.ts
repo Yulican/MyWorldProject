@@ -148,14 +148,16 @@ function yearsUntil(stock: number, cost: number, income: number): number {
 }
 
 /**
- * Quarterly, for every hex with people or buildings: harvest, construction,
- * upkeep (at `yearEnd`) and the next building. Returns whether any hex's
- * supply or buildings changed (so the map snapshot needs refreshing).
+ * One quarter of the economy for every `step`-th hex from `first` that has
+ * people or buildings: harvest, construction, upkeep (with `yearEnd`) and
+ * the next building. The simulation spreads the hexes over the weeks of a
+ * quarter, so no single tick carries all of them. Returns whether any hex's
+ * supply or buildings changed.
  */
-export function runEconomy(sim: Simulation, yearEnd: boolean): boolean {
+export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 1): boolean {
   const { world, economy } = sim;
   let changed = false;
-  for (let c = 0; c < world.cellCount; c++) {
+  for (let c = first; c < world.cellCount; c += step) {
     const people = sim.cellPop[c];
     if (people === 0 && !sim.hasBuildings[c]) continue;
     const stock = c * MATERIAL_COUNT;
