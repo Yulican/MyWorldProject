@@ -3,12 +3,20 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { scenarioFromUrl } from '../bench/benchmark';
 import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
+import { ChronicleDialog } from '../components/ChronicleDialog';
 import { CivPanel } from '../components/CivPanel';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { hexEconomy, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
-import { createNewWorld, setSpeed, snapshotStore, useGameState } from '../state/worldStore';
+import { hexEconomy, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
+import {
+  acknowledgeChronicle,
+  createNewWorld,
+  setResumeSpeed,
+  setSpeed,
+  snapshotStore,
+  useGameState,
+} from '../state/worldStore';
 import { colors, spacing } from '../theme';
 
 // Set by the CI build (branch · commit) so testers can see which build is installed.
@@ -19,7 +27,7 @@ const BENCHMARK_URL = 'myworld://benchmark';
 type OpenPanel = { kind: 'none' } | { kind: 'hex'; cell: number } | { kind: 'peoples' };
 
 export function WorldScreen() {
-  const { sim, speed } = useGameState();
+  const { sim, speed, chronicleSeen, resumeSpeed, chronicleDialogs } = useGameState();
   const world = sim?.world ?? null;
   const [panel, setPanel] = useState<OpenPanel>({ kind: 'none' });
   const mapController = useRef<MapController | null>(null);
@@ -60,6 +68,13 @@ export function WorldScreen() {
     [],
   );
   const closePanel = () => setPanel({ kind: 'none' });
+  // A new chronicle entry pauses the game and is shown until the player closes it.
+  const entry = sim && chronicleDialogs && !sim.gameOver ? sim.chronicle[chronicleSeen] : undefined;
+  const goTo = (cell: number) => {
+    mapController.current?.centerOn(cell);
+    setPanel({ kind: 'hex', cell });
+    acknowledgeChronicle();
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -112,10 +127,19 @@ export function WorldScreen() {
             civName={sim.civs[sim.world.owner[panel.cell]]?.name ?? null}
             supply={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexSupplyTerms(sim, panel.cell)}
             economy={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexEconomy(sim, panel.cell)}
+            satisfaction={hexSatisfaction(sim, panel.cell)}
             onClose={closePanel}
           />
         )}
         {sim && panel.kind === 'peoples' && <CivPanel sim={sim} onClose={closePanel} />}
+        {sim && entry && (
+          <ChronicleDialog
+            entry={entry}
+            more={sim.chronicle.length - chronicleSeen - 1}
+            onGoTo={goTo}
+            onOk={acknowledgeChronicle}
+          />
+        )}
         {sim?.gameOver && (
           <View style={styles.gameOver}>
             <Text style={styles.gameOverTitle}>Nobody prays to you anymore</Text>
@@ -128,7 +152,12 @@ export function WorldScreen() {
       </View>
 
       <View style={styles.bottomBar}>
-        <TimeControls speed={speed} onChange={setSpeed} disabled={!sim || sim.gameOver} />
+        {/* While a chronicle entry is open, the controls choose the speed the game continues at. */}
+        <TimeControls
+          speed={entry ? resumeSpeed : speed}
+          onChange={entry ? setResumeSpeed : setSpeed}
+          disabled={!sim || sim.gameOver}
+        />
         <Pressable
           style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
           onPress={() => setPanel(panel.kind === 'peoples' ? { kind: 'none' } : { kind: 'peoples' })}

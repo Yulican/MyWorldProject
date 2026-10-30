@@ -1,5 +1,6 @@
 import type { Term } from '../terms';
 import { RESOURCE_COUNT, Resource } from '../world/biomes';
+import { Deposit } from '../world/deposits';
 import type { World } from '../world/world';
 import { SUPPLY_KINDS, type SupplyModifier } from './supply';
 
@@ -10,11 +11,47 @@ import { SUPPLY_KINDS, type SupplyModifier } from './supply';
 
 /**
  * What a building improves. The first three are the hex's supplies
- * (SupplyKind), the last two its yearly harvest.
+ * (SupplyKind), wood and stone its yearly harvest. Comfort serves `amount`
+ * people (satisfaction.ts), Seat makes the hex a seat of government, and
+ * the luxury goods are harvested from a special deposit (units per year).
  */
-export const Good = { Food: 0, Water: 1, Space: 2, Wood: 3, Stone: 4 } as const;
-export const GOOD_COUNT = 5;
-export const GOOD_NAMES = ['Food', 'Water', 'Space', 'Wood', 'Stone'] as const;
+export const Good = {
+  Food: 0,
+  Water: 1,
+  Space: 2,
+  Wood: 3,
+  Stone: 4,
+  Comfort: 5,
+  Seat: 6,
+  Salt: 7,
+  Spices: 8,
+  Gems: 9,
+  Gold: 10,
+  Marble: 11,
+  Horses: 12,
+} as const;
+export const GOOD_COUNT = 13;
+export const GOOD_NAMES = [
+  'Food',
+  'Water',
+  'Space',
+  'Wood',
+  'Stone',
+  'Comfort',
+  'Seat of government',
+  'Salt',
+  'Spices',
+  'Gems',
+  'Gold',
+  'Marble',
+  'Horses',
+] as const;
+/** Luxury goods are Good.Salt .. Good.Horses; `Economy.luxury` holds them in this order. */
+export const FIRST_LUXURY = Good.Salt;
+export const LUXURY_COUNT = 6;
+export const isLuxury = (good: number) => good >= FIRST_LUXURY && good < FIRST_LUXURY + LUXURY_COUNT;
+/** Wood or stone: the goods that pay for buildings. */
+export const isMaterial = (good: number) => good === Good.Wood || good === Good.Stone;
 
 /** Building materials, as stored in `Economy.stock`. */
 export const Material = { Wood: 0, Stone: 1 } as const;
@@ -34,6 +71,10 @@ export type BuildingType = {
   upkeepStone: number;
   /** Construction time in years. */
   years: number;
+  /** Only on a hex with this special deposit (luxury goods). */
+  deposit?: number;
+  /** Only where the hex has this much more water than its people need. */
+  waterSurplus?: number;
 };
 
 /**
@@ -52,6 +93,17 @@ export const BUILDINGS: readonly BuildingType[] = [
   { name: 'Sawmill', good: Good.Wood, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 0, upkeepStone: 1, years: 2 },
   { name: 'Quarry', good: Good.Stone, amount: 5, percent: 0, wood: 10, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
   { name: 'Stonemason', good: Good.Stone, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 1, upkeepStone: 0, years: 2 },
+  // Satisfaction (satisfaction.ts): comfort for this many people, a seat of
+  // government, and the luxury goods of special deposits.
+  { name: 'Meeting place', good: Good.Comfort, amount: 50, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
+  { name: 'Bathhouse', good: Good.Comfort, amount: 100, percent: 0, wood: 10, stone: 30, upkeepWood: 0, upkeepStone: 1, years: 2, waterSurplus: 25 },
+  { name: 'Seat of government', good: Good.Seat, amount: 0, percent: 0, wood: 40, stone: 60, upkeepWood: 2, upkeepStone: 2, years: 3 },
+  { name: 'Salt works', good: Good.Salt, amount: 10, percent: 0, wood: 15, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Salt },
+  { name: 'Spice garden', good: Good.Spices, amount: 10, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Spices },
+  { name: 'Gem mine', good: Good.Gems, amount: 10, percent: 0, wood: 15, stone: 10, upkeepWood: 1, upkeepStone: 0, years: 2, deposit: Deposit.Gems },
+  { name: 'Gold mine', good: Good.Gold, amount: 10, percent: 0, wood: 15, stone: 10, upkeepWood: 1, upkeepStone: 0, years: 2, deposit: Deposit.Gold },
+  { name: 'Marble quarry', good: Good.Marble, amount: 10, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Marble },
+  { name: 'Horse ranch', good: Good.Horses, amount: 10, percent: 0, wood: 20, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.WildHorses },
 ];
 
 /** Building slots per hex (later changed by modifiers). */
@@ -77,6 +129,10 @@ export type Economy = {
   work: Float32Array;
   /** Standing: years in a row the upkeep wasn't paid. */
   unpaid: Uint8Array;
+  /** Luxury goods in stock: cell * LUXURY_COUNT + (good - FIRST_LUXURY). Stays on the ground like `stock`. */
+  luxury: Float32Array;
+  /** Bit per luxury good whose yearly need the stock covered at the last year's end. */
+  luxuryCovered: Uint8Array;
 };
 
 export function createEconomy(cellCount: number): Economy {
@@ -86,6 +142,8 @@ export function createEconomy(cellCount: number): Economy {
     state: new Uint8Array(cellCount * SLOTS),
     work: new Float32Array(cellCount * SLOTS),
     unpaid: new Uint8Array(cellCount * SLOTS),
+    luxury: new Float32Array(cellCount * LUXURY_COUNT),
+    luxuryCovered: new Uint8Array(cellCount),
   };
 }
 
@@ -137,7 +195,7 @@ export function buildingSupplyModifiers(eco: Economy, cell: number): SupplyModif
 }
 
 /** How the hex's yearly wood or stone harvest comes about (Good.Wood or Good.Stone). */
-export function harvestTerms(world: World, eco: Economy, cell: number, good: number): Term[] {
+export function harvestTerms(world: World, eco: Economy, cell: number, good: number, factor = 1): Term[] {
   const resource = world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
   const terms: Term[] = [
     { label: 'Foraging', value: FORAGE_BASE },
@@ -157,6 +215,10 @@ export function harvestTerms(world: World, eco: Economy, cell: number, good: num
       terms.push({ label: `${b.name} +${Math.round(b.percent * 100)} %`, value: total * b.percent });
       total *= 1 + b.percent;
     }
+  }
+  if (factor !== 1) {
+    const pct = Math.round((factor - 1) * 100);
+    terms.push({ label: `Satisfaction ${pct < 0 ? '−' : '+'}${Math.abs(pct)} %`, value: total * (factor - 1) });
   }
   return terms;
 }

@@ -1,6 +1,6 @@
 # Requirement: Zufriedenheit pro Siedlung
 
-Status: **Anforderungen geklärt; Zahlen werden noch kalibriert.** Die Zahlen sind Startwerte. Vor der
+Status: **Umgesetzt auf Branch `feature/settlement-satisfaction`, Zahlen kalibriert** (siehe „Kalibrierung“ am Ende; die Regeln mit allen Werten stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
 Umsetzung werden sie per Simulation kalibriert (siehe „Abnahme“) und dir
 noch einmal vorgelegt. Spieltexte sind Englisch („Satisfaction“).
 
@@ -29,13 +29,13 @@ Gebäude-Feature umgesetzt.
 | Nahrung fehlt | −100 × Anteil des fehlenden Bedarfs | nur Abzug; gedeckt = 0 |
 | Wasser fehlt | −100 × Anteil des fehlenden Bedarfs | nur Abzug |
 | Platz fehlt | −100 × Anteil des fehlenden Bedarfs | nur Abzug |
-| Enge | ab 80 % der Kapazität linear bis −10 bei 100 % | bewusst schwach |
-| Anbindung | am Regierungssitz und nah +10, linear bis −20 bei großer Reiseentfernung über Straßen zum nächsten Regierungssitz des eigenen Volks | ersetzt die alte Entfernungsregel; Regierungssitz = Hauptstadt oder lokaler Regierungssitz (3b) |
+| Enge | ab 80 % der Kapazität linear bis −5 bei 100 % | bewusst schwach (kalibriert, vorher −10) |
+| Anbindung | +10 bis 0,5 Reisekosten vom nächsten Regierungssitz des eigenen Volks, linear bis −20 ab 4 Reisekosten (über Straßen kostet ein Hex meist 0,5) | ersetzt die alte Entfernungsregel; Regierungssitz = Hauptstadt oder lokaler Regierungssitz (3b) |
 | Komfort: Gebäude | bis +15 | siehe 3a |
 | Komfort: Luxusgüter | +5 je abgedecktem Gut, bis +15 | siehe 3c |
 | Neuer Stamm | +10, klingt über 10 Jahre ab | nur im neuen Volk |
 | Erfolgreiche Revolution | +20, klingt über 10 Jahre ab | zusätzlich zum Wert eines neuen Stamms |
-| Verlorene Revolution | −5, klingt über 10 Jahre ab | alle Siedlungen des alten Volks; klein, kann aber Randsiedlungen weiter destabilisieren (bestätigt) |
+| Verlorene Revolution | −5, klingt über 10 Jahre ab | alle Siedlungen des alten Volks; klein, kann aber Randsiedlungen weiter destabilisieren (bestätigt); eine weitere verlorene Revolution erneuert den Malus, statt ihn zu stapeln |
 
 Folgen dieser Zahlen:
 - Eine voll versorgte Siedlung ohne Komfort liegt nahe der Hauptstadt bei
@@ -221,3 +221,38 @@ Alle Fragen sind beantwortet:
 Nächster Schritt: Sobald das Gebäude-Feature im Code ist, werden die
 Startwerte per Simulation kalibriert und mit den Kennzahlen vorgelegt. Erst
 nach der Bestätigung wird umgesetzt.
+
+## Kalibrierung (12 Testwelten, `npx tsx tools/satisfactionStats.ts`)
+
+Geändert gegenüber den Startwerten:
+- **Enge −5 statt −10.** Mit −10 lagen volle Siedlungen nahe der Hauptstadt
+  genau bei 0, weil Siedlungen erst bei Überfüllung aussiedeln. Schon
+  kleinste Schwankungen führten zu Revolutionen.
+- **Verlorene Revolution stapelt sich nicht.** Gestapelte −5 lösten
+  Kettenreaktionen aus, mit bis zu 22 Völkern in einer Welt.
+- **Anbindung 0,5 bis 4 Reisekosten statt „nah bis weit“.** Reiche sind
+  über Straßen eng verbunden: Die halbe Strecke liegt bei 1,25, die längste
+  bei 4,75. Mit 10 als „weit“ blieb jede Siedlung im Plus, und nichts
+  passierte.
+- **Mindestabstand eines neuen Regierungssitzes: 1 Reisekosten.** Der Sitz
+  lohnt sich ab 40 Punkten Anbindung, die die Siedlungen zusammen gewinnen.
+- **Abwanderung:** Ziele müssen über Straßen in höchstens 8 Reisekosten
+  erreichbar und mindestens 10 Punkte zufriedener sein.
+
+Ergebnis nach 300 Jahren, im Mittel (Spanne):
+
+| Kennzahl | mit Zufriedenheit | ohne |
+|---|---|---|
+| Menschen | 3.400 (1.580–6.480) | 3.860 |
+| Siedlungen | 47 | 50 |
+| Völker | 7,1 (4–11) | 5,2 |
+| Revolutionen | 1,7 (0–7), meist einzelne große Städte (100-Menschen-Regel) | – |
+| Abgewanderte Gruppen | 2,8, davon 0,3 zu fremden Völkern | – |
+| Zufriedenheit der Siedlungen | Median +7, 10 % unter +1,7, 6 % unter 0 | – |
+| Komfortgebäude / Regierungssitze / Luxusgut-Betriebe | 21,5 / 1,2 / 0,2 | – |
+| Rechenzeit unter Node | 1,5 ms pro simuliertem Jahr | 1,8 ms |
+
+Nach 100 und 200 Jahren gibt es noch keine Revolution; die ersten kommen,
+wenn Reiche groß genug für schlecht angebundene Ränder sind. Die Rechenzeit
+ist gesunken, weil die Expansion die überfüllten Felder jetzt einmal sucht
+statt einmal pro Volk.

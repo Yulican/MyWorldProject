@@ -1,4 +1,5 @@
 import { DIRECTION_COUNT } from '../hex';
+import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
 import type { Term } from '../terms';
 import { BIOMES, isWaterBiome } from '../world/biomes';
@@ -21,19 +22,35 @@ import {
   EXPANSION_GROUP,
   capacityAfterRepair,
   isSettlementTarget,
+  planSeats,
   rawMaterials,
   runEconomy,
   updateCellSupply,
 } from './economy';
+import {
+  MOOD_NEW_PEOPLE,
+  MOOD_REVOLUTION_LOST,
+  MOOD_REVOLUTION_WON,
+  SATISFACTION_MAX,
+  UNHAPPY_QUARTERS,
+  addMood,
+  birthFactor,
+  cellOwners,
+  connectionValue,
+  hasSeat,
+  pruneMoods,
+  updateSatisfaction,
+} from './satisfaction';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
 // The living world: inhabitants age, have children and die; when a hex can't
 // provide enough food, water or space, a group moves on to a free neighbor
-// and a road connects the two. Civilizations spread that way, new peoples
-// appear (and, once enabled again, break away). One tick is one
-// week. Each inhabitant is updated once a year, staggered so that every tick
-// handles 1/52 of them (design doc, section 11).
+// and a road connects the two. Civilizations spread that way and new peoples
+// appear. Unhappy settlements send people away and, joined by roads into a
+// league, break away (satisfaction.ts). One tick is one week. Each
+// inhabitant is updated once a year, staggered so that every tick handles
+// 1/52 of them (design doc, section 11).
 
 export const TICKS_PER_YEAR = 52;
 /** Map snapshot and civilization stats are refreshed this often (quarterly). */
@@ -43,15 +60,16 @@ export const BELIEVER_FAITH = 0.5;
 const START_TRIBE_SIZE = 20;
 /** Civilization slots per cell in `cellCivPop` at first (index 0 = nobody); doubles as needed. */
 const INITIAL_CIV_SLOTS = 8;
-/**
- * Breakaways are paused for now: they made test games hard to follow
- * without adding much. The rules stay in place for when we return to them.
- */
-const SECESSION_ENABLED = false;
-/** Settlements further than this many hexes from the capital may break away. */
-const SECESSION_REACH = 7;
-const SECESSION_CHANCE = 0.08;
 export { EXPANSION_GROUP };
+/** A league of settlements ready to break away needs this many settlements or people. */
+export const LEAGUE_MIN_SETTLEMENTS = 3;
+export const LEAGUE_MIN_PEOPLE = 100;
+/** Unhappy people move to settlements reachable by road within this travel cost. */
+const MIGRATION_REACH = 8;
+/** ...that are at least this much more satisfied than their own. */
+const MIGRATION_MIN_GAIN = 10;
+/** Expansion score per point of satisfaction the new hex's connection promises (×1/100). */
+const SATISFACTION_APPEAL = 0.5;
 /** Score lost per unit of travel cost into the new hex: easy land is settled first. */
 const TRAVEL_EFFORT = 0.05;
 /** Score per unit of wood and stone the new hex yields per year: building material is worth having. */
@@ -65,7 +83,8 @@ const NEW_TRIBE_CHANCE = 0.02;
 /** New tribes appear at least this many hexes from anyone else. */
 const NEW_TRIBE_DISTANCE = 8;
 
-export type ChronicleEntry = { tick: number; text: string };
+/** A notable event; `cell` is where it happened (-1 for none), so the player can jump there. */
+export type ChronicleEntry = { tick: number; text: string; cell: number };
 
 export type Simulation = {
   world: World;
@@ -98,8 +117,18 @@ export type Simulation = {
   economy: Economy;
   /** 1 for hexes that ever had a building (ruins stay forever), so the economy can skip the rest. */
   hasBuildings: Uint8Array;
+  /** Satisfaction per settled hex, -100..100 (see satisfaction.ts). */
+  satisfaction: Float32Array;
+  /** Quarters in a row a settlement's satisfaction was below zero. */
+  unhappyQuarters: Uint8Array;
+  /** 1 once a settled hex has a satisfaction; a new settlement starts at its target. */
+  moodSet: Uint8Array;
+  /** Travel cost to the nearest seat of government of the hex's people, Infinity if none in reach. */
+  seatCost: Float32Array;
   /** Notable events, oldest first. */
   chronicle: ChronicleEntry[];
+  /** Groups that left unhappy settlements so far, and how many of them joined another people. */
+  migrations: { groups: number; abroad: number };
   /** Believers in all civilizations at the last refresh. */
   believers: number;
   /** Totals at the end of each year, oldest first, at most HISTORY_YEARS. */
@@ -129,7 +158,12 @@ export function createSimulation(world: World): Simulation {
     supplyModifiers: new Map(),
     economy: createEconomy(n),
     hasBuildings: new Uint8Array(n),
+    satisfaction: new Float32Array(n),
+    unhappyQuarters: new Uint8Array(n),
+    moodSet: new Uint8Array(n),
+    seatCost: new Float32Array(n).fill(Infinity),
     chronicle: [],
+    migrations: { groups: 0, abroad: 0 },
     believers: 0,
     history: { population: [], believers: [] },
     gameOver: false,
@@ -143,7 +177,8 @@ export function createSimulation(world: World): Simulation {
   for (let i = 0; i < START_TRIBE_SIZE; i++) {
     addInhabitant(sim, start, tribe.id, 2 + Math.floor(sim.rng() * 36), 0.75 + 0.25 * sim.rng());
   }
-  record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`);
+  record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`, start);
+  updateSatisfaction(sim, cellOwners(sim));
   refreshSnapshot(sim);
   return sim;
 }
@@ -165,7 +200,12 @@ export function stepSimulation(sim: Simulation): void {
   runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
   if (sim.tick % REFRESH_TICKS === 0) {
     expandSettlements(sim);
-    splitCutOffLand(sim);
+    const owner = cellOwners(sim);
+    splitCutOffLand(sim, owner);
+    updateSatisfaction(sim, owner);
+    emigrate(sim, owner);
+    breakAway(sim, owner);
+    if (yearEnd) planSeats(sim, owner);
     refreshSnapshot(sim);
   }
   if (yearEnd) closeYear(sim);
@@ -284,8 +324,10 @@ function updateInhabitant(sim: Simulation, i: number): void {
     else ledger.grewDevout++;
   }
 
-  // Full birth rate up to half the hex's capacity, none once it is overfull.
-  if (age >= 16 && age <= 42 && rng() < 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1)) {
+  // Full birth rate up to half the hex's capacity, none once it is overfull;
+  // satisfied settlements have more children, unhappy ones fewer.
+  const birth = 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1) * birthFactor(sim.satisfaction[cell]);
+  if (age >= 16 && age <= 42 && rng() < birth) {
     const childFaith = clamp(faith * 0.9 + neighborFaith * 0.1 + (rng() - 0.5) * 0.1, 0, 1);
     if (childFaith >= BELIEVER_FAITH) ledger.born++;
     addInhabitant(sim, cell, civId, 0, childFaith);
@@ -325,11 +367,12 @@ export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
  */
 function expandSettlements(sim: Simulation): void {
   const { world } = sim;
+  // Overloaded hexes are few; find them once instead of once per people.
+  const overloaded: number[] = [];
+  for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > sim.cellCapacity[c]) overloaded.push(c);
+  if (overloaded.length === 0) return;
   for (const civ of livingCivilizations(sim)) {
-    const sources: number[] = [];
-    for (let c = 0; c < world.cellCount; c++) {
-      if (sim.cellCivPop[c * sim.civSlots + civ.id] > EXPANSION_GROUP && sim.cellPop[c] > sim.cellCapacity[c]) sources.push(c);
-    }
+    const sources = overloaded.filter((c) => sim.cellCivPop[c * sim.civSlots + civ.id] > EXPANSION_GROUP);
     if (sources.length === 0) continue;
     // Most overloaded first, so it gets the pick of the free land.
     sources.sort((a, b) => sim.cellPop[b] - sim.cellCapacity[b] - (sim.cellPop[a] - sim.cellCapacity[a]));
@@ -339,11 +382,13 @@ function expandSettlements(sim: Simulation): void {
       for (let d = 0; d < DIRECTION_COUNT; d++) {
         const target = world.neighbors[source * DIRECTION_COUNT + d];
         if (target < 0 || !isSettlementTarget(sim, target)) continue;
+        const step = stepCost(world, source, d);
         const score =
           capacityAfterRepair(sim, target) / GOOD_LAND_PEOPLE +
           terrainAppeal(world, civ.culture, target) +
-          RAW_MATERIAL_APPEAL * rawMaterials(sim, target) -
-          TRAVEL_EFFORT * stepCost(world, source, d);
+          RAW_MATERIAL_APPEAL * rawMaterials(sim, target) +
+          (SATISFACTION_APPEAL * connectionValue(sim.seatCost[source] + step)) / SATISFACTION_MAX -
+          TRAVEL_EFFORT * step;
         if (score > bestScore) {
           bestScore = score;
           best = d;
@@ -363,10 +408,9 @@ function expandSettlements(sim: Simulation): void {
  * soft cap MAX_CIVS (only new tribes respect it). Its people keep 60 % of their faith and no
  * longer worship the player (design doc, section 5).
  */
-function splitCutOffLand(sim: Simulation): void {
+function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
   const { world, pop } = sim;
   const n = world.cellCount;
-  const owner = currentOwners(sim);
   // Land is only cut off after a hex changed hands since the last snapshot
   // (`world.owner`); otherwise skip the search.
   let changed = false;
@@ -415,34 +459,29 @@ function splitCutOffLand(sim: Simulation): void {
         changeCiv(sim, i, civ.id);
         pop.faith[i] *= 0.6;
       }
-      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`);
+      for (const c of cells) owner[c] = civ.id;
+      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital);
     }
   }
 }
 
-/** Who holds each hex right now: the civilization with the most people there, 0 if empty. */
-function currentOwners(sim: Simulation): Uint8Array {
-  const owner = new Uint8Array(sim.world.cellCount);
-  for (let c = 0; c < owner.length; c++) {
-    let most = 0;
-    for (let id = 1; id < sim.civSlots; id++) {
-      const k = sim.cellCivPop[c * sim.civSlots + id];
-      if (k > most) {
-        most = k;
-        owner[c] = id;
-      }
-    }
-  }
-  return owner;
-}
-
-/** Moves `count` people of a civilization from one hex to another. */
-function moveGroup(sim: Simulation, from: number, to: number, civId: number, count: number): void {
+/**
+ * Moves `count` people of a civilization from one hex to another; settling
+ * with another people (`joinCiv`) makes them part of it, faith unchanged.
+ */
+function moveGroup(sim: Simulation, from: number, to: number, civId: number, count: number, joinCiv = civId): void {
   const { pop } = sim;
   let moved = 0;
   for (let i = 0; i < pop.end && moved < count; i++) {
     if (pop.alive[i] && pop.cell[i] === from && pop.civ[i] === civId) {
       moveInhabitant(sim, i, to);
+      if (joinCiv !== civId) {
+        if (pop.faith[i] >= BELIEVER_FAITH) {
+          sim.civs[civId]!.faithYear.emigrated++;
+          sim.civs[joinCiv]!.faithYear.immigrated++;
+        }
+        changeCiv(sim, i, joinCiv);
+      }
       moved++;
     }
   }
@@ -502,7 +541,7 @@ function refreshSnapshot(sim: Simulation): void {
     civ.averageFaith = civ.population > 0 ? civFaithSum[id] / civ.population : 0;
     sim.believers += believers[id];
     if (civ.population === 0) {
-      record(sim, `The ${civ.name} have vanished.`);
+      record(sim, `The ${civ.name} have vanished.`, civ.capital);
       sim.civs[id] = null;
       continue;
     }
@@ -511,7 +550,7 @@ function refreshSnapshot(sim: Simulation): void {
 
   if (sim.believers === 0) {
     sim.gameOver = true;
-    record(sim, 'Nobody prays to you anymore.');
+    record(sim, 'Nobody prays to you anymore.', -1);
   }
   sim.snapshotVersion++;
 }
@@ -533,15 +572,15 @@ function mostPopulousCell(sim: Simulation, civId: number, allowed: Uint8Array | 
 // ---------------------------------------------------------------------------
 // Civilizations
 
-/** Yearly: culture drift, breakaways and new tribes. */
+/** Yearly: culture drift, fading moods and new tribes (new seats of government: see stepSimulation). */
 function updateCivilizations(sim: Simulation): void {
   const target = new Float32Array(CULTURE_COUNT);
   for (const civ of livingCivilizations(sim)) {
+    pruneMoods(civ, sim.tick);
     const { cells, weights } = civCells(sim, civ.id);
     if (cells.length === 0) continue;
     landCulture(sim.world, cells, weights, target);
     driftCulture(civ.culture, target);
-    if (SECESSION_ENABLED) trySecession(sim, civ);
   }
   tryNewTribe(sim);
 }
@@ -559,59 +598,171 @@ function civCells(sim: Simulation, civId: number): { cells: number[]; weights: n
   return { cells, weights };
 }
 
+// ---------------------------------------------------------------------------
+// Satisfaction: migration and breakaway
+
 /**
- * Settlements cut off from the capital, or too far away from it, may break
- * away as a new civilization. They keep part of their faith in the player
- * but no longer worship them.
+ * Quarterly: an unhappy settlement sends a group of EXPANSION_GROUP people
+ * away, with a yearly chance that grows with its unhappiness (certain at
+ * -100), as long as some of its people stay. They go to the best of: a free
+ * neighboring hex (a road is built), or a settlement of any people reachable
+ * by road within MIGRATION_REACH that has room and is clearly more
+ * satisfied. Settling with another people makes them part of it; their faith
+ * stays as it is.
  */
-function trySecession(sim: Simulation, parent: Civilization): void {
-  const { world, rng, pop } = sim;
-  if (livingCivilizations(sim).length >= MAX_CIVS || parent.population < 60) return;
+function emigrate(sim: Simulation, owner: Uint8Array): void {
+  const { world, rng } = sim;
+  for (let c = 0; c < world.cellCount; c++) {
+    const mood = sim.satisfaction[c];
+    const civId = owner[c];
+    if (mood >= 0 || civId === 0 || sim.cellCivPop[c * sim.civSlots + civId] <= EXPANSION_GROUP) continue;
+    if (rng() >= -mood / SATISFACTION_MAX / 4) continue;
+    const target = migrationTarget(sim, owner, c, civId);
+    if (target < 0) continue;
+    const dir = neighborDirection(world, c, target);
+    if (sim.cellPop[target] === 0 && dir >= 0) addRoad(world, c, dir);
+    moveGroup(sim, c, target, civId, EXPANSION_GROUP, owner[target] || civId);
+    sim.migrations.groups++;
+    if (owner[target] && owner[target] !== civId) sim.migrations.abroad++;
+  }
+}
 
-  const own = (c: number) => sim.cellCivPop[c * sim.civSlots + parent.id] > 0;
-  const reach = distanceField(world, [parent.capital], SECESSION_REACH, own);
+/** Travel cost along roads from the source, reset for every search (see migrationTarget). */
+let roadCost = new Float32Array(0);
+const roadHeap = new MinHeap(64);
+const roadTouched: number[] = [];
 
-  // Group remote settlements into connected clusters, keep the largest.
-  const cluster = new Int32Array(world.cellCount).fill(-1);
-  let bestCluster = -1;
-  let bestPop = 0;
-  let clusterCount = 0;
-  const stack: number[] = [];
-  for (let start = 0; start < world.cellCount; start++) {
-    if (!own(start) || reach[start] >= 0 || cluster[start] >= 0) continue;
-    const id = clusterCount++;
-    let people = 0;
-    cluster[start] = id;
-    stack.push(start);
-    while (stack.length > 0) {
-      const c = stack.pop()!;
-      people += sim.cellCivPop[c * sim.civSlots + parent.id];
-      for (let d = 0; d < DIRECTION_COUNT; d++) {
-        const nb = world.neighbors[c * DIRECTION_COUNT + d];
-        if (nb < 0 || cluster[nb] >= 0 || !own(nb) || reach[nb] >= 0) continue;
-        cluster[nb] = id;
-        stack.push(nb);
+/** Where an unhappy settlement's group goes, or -1 if nowhere is clearly better. */
+function migrationTarget(sim: Simulation, owner: Uint8Array, source: number, civId: number): number {
+  const { world } = sim;
+  const mood = sim.satisfaction[source];
+  let best = -1;
+  let bestScore = -Infinity;
+
+  // Free land next door, valued by the connection it would have.
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = world.neighbors[source * DIRECTION_COUNT + d];
+    if (nb < 0 || !isSettlementTarget(sim, nb)) continue;
+    const step = stepCost(world, source, d);
+    const promise = connectionValue(sim.seatCost[source] + step);
+    if (promise < mood + MIGRATION_MIN_GAIN) continue;
+    const score = promise / SATISFACTION_MAX + capacityAfterRepair(sim, nb) / GOOD_LAND_PEOPLE - TRAVEL_EFFORT * step;
+    if (score > bestScore) {
+      bestScore = score;
+      best = nb;
+    }
+  }
+
+  // Settlements of any people along the roads.
+  if (roadCost.length !== world.cellCount) roadCost = new Float32Array(world.cellCount).fill(Infinity);
+  roadCost[source] = 0;
+  roadTouched.push(source);
+  roadHeap.push(source, 0);
+  while (roadHeap.size > 0) {
+    const c = roadHeap.pop();
+    const here = roadCost[c];
+    if (c !== source && sim.cellPop[c] > 0 && owner[c] !== 0) {
+      const room = sim.cellCapacity[c] - sim.cellPop[c];
+      if (room >= EXPANSION_GROUP && sim.satisfaction[c] >= mood + MIGRATION_MIN_GAIN) {
+        const score = sim.satisfaction[c] / SATISFACTION_MAX + room / GOOD_LAND_PEOPLE - TRAVEL_EFFORT * here;
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
       }
     }
-    if (people > bestPop) {
-      bestPop = people;
-      bestCluster = id;
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      if (!hasRoad(world, c, d)) continue;
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      if (nb < 0) continue;
+      const next = here + stepCost(world, c, d);
+      if (next < roadCost[nb] && next <= MIGRATION_REACH) {
+        if (roadCost[nb] === Infinity) roadTouched.push(nb);
+        roadCost[nb] = next;
+        roadHeap.push(nb, next);
+      }
     }
   }
-  if (bestCluster < 0 || bestPop < 25 || rng() >= SECESSION_CHANCE) return;
+  for (const c of roadTouched) roadCost[c] = Infinity;
+  roadTouched.length = 0;
+  return best;
+}
 
-  const inCluster = new Uint8Array(world.cellCount);
-  for (let c = 0; c < world.cellCount; c++) if (cluster[c] === bestCluster) inCluster[c] = 1;
-  const capital = mostPopulousCell(sim, parent.id, inCluster);
-  const civ = foundCivilization(sim, 'secession', capital, parent);
-  if (!civ) return;
-  for (let i = 0; i < pop.end; i++) {
-    if (pop.alive[i] && pop.civ[i] === parent.id && inCluster[pop.cell[i]]) {
-      changeCiv(sim, i, civ.id);
-      pop.faith[i] *= 0.6;
+function neighborDirection(world: World, cell: number, other: number): number {
+  for (let d = 0; d < DIRECTION_COUNT; d++) if (world.neighbors[cell * DIRECTION_COUNT + d] === other) return d;
+  return -1;
+}
+
+/**
+ * Quarterly: settlements below zero for UNHAPPY_QUARTERS in a row (never a
+ * capital) that are joined by roads form leagues; a league with at least
+ * LEAGUE_MIN_SETTLEMENTS settlements or LEAGUE_MIN_PEOPLE people breaks away
+ * as a new people. Its capital is its most populous seat of government, else
+ * its most populous settlement. Faith stays as it is; the new people starts
+ * proud of its revolution, the old one is shaken. Satisfied settlements stay
+ * with their people, and a lone unhappy settlement only loses people.
+ */
+function breakAway(sim: Simulation, owner: Uint8Array): void {
+  const { world, pop } = sim;
+  const n = world.cellCount;
+  const ready = UNHAPPY_QUARTERS;
+  // Settlements ready to break away (never a capital), by people.
+  const byCiv = new Map<number, number[]>();
+  for (let c = 0; c < n; c++) {
+    if (sim.unhappyQuarters[c] < ready || owner[c] === 0 || sim.civs[owner[c]]?.capital === c) continue;
+    const list = byCiv.get(owner[c]);
+    if (list) list.push(c);
+    else byCiv.set(owner[c], [c]);
+  }
+  if (byCiv.size === 0) return;
+  const league = new Int32Array(n).fill(-1);
+  for (const [parentId, restlessCells] of byCiv) {
+    const parent = sim.civs[parentId]!;
+    const restless = (c: number) => owner[c] === parentId && sim.unhappyQuarters[c] >= ready && c !== parent.capital;
+    const leagues: number[][] = [];
+    for (const start of restlessCells) {
+      if (league[start] >= 0) continue;
+      const cells = [start];
+      league[start] = leagues.length;
+      for (let k = 0; k < cells.length; k++) {
+        const c = cells[k];
+        for (let d = 0; d < DIRECTION_COUNT; d++) {
+          if (!hasRoad(world, c, d)) continue;
+          const nb = world.neighbors[c * DIRECTION_COUNT + d];
+          if (nb < 0 || league[nb] >= 0 || !restless(nb)) continue;
+          league[nb] = leagues.length;
+          cells.push(nb);
+        }
+      }
+      leagues.push(cells);
+    }
+    for (const cells of leagues) {
+      const people = cells.reduce((sum, c) => sum + sim.cellCivPop[c * sim.civSlots + parent.id], 0);
+      if (cells.length < LEAGUE_MIN_SETTLEMENTS && people < LEAGUE_MIN_PEOPLE) continue;
+      const inLeague = new Uint8Array(n);
+      for (const c of cells) inLeague[c] = 1;
+      let capital = -1;
+      for (const c of cells) {
+        if (hasSeat(sim.economy, c) && (capital < 0 || sim.cellPop[c] > sim.cellPop[capital])) capital = c;
+      }
+      if (capital < 0) capital = mostPopulousCell(sim, parent.id, inLeague);
+      const civ = foundCivilization(sim, 'revolution', capital, parent);
+      if (!civ) return; // all civilization ids in use; try again next quarter
+      for (let i = 0; i < pop.end; i++) {
+        if (!pop.alive[i] || pop.civ[i] !== parent.id || !inLeague[pop.cell[i]]) continue;
+        if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
+        changeCiv(sim, i, civ.id);
+      }
+      for (const c of cells) {
+        sim.unhappyQuarters[c] = 0;
+        owner[c] = civ.id;
+      }
+      addMood(civ, 'Won its revolution', MOOD_REVOLUTION_WON, sim.tick);
+      addMood(parent, 'Lost a revolution', MOOD_REVOLUTION_LOST, sim.tick);
+      const who = cells.length === 1 ? 'A settlement' : `${cells.length} settlements`;
+      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital);
     }
   }
-  record(sim, `The ${civ.name} in the ${biomeName(world, capital)} broke away from the ${parent.name}.`);
 }
 
 /** Occasionally a new people appears in empty, livable land far from everyone. */
@@ -640,7 +791,7 @@ function tryNewTribe(sim: Simulation): void {
   if (!civ) return;
   const size = 15 + Math.floor(rng() * 10);
   for (let i = 0; i < size; i++) addInhabitant(sim, best, civ.id, 2 + Math.floor(rng() * 36), rng() * 0.1);
-  record(sim, `A new people, the ${civ.name}, appeared in the ${biomeName(world, best)}.`);
+  record(sim, `A new people, the ${civ.name}, appeared in the ${biomeName(world, best)}.`, best);
 }
 
 /**
@@ -675,6 +826,7 @@ function foundCivilization(
     civ.culture[k] = parent ? (own + parent.culture[k]) / 2 : own;
   }
   if (parent) civ.parentName = parent.name;
+  addMood(civ, 'A new people', MOOD_NEW_PEOPLE, sim.tick);
   sim.civs[id] = civ;
   return civ;
 }
@@ -733,6 +885,6 @@ function biomeName(world: World, cell: number): string {
   return BIOMES[world.biome[cell]].name.toLowerCase();
 }
 
-function record(sim: Simulation, text: string): void {
-  sim.chronicle.push({ tick: sim.tick, text });
+function record(sim: Simulation, text: string, cell: number): void {
+  sim.chronicle.push({ tick: sim.tick, text, cell });
 }

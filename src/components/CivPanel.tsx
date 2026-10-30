@@ -97,7 +97,8 @@ function CivRow({ civ }: { civ: Civilization }) {
         <Text style={[styles.tag, civ.worshipsPlayer && styles.tagHighlight]}>{originText(civ)}</Text>
       </View>
       <Text style={styles.stats}>
-        {civ.population} people · {civ.territory} hexes · {cultureText(civ)}
+        {civ.population} people · {civ.territory} hexes · satisfaction {Math.round(civ.averageSatisfaction)} ·{' '}
+        {cultureText(civ)}
       </Text>
 
       <View style={styles.faithRow}>
@@ -128,6 +129,8 @@ function ledgerText(civ: Civilization): string {
     l.lostToNeighbors && `−${l.lostToNeighbors} swayed by doubting neighbors`,
     l.forgot && `−${l.forgot} forgot you`,
     l.brokeAway && `−${l.brokeAway} broke away`,
+    l.emigrated && `−${l.emigrated} moved to other peoples`,
+    l.immigrated && `+${l.immigrated} moved in from other peoples`,
   ].filter(Boolean);
   const sign = net > 0 ? '+' : net < 0 ? '−' : '±';
   return `Believers last year ${sign}${Math.abs(net)}${parts.length ? ': ' + parts.join(', ') : ''}`;
@@ -145,6 +148,7 @@ function faithReason(civ: Civilization): string {
 function originText(civ: Civilization): string {
   if (civ.worshipsPlayer) return 'Worships you';
   if (civ.origin === 'secession') return `Broke away from the ${civ.parentName}`;
+  if (civ.origin === 'revolution') return `Rose up against the ${civ.parentName}`;
   return 'Without a god';
 }
 
