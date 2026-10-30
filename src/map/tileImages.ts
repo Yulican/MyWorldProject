@@ -3,6 +3,13 @@ import type { TileRef } from './viewport';
 
 /** JS time spent rendering tiles before yielding, so view updates aren't held up. */
 const SLICE_MS = 8;
+/**
+ * New images per slice, and the pause after a slice that made some: each new
+ * image is uploaded to the GPU when first drawn, so a burst of them (a swipe
+ * into fresh map, a snapshot) would all land in one frame.
+ */
+const TILES_PER_SLICE = 3;
+const SLICE_PAUSE_MS = 16;
 /** Memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
@@ -118,7 +125,11 @@ export class TileImages {
     let rendered = 0;
     let wait = 0;
     // A further tile only if one more of the recent (worst) duration still fits the slice.
-    while (this.queue.length > 0 && (rendered === 0 || Date.now() - start + this.tileMs <= SLICE_MS)) {
+    while (
+      this.queue.length > 0 &&
+      rendered < TILES_PER_SLICE &&
+      (rendered === 0 || Date.now() - start + this.tileMs <= SLICE_MS)
+    ) {
       const r = this.queue[0];
       const k = key(r.chunk, r.tier);
       const old = this.entries.get(k);
@@ -143,7 +154,7 @@ export class TileImages {
     }
     this.evict();
     if (rendered > 0) this.onReady();
-    if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(0, wait));
+    if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(rendered > 0 ? SLICE_PAUSE_MS : 0, wait));
   };
 
   /** Frees the least recently drawn tiles while over budget. */
