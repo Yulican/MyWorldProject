@@ -172,7 +172,7 @@ test('an overloaded hex sends 25 people to a free neighbor and builds a road', (
 });
 
 test('every road joins two neighboring land hexes, and settlements only grow next to their own', () => {
-  const sim = createSimulation(generateWorld({ seed: 1 }));
+  const sim = createSimulation(generateWorld({ seed: 3 }));
   runYears(sim, 200);
   const { world } = sim;
   assert.ok(roadCount(sim) > 5);

@@ -34,6 +34,7 @@ import {
 } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
+import { buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -76,7 +77,9 @@ const NO_MODIFIERS: readonly SupplyModifier[] = [];
  * without buildings in `sim.baseSupply` for planning.
  */
 export function updateCellSupply(sim: Simulation, cell: number): void {
-  const other = sim.supplyModifiers.get(cell) ?? NO_MODIFIERS;
+  const given = sim.supplyModifiers.get(cell) ?? NO_MODIFIERS;
+  const provisions = provisionModifiers(sim.economy, cell);
+  const other = provisions.length > 0 ? [...given, ...provisions] : given;
   const base = supplyTerms(sim.world, cell, other);
   const buildings = buildingSupplyModifiers(sim.economy, cell);
   const terms = buildings.length > 0 ? supplyTerms(sim.world, cell, [...other, ...buildings]) : base;
@@ -229,8 +232,23 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
         }
       }
     }
-    if (supplyChanged) updateCellSupply(sim, c);
-    if (people > 0 && !busy && (planBuilding(sim, c) || planSatisfaction(sim, c))) supplyChanged = true;
+    if (supplyChanged) {
+      updateTradeBuildings(sim, c);
+      updateCellSupply(sim, c);
+    }
+    if (people > 0) {
+      if (updateTradeNeeds(sim, c, sim.cellAdults[c], yearEnd, STEPS_PER_YEAR)) {
+        updateCellSupply(sim, c);
+        supplyChanged = true;
+      }
+      economy.goal[stock + Material.Wood] = 0;
+      economy.goal[stock + Material.Stone] = 0;
+      if (!busy && (planBuilding(sim, c) || planSatisfaction(sim, c) || (yearEnd && planTrade(sim, c)))) supplyChanged = true;
+      if (sim.trade.merchants[c] > 0) {
+        sendMerchants(sim, c);
+        buildTradeRoad(sim, c);
+      }
+    }
     if (supplyChanged) changed = true;
   }
   return changed;
@@ -354,8 +372,32 @@ function planBuilding(sim: Simulation, cell: number): boolean {
 
   if (bestType < 0) return false;
   if (firstType >= 0) return startConstruction(sim, cell, firstSlot, firstType);
-  if (bestTime > 0) return false; // saving up
+  if (bestTime > 0) return saveUp(sim, cell, bestSlot, bestType);
   return startConstruction(sim, cell, bestSlot, bestType);
+}
+
+/** Notes what a hex saves up for, so merchants can bring the rest (trade.ts). Returns false: nothing started. */
+function saveUp(sim: Simulation, cell: number, slot: number, type: number): boolean {
+  const b = BUILDINGS[type];
+  const share = slot >= 0 ? REPAIR_SHARE : 1;
+  sim.economy.goal[cell * MATERIAL_COUNT + Material.Wood] = b.wood * share;
+  sim.economy.goal[cell * MATERIAL_COUNT + Material.Stone] = b.stone * share;
+  return false;
+}
+
+/** Yearly, when nothing else is to be built: a trade building (see wantedTradeBuilding) if affordable and kept up for good. */
+function planTrade(sim: Simulation, cell: number): boolean {
+  if (sim.cellPop[cell] < EXPANSION_GROUP) return false;
+  const type = wantedTradeBuilding(sim, cell, (good) => hasGood(sim, cell, good));
+  if (type < 0 || !buildingFits(sim, cell, type)) return false;
+  const { economy } = sim;
+  let free = false;
+  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (economy.state[s] === SlotState.Empty) free = true;
+  if (!free) return false;
+  const b = BUILDINGS[type];
+  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone) return false;
+  if (netWith(sim, cell, Material.Wood, type, -1) < 0 || netWith(sim, cell, Material.Stone, type, -1) < 0) return false;
+  return startConstruction(sim, cell, -1, type);
 }
 
 /**
@@ -370,6 +412,7 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
     if (economy.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[economy.type[s]];
     if (isLuxury(b.good)) economy.luxury[cell * LUXURY_COUNT + b.good - FIRST_LUXURY] += (b.amount * factor) / STEPS_PER_YEAR;
+    else if (b.good === Good.Grain || b.good === Good.Barrels) economy.provisions[cell * 2 + (b.good === Good.Grain ? 0 : 1)] += b.amount / STEPS_PER_YEAR;
   }
   if (!yearEnd) return;
   const need = sim.cellPop[cell] * LUXURY_PER_PERSON;
@@ -388,6 +431,7 @@ function buildingFits(sim: Simulation, cell: number, type: number): boolean {
   const b = BUILDINGS[type];
   if (b.deposit !== undefined && sim.world.deposit[cell] !== b.deposit) return false;
   if (b.waterSurplus !== undefined && sim.cellSupply[cell * SUPPLY_KINDS + 1] - sim.cellPop[cell] < b.waterSurplus) return false;
+  if (b.coast && !isCoast(sim.world, cell)) return false;
   return true;
 }
 
@@ -451,7 +495,8 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
     bestSlot = slot;
     bestType = type;
   }
-  if (bestType < 0 || bestTime > 0) return false; // nothing worth it, or saving up
+  if (bestType < 0) return false; // nothing worth it
+  if (bestTime > 0) return saveUp(sim, cell, bestSlot, bestType);
   return startConstruction(sim, cell, bestSlot, bestType);
 }
 

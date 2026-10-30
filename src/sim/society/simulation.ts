@@ -41,6 +41,7 @@ import {
   pruneMoods,
   updateSatisfaction,
 } from './satisfaction';
+import { advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
@@ -58,6 +59,8 @@ const REFRESH_TICKS = 13;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
 export const BELIEVER_FAITH = 0.5;
 const START_TRIBE_SIZE = 20;
+/** From this age inhabitants count as adults (they have children and earn money). */
+const ADULT_AGE = 16;
 /** Civilization slots per cell in `cellCivPop` at first (index 0 = nobody); doubles as needed. */
 const INITIAL_CIV_SLOTS = 8;
 export { EXPANSION_GROUP };
@@ -125,6 +128,10 @@ export type Simulation = {
   moodSet: Uint8Array;
   /** Travel cost to the nearest seat of government of the hex's people, Infinity if none in reach. */
   seatCost: Float32Array;
+  /** Merchants on their way and what settlements ask for and spare (see trade.ts). */
+  trade: Trade;
+  /** Inhabitants of 16 and older per hex, counted at every refresh (they earn money). */
+  cellAdults: Int32Array;
   /** Notable events, oldest first. */
   chronicle: ChronicleEntry[];
   /** Groups that left unhappy settlements so far, and how many of them joined another people. */
@@ -162,6 +169,8 @@ export function createSimulation(world: World): Simulation {
     unhappyQuarters: new Uint8Array(n),
     moodSet: new Uint8Array(n),
     seatCost: new Float32Array(n).fill(Infinity),
+    trade: createTrade(world.seed, n),
+    cellAdults: new Int32Array(n),
     chronicle: [],
     migrations: { groups: 0, abroad: 0 },
     believers: 0,
@@ -197,12 +206,14 @@ export function stepSimulation(sim: Simulation): void {
   // Every hex's economy runs once a quarter, a 13th of the hexes each week;
   // upkeep is due in the year's last quarter.
   const week = sim.tick - 1;
+  advanceTrips(sim, (cell) => updateCellSupply(sim, cell));
   runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
   if (sim.tick % REFRESH_TICKS === 0) {
     expandSettlements(sim);
     const owner = cellOwners(sim);
     splitCutOffLand(sim, owner);
     updateSatisfaction(sim, owner);
+    sumCivWants(sim, owner);
     emigrate(sim, owner);
     breakAway(sim, owner);
     if (yearEnd) planSeats(sim, owner);
@@ -500,8 +511,10 @@ function refreshSnapshot(sim: Simulation): void {
   const faithSum = new Float64Array(world.cellCount);
   const believers = new Int32Array(sim.civSlots);
   const civFaithSum = new Float64Array(sim.civSlots);
+  sim.cellAdults.fill(0);
   for (let i = 0; i < pop.end; i++) {
     if (!pop.alive[i]) continue;
+    if (pop.age[i] >= ADULT_AGE) sim.cellAdults[pop.cell[i]]++;
     faithSum[pop.cell[i]] += pop.faith[i];
     civFaithSum[pop.civ[i]] += pop.faith[i];
     if (pop.faith[i] >= BELIEVER_FAITH) believers[pop.civ[i]]++;

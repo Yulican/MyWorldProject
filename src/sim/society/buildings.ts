@@ -14,6 +14,9 @@ import { SUPPLY_KINDS, type SupplyModifier } from './supply';
  * (SupplyKind), wood and stone its yearly harvest. Comfort serves `amount`
  * people (satisfaction.ts), Seat makes the hex a seat of government, and
  * the luxury goods are harvested from a special deposit (units per year).
+ * Merchants and Harbor give a settlement merchants (trade.ts); a harbor also
+ * opens the water next to it for trade. Grain and water barrels turn food or
+ * water the hex doesn't need into goods to trade (units per year).
  */
 export const Good = {
   Food: 0,
@@ -29,8 +32,12 @@ export const Good = {
   Gold: 10,
   Marble: 11,
   Horses: 12,
+  Merchants: 13,
+  Harbor: 14,
+  Grain: 15,
+  Barrels: 16,
 } as const;
-export const GOOD_COUNT = 13;
+export const GOOD_COUNT = 17;
 export const GOOD_NAMES = [
   'Food',
   'Water',
@@ -45,6 +52,10 @@ export const GOOD_NAMES = [
   'Gold',
   'Marble',
   'Horses',
+  'Merchants',
+  'Harbor',
+  'Grain',
+  'Water barrels',
 ] as const;
 /** Luxury goods are Good.Salt .. Good.Horses; `Economy.luxury` holds them in this order. */
 export const FIRST_LUXURY = Good.Salt;
@@ -75,6 +86,10 @@ export type BuildingType = {
   deposit?: number;
   /** Only where the hex has this much more water than its people need. */
   waterSurplus?: number;
+  /** Takes `amount` of this supply (SupplyKind) away from the hex to make its goods. */
+  converts?: number;
+  /** Only on a hex next to the sea or a lake. */
+  coast?: boolean;
 };
 
 /**
@@ -104,6 +119,12 @@ export const BUILDINGS: readonly BuildingType[] = [
   { name: 'Gold mine', good: Good.Gold, amount: 10, percent: 0, wood: 15, stone: 10, upkeepWood: 1, upkeepStone: 0, years: 2, deposit: Deposit.Gold },
   { name: 'Marble quarry', good: Good.Marble, amount: 10, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Marble },
   { name: 'Horse ranch', good: Good.Horses, amount: 10, percent: 0, wood: 20, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.WildHorses },
+  // Trade (trade.ts): merchants, a harbor with merchants of its own, and
+  // food or water the hex can spare turned into goods.
+  { name: 'Trade center', good: Good.Merchants, amount: 2, percent: 0, wood: 25, stone: 15, upkeepWood: 1, upkeepStone: 1, years: 2 },
+  { name: 'Harbor', good: Good.Harbor, amount: 2, percent: 0, wood: 30, stone: 10, upkeepWood: 1, upkeepStone: 1, years: 2, coast: true },
+  { name: 'Granary', good: Good.Grain, amount: 25, percent: 0, wood: 15, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, converts: 0 },
+  { name: 'Water carriers', good: Good.Barrels, amount: 25, percent: 0, wood: 10, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, converts: 1 },
 ];
 
 /** Building slots per hex (later changed by modifiers). */
@@ -131,6 +152,12 @@ export type Economy = {
   unpaid: Uint8Array;
   /** Luxury goods in stock: cell * LUXURY_COUNT + (good - FIRST_LUXURY). Stays on the ground like `stock`. */
   luxury: Float32Array;
+  /** Money in stock (trade.ts). */
+  money: Float32Array;
+  /** Grain and water barrels in stock: cell * 2 + (0 grain, 1 water). They feed and water the hex's people. */
+  provisions: Float32Array;
+  /** Wood and stone the hex saves up for (cell * MATERIAL_COUNT + material), 0 = nothing; buyers ask for the rest. */
+  goal: Float32Array;
   /** Bit per luxury good whose yearly need the stock covered at the last year's end. */
   luxuryCovered: Uint8Array;
 };
@@ -143,6 +170,9 @@ export function createEconomy(cellCount: number): Economy {
     work: new Float32Array(cellCount * SLOTS),
     unpaid: new Uint8Array(cellCount * SLOTS),
     luxury: new Float32Array(cellCount * LUXURY_COUNT),
+    money: new Float32Array(cellCount),
+    provisions: new Float32Array(cellCount * 2),
+    goal: new Float32Array(cellCount * MATERIAL_COUNT),
     luxuryCovered: new Uint8Array(cellCount),
   };
 }
@@ -166,10 +196,13 @@ export function withBuildings(eco: Economy, cell: number, good: number, base: nu
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
+    if (b.converts === good) add -= b.amount;
     if (b.good !== good) continue;
     add += b.amount;
     mul *= 1 + b.percent;
   }
+  if (extraA >= 0 && BUILDINGS[extraA].converts === good) add -= BUILDINGS[extraA].amount;
+  if (extraB >= 0 && BUILDINGS[extraB].converts === good) add -= BUILDINGS[extraB].amount;
   if (extraA >= 0 && BUILDINGS[extraA].good === good) {
     add += BUILDINGS[extraA].amount;
     mul *= 1 + BUILDINGS[extraA].percent;
@@ -187,6 +220,7 @@ export function buildingSupplyModifiers(eco: Economy, cell: number): SupplyModif
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
+    if (b.converts !== undefined) mods.push({ kind: b.converts, label: b.name, amount: -b.amount });
     if (b.good >= SUPPLY_KINDS) continue;
     if (b.amount) mods.push({ kind: b.good, label: b.name, amount: b.amount });
     if (b.percent) mods.push({ kind: b.good, label: `${b.name} +${Math.round(b.percent * 100)} %`, amount: b.percent, percent: true });
