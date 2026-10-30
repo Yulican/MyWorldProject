@@ -5,14 +5,16 @@
 /**
  * Scenarios: the same swipes over young worlds (a single tribe), over worlds
  * simulated for 300 years first (many peoples, territories, roads and
- * cities), and over such worlds where every settled hex is a big city and
- * free land next to them has ruins (the most icons the map can show, see
- * fillBuildings.ts).
+ * cities), over such worlds where every settled hex is a big city and free
+ * land next to them has ruins (the most icons the map can show, see
+ * fillBuildings.ts), and over such worlds where every settlement but the
+ * capitals rose up (the most peoples and borders, see stirUnrest.ts).
  */
-export const SCENARIOS: Record<'young' | 'aged' | 'cities', { years: number; buildings?: boolean }> = {
+export const SCENARIOS: Record<'young' | 'aged' | 'cities' | 'unrest', { years: number; buildings?: boolean; unrest?: boolean }> = {
   young: { years: 0 },
   aged: { years: 300 },
   cities: { years: 300, buildings: true },
+  unrest: { years: 300, unrest: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 

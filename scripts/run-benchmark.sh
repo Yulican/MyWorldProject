@@ -2,7 +2,7 @@
 # Runs the map benchmark on a connected Android device or emulator and fails
 # unless every swipe passes (rules in src/bench/benchmark.ts).
 #
-# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities]
+# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest]
 # The app is opened with the link myworld://benchmark?scenario=..., which
 # starts the benchmark; it logs MYWORLD_BENCH_* lines.
 set -euo pipefail
@@ -62,6 +62,7 @@ const scenarioText = {
   young: 'young worlds',
   aged: 'worlds after 300 simulated years',
   cities: 'worlds after 300 years, every settlement a big city, ruins around them',
+  unrest: 'worlds after 300 years, every settlement but the capitals rose up',
 }[scenario] ?? scenario;
 const summary = JSON.parse(fs.readFileSync(`${out}/summary.json`, 'utf8'));
 const swipes = fs.readFileSync(`${out}/swipes.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));

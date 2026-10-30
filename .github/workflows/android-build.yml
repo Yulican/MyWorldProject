@@ -159,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [young, aged, cities]
+        scenario: [young, aged, cities, unrest]
     steps:
       - uses: actions/checkout@v5
 
@@ -245,7 +245,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           NOTES=""
-          for scenario in young aged cities; do
+          for scenario in young aged cities unrest; do
             f="results/benchmark-results-$scenario/summary.json"
             if [ -f "$f" ]; then
               RESULT=$(node -p "const s=require('./$f'); (s.pass ? 'PASSED' : 'FAILED') + ' (failed swipes: ' + s.failed + '/' + s.swipes + ')'")

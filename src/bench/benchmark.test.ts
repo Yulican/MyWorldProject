@@ -41,6 +41,7 @@ test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark'), 'young');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=aged'), 'aged');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=cities'), 'cities');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=unrest'), 'unrest');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });
 
@@ -62,4 +63,19 @@ test('the cities scenario fills every settled hex with buildings and puts ruins 
   }
   assert.ok(cities > 0 && ruins > 0);
   assert.equal(SCENARIOS.cities.buildings, true);
+});
+
+test('the unrest scenario makes every settlement but the capitals break away', async () => {
+  const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { stirUnrest } = await import('./stirUnrest');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  stirUnrest(sim);
+  const rebels = livingCivilizations(sim).filter((c) => c.origin === 'revolution');
+  assert.ok(rebels.length > 0);
+  // Most of the land changed hands: the rebels hold more hexes than the old peoples.
+  const held = (civs: typeof rebels) => civs.reduce((n, c) => n + c.territory, 0);
+  const old = livingCivilizations(sim).filter((c) => c.origin !== 'revolution');
+  assert.ok(held(rebels) > held(old), `rebels ${held(rebels)} hexes, others ${held(old)}`);
+  assert.equal(SCENARIOS.unrest.unrest, true);
 });
