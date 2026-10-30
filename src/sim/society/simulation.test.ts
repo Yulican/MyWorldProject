@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hexDistance } from '../hex';
+import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
+import { ROAD_TRAVEL_FACTOR, addRoad, hasRoad, travelCostField } from '../world/roads';
 import { MAX_CIVS } from './civilizations';
 import {
   BELIEVER_FAITH,
+  EXPANSION_GROUP,
   TICKS_PER_YEAR,
   createSimulation,
   livingCivilizations,
   stepSimulation,
   type Simulation,
 } from './simulation';
+import { SUPPLY_KINDS, SupplyKind } from './supply';
 
 function runYears(sim: Simulation, years: number): void {
   for (let t = 0; t < years * TICKS_PER_YEAR; t++) stepSimulation(sim);
@@ -119,4 +122,82 @@ test('100 years of a grown world simulate fast enough', () => {
   const ms = performance.now() - t0;
   // Hermes on a phone is about 13x slower than Node; this keeps headroom.
   assert.ok(ms < 1500, `100 years with ${sim.pop.count} inhabitants took ${ms.toFixed(0)} ms`);
+});
+
+function roadCount(sim: Simulation): number {
+  let ends = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    for (let d = 0; d < DIRECTION_COUNT; d++) if (hasRoad(sim.world, c, d)) ends++;
+  }
+  return ends / 2;
+}
+
+test('a hex supports as many people as its scarcest supply allows', () => {
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  const { world } = sim;
+  let riverWater = 0;
+  let rivers = 0;
+  for (let c = 0; c < world.cellCount; c++) {
+    const s = sim.cellSupply.subarray(c * SUPPLY_KINDS, (c + 1) * SUPPLY_KINDS);
+    assert.equal(sim.cellCapacity[c], Math.min(s[0], s[1], s[2]));
+    if (isWaterBiome(world.biome[c])) assert.equal(sim.cellCapacity[c], 0);
+    if (world.riverFlow[c] > 0) {
+      riverWater += s[SupplyKind.Water];
+      rivers++;
+    }
+  }
+  // Rivers bring fresh water on top of the rain.
+  assert.ok(rivers > 0 && riverWater / rivers >= 70);
+});
+
+test('an overloaded hex sends 25 people to a free neighbor and builds a road', () => {
+  const sim = createSimulation(generateWorld({ seed: 42 }));
+  const { world } = sim;
+  let roads = 0;
+  for (let t = 0; t < 200 * TICKS_PER_YEAR && roads === 0; t++) {
+    const before = Int32Array.from(sim.cellPop);
+    stepSimulation(sim);
+    roads = roadCount(sim);
+    if (roads === 0) continue;
+    // The new hex was empty and now holds exactly the group; a road joins it to its neighbor.
+    const fresh = [...sim.cellPop.keys()].filter((c) => before[c] === 0 && sim.cellPop[c] > 0);
+    assert.equal(fresh.length, 1);
+    const target = fresh[0];
+    assert.equal(sim.cellPop[target], EXPANSION_GROUP);
+    const linked = [0, 1, 2, 3, 4, 5].filter((d) => hasRoad(world, target, d));
+    assert.equal(linked.length, 1);
+    const source = world.neighbors[target * DIRECTION_COUNT + linked[0]];
+    assert.ok(before[source] > sim.cellCapacity[source], 'the source hex was overloaded');
+    assert.ok(sim.cellPop[source] > 0, 'some people stay behind');
+  }
+  assert.equal(roads, 1, 'the first expansion happened within 200 years');
+});
+
+test('every road joins two neighboring land hexes, and settlements only grow next to their own', () => {
+  const sim = createSimulation(generateWorld({ seed: 1 }));
+  runYears(sim, 200);
+  const { world } = sim;
+  assert.ok(roadCount(sim) > 5);
+  for (let c = 0; c < world.cellCount; c++) {
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      if (!hasRoad(world, c, d)) continue;
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      assert.ok(nb >= 0 && !isWaterBiome(world.biome[c]) && !isWaterBiome(world.biome[nb]));
+      assert.ok(hasRoad(world, nb, (d + 3) % DIRECTION_COUNT), 'roads are set on both ends');
+    }
+  }
+});
+
+test('roads make travel cheaper', () => {
+  const world = generateWorld({ seed: 9 });
+  const from = world.startCell;
+  const d = [0, 1, 2, 3, 4, 5].find((k) => {
+    const nb = world.neighbors[from * DIRECTION_COUNT + k];
+    return nb >= 0 && !isWaterBiome(world.biome[nb]);
+  })!;
+  const to = world.neighbors[from * DIRECTION_COUNT + d];
+  const before = travelCostField(world, from, 100)[to];
+  addRoad(world, from, d);
+  const after = travelCostField(world, from, 100)[to];
+  assert.ok(Math.abs(after - before * ROAD_TRAVEL_FACTOR) < 1e-6, `${before} -> ${after}`);
 });

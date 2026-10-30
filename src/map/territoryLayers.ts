@@ -17,6 +17,7 @@ import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './wor
  * stay readable when zoomed out.
  */
 const OVERVIEW_PX_PER_HEX = 12;
+const ROAD_COLOR = 'rgba(92,65,40,0.9)';
 
 /** Corner pair (unit offsets) of the hex edge facing each direction. */
 const EDGE_CORNERS = DIRECTION_OFFSETS.map(([dx, dy]) => {
@@ -71,17 +72,24 @@ export function renderTerritoryTile(
   pxPerUnit: number,
   colorOf: (civ: number) => string,
 ): SkImage | null {
-  const settled = tileCells(world, chunk, chunkCols).some(({ cells }) => cells.some((c) => world.owner[c] !== 0));
+  const settled = tileCells(world, chunk, chunkCols).some(({ cells }) =>
+    cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0),
+  );
   if (!settled) return null;
   return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf)]);
 }
 
-/** A tint and a border per civilization and a dot per settlement, sized by population. */
+/**
+ * A tint and a border per civilization, roads, and a dot per settlement
+ * sized by population. Each hex draws its half of a road (center to edge),
+ * so roads join across tiles and the map wrap.
+ */
 function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string) {
   const tints = new Map<number, SkPathBuilder>();
   const borders = new Map<number, SkPathBuilder>();
   const dots = new Map<number, SkPathBuilder>();
   const rim = Skia.PathBuilder.Make();
+  const roads = Skia.PathBuilder.Make();
   const pathFor = (paths: Map<number, SkPathBuilder>, civ: number) => {
     let path = paths.get(civ);
     if (!path) {
@@ -94,11 +102,19 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   for (let i = 0; i < cells.length; i++) {
     const c = cells[i];
     const owner = world.owner[c];
-    if (!owner) continue;
+    const roadBits = world.roads[c];
+    if (!owner && !roadBits) continue;
     const col = c % world.width;
     const row = (c - col) / world.width;
     const x = hexCenterX(col) * HEX_PX;
     const y = hexCenterY(col, row) * HEX_PX;
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      if (!(roadBits & (1 << d))) continue;
+      const [dx, dy] = DIRECTION_OFFSETS[d];
+      roads.moveTo(x, y);
+      roads.lineTo(x + dx * HEX_PX * 0.5, y + dy * HEX_PX * 0.5);
+    }
+    if (!owner) continue;
 
     addHex(pathFor(tints, owner), x, y, HEX_PX + 0.5);
 
@@ -121,6 +137,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   }
 
   for (const [civ, path] of tints) canvas.drawPath(path.detach(), fillPaint(withAlpha(colorOf(civ), 0.28)));
+  canvas.drawPath(roads.detach(), strokePaint(ROAD_COLOR, HEX_PX * 0.1));
   for (const [civ, path] of borders) canvas.drawPath(path.detach(), strokePaint(colorOf(civ), HEX_PX * 0.12));
   canvas.drawPath(rim.detach(), fillPaint('#1b1b1b'));
   for (const [civ, path] of dots) canvas.drawPath(path.detach(), fillPaint(colorOf(civ)));

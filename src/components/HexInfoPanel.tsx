@@ -5,6 +5,7 @@ import {
   DEPOSITS,
   RESOURCE_COUNT,
   RESOURCE_NAMES,
+  SUPPLY_NAMES,
   elevationMeters,
   hasFreshWater,
   type World,
@@ -16,6 +17,8 @@ type Props = {
   cell: number;
   /** Name of the civilization living in the hex, if any. */
   civName?: string | null;
+  /** Food, water and space the hex provides, in people (see SUPPLY_NAMES); null for water. */
+  supply?: readonly number[] | null;
   onClose: () => void;
 };
 
@@ -23,7 +26,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -38,8 +41,12 @@ export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
     river > 0 ? riverSize(river) : null,
   ].filter(Boolean);
   const people = Math.round(world.population[cell]);
+  const supports = supply ? Math.floor(Math.min(...supply)) : 0;
+  const scarcest = supply ? SUPPLY_NAMES[supply.indexOf(Math.min(...supply))] : null;
+  let roads = 0;
+  for (let d = 0; d < 6; d++) if (world.roads[cell] & (1 << d)) roads++;
   const highlights = [
-    civName ? `${civName} · ${people} people · ${percent(world.faith[cell])} faith` : null,
+    civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
   ].filter(Boolean);
@@ -72,7 +79,10 @@ export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
             <Row label="Fresh water" value={river > 0 || hasFreshWater(world, cell) ? 'Yes' : 'No'} />
           )}
           <Row label="Danger" value={percent(world.danger[cell])} />
-          <Row label="Travel cost" value={`×${world.moveCost[cell]}`} />
+          <Row
+            label="Travel cost"
+            value={`×${world.moveCost[cell]}${roads > 0 ? ` · ${roads} road${roads > 1 ? 's' : ''} (half cost)` : ''}`}
+          />
           {deposit && <Row label="Deposit" value={`${deposit.name} (${deposit.category})`} />}
 
           <Text style={styles.section}>Resources</Text>
@@ -84,6 +94,19 @@ export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
               capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
             />
           ))}
+
+          {supply && (
+            <>
+              <Text style={styles.section}>Supports {supports} people</Text>
+              {SUPPLY_NAMES.map((name, k) => (
+                <Row
+                  key={name}
+                  label={name}
+                  value={`${Math.floor(supply[k])} people${name === scarcest ? ' · scarcest' : ''}`}
+                />
+              ))}
+            </>
+          )}
 
           <Text style={styles.section}>People</Text>
           <Row label="Civilization" value={civName ?? 'Nobody'} />

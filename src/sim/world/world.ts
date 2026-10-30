@@ -46,6 +46,11 @@ export type World = HexGrid & {
   population: Float32Array;
   /** Average faith in the player 0..1. */
   faith: Float32Array;
+  /**
+   * Roads, built when people expand to a new hex: bit d set = a road leads to
+   * the neighbor in direction d (set on both ends). See roads.ts.
+   */
+  roads: Uint8Array;
 
   /** Where the player's starting tribe settles. */
   startCell: number;
@@ -76,6 +81,7 @@ export function allocateWorld(width: number, height: number, seed: number, shape
     owner: new Uint8Array(n),
     population: new Float32Array(n),
     faith: new Float32Array(n),
+    roads: new Uint8Array(n),
     startCell: -1,
   };
 }
