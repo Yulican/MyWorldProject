@@ -136,8 +136,6 @@ export function WorldScreen() {
           <ChronicleDialog
             entry={entry}
             more={sim.chronicle.length - chronicleSeen - 1}
-            resumeSpeed={resumeSpeed}
-            onResumeSpeed={setResumeSpeed}
             onGoTo={goTo}
             onOk={acknowledgeChronicle}
           />
@@ -154,7 +152,12 @@ export function WorldScreen() {
       </View>
 
       <View style={styles.bottomBar}>
-        <TimeControls speed={speed} onChange={setSpeed} disabled={!sim || sim.gameOver || entry !== undefined} />
+        {/* While a chronicle entry is open, the controls choose the speed the game continues at. */}
+        <TimeControls
+          speed={entry ? resumeSpeed : speed}
+          onChange={entry ? setResumeSpeed : setSpeed}
+          disabled={!sim || sim.gameOver}
+        />
         <Pressable
           style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
           onPress={() => setPanel(panel.kind === 'peoples' ? { kind: 'none' } : { kind: 'peoples' })}
