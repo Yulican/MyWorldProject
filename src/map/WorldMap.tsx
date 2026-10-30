@@ -150,6 +150,9 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
 
   // Benchmark swipes: frames are counted on the UI thread while one runs.
   const benchSwipe = useSharedValue({ active: false, frames: 0, timeMs: 0, worstMs: 0 });
+  // Times the swipe on its own: an animation of an offset that doesn't change
+  // (dx = 0 for a north swipe) would end at once.
+  const benchClock = useSharedValue(0);
   const swipeDone = useRef<(stats: SwipeStats) => void>(() => {});
   const onSwipeDone = useCallback((stats: SwipeStats) => swipeDone.current(stats), []);
   useFrameCallback((frame) => {
@@ -185,7 +188,9 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
             // which would otherwise end the swipe at once.
             const timing = { duration: durationMs, easing: Easing.linear, reduceMotion: ReduceMotion.Never };
             glideY.value = withTiming(glideY.value + dy, timing);
-            glideX.value = withTiming(glideX.value + dx, timing, () => {
+            glideX.value = withTiming(glideX.value + dx, timing);
+            benchClock.value = 0;
+            benchClock.value = withTiming(1, timing, () => {
               const b = benchSwipe.value;
               benchSwipe.value = { ...b, active: false };
               scheduleOnRN(onSwipeDone, { frames: b.frames, timeMs: b.timeMs, worstMs: b.worstMs });
