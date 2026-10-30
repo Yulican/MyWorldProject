@@ -40,9 +40,9 @@ const SEA_STEP = 1;
 /** A sea route crosses at most this many water hexes. */
 const MAX_SEA_HEXES = 12;
 /** Chance per hex entered to lose LOSS_SHARE of the load: on land, on water, plus the hex's danger times LOSS_DANGER. */
-const LOSS_LAND = 0.005;
-const LOSS_WATER = 0.015;
-const LOSS_DANGER = 0.01;
+const LOSS_LAND = 0.02;
+const LOSS_WATER = 0.06;
+const LOSS_DANGER = 0.04;
 const LOSS_SHARE = 0.25;
 /** A trip must be worth this much money (goods both ways) to go. */
 const MIN_TRIP_VALUE = 5;
@@ -58,8 +58,6 @@ const ROAD_WOOD = 3;
 const ROAD_STONE = 3;
 /** A road is built when it makes the way to the last partner this much shorter. */
 const ROAD_SAVING = 0.25;
-/** A harbor is built when it makes the best deal this much better. */
-const HARBOR_GAIN = 0.25;
 /** A trade center needs a trip worth this much (money) in reach. */
 const CENTER_MIN_VALUE = 15;
 
@@ -639,9 +637,10 @@ export function isCoast(world: World, cell: number): boolean {
 
 /**
  * Which trade building a settlement should put up, if any (a type id, -1 =
- * none): a trade center when a trip worth CENTER_MIN_VALUE is in reach; a
- * harbor when harbors here and at every coastal settlement of its people
- * would make its best trip HARBOR_GAIN better; a granary or water carriers
+ * none): the workshop of its special deposit's luxury good (the whole
+ * people needs it); a trade center when a trip worth CENTER_MIN_VALUE is in
+ * reach; a harbor when harbors here and at every coastal settlement of its
+ * people would make its best trip better (a shorter way over water); a granary or water carriers
  * when the hex has 25 more food or water than it can use and its people ask
  * for more of that good than they spare and make.
  */
@@ -650,6 +649,8 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
   const owner = world.owner;
   const civ = owner[cell];
   if (!civ) return -1;
+  const workshop = WORKSHOP_OF[world.deposit[cell]];
+  if (workshop !== undefined && !has(BUILDINGS[workshop].good)) return workshop;
   if (!has(Good.Merchants)) {
     const target = bestTrip(sim, owner, cell, (c) => trade.harbor[c] === 1, tripOut);
     resetWays();
@@ -659,7 +660,7 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
     const now = tradeRate(sim, cell, (c) => trade.harbor[c] === 1);
     const coast = (c: number) => trade.harbor[c] === 1 || c === cell || (owner[c] === civ && sim.cellPop[c] > 0 && isCoast(world, c));
     const withHarbors = tradeRate(sim, cell, coast);
-    if (withHarbors > 0 && withHarbors >= now * (1 + HARBOR_GAIN) && withHarbors * 2 >= MIN_TRIP_VALUE) return TYPE_OF[Good.Harbor];
+    if (withHarbors > now) return TYPE_OF[Good.Harbor];
   }
   const capacity = sim.cellCapacity[cell];
   for (let k = 0; k < 2; k++) {
@@ -675,6 +676,11 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
   return -1;
 }
 
+/** The luxury workshop type per special deposit id. */
+const WORKSHOP_OF: Record<number, number> = {};
+BUILDINGS.forEach((b, i) => {
+  if (b.deposit !== undefined) WORKSHOP_OF[b.deposit] = i;
+});
 const TYPE_OF: Record<number, number> = {};
 BUILDINGS.forEach((b, i) => {
   if (b.good === Good.Merchants || b.good === Good.Harbor || b.good === Good.Grain || b.good === Good.Barrels) TYPE_OF[b.good] = i;

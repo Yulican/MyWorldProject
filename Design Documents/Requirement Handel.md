@@ -1,6 +1,6 @@
 # Requirement: Interner Handel
 
-Stand: Entwurf zur Freigabe. Grundlage: Diskussion mit dem Nutzer; baut auf
+Stand: vom Nutzer freigegeben, Entscheidungen aus Abschnitt 10 eingearbeitet. Grundlage: Diskussion mit dem Nutzer; baut auf
 dem Gebäude-Feature und der Zufriedenheit (`Requirement Zufriedenheit.md`)
 auf. Zahlen sind Startwerte aus dem Prototyp (Abschnitt 9).
 
@@ -100,8 +100,8 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
 ## 7. Verlust
 
 - Für jedes durchquerte Feld besteht eine Chance, ein Viertel der Ladung
-  zu verlieren: 0,5 % an Land, 1,5 % auf Wasser, jeweils plus 1 % ×
-  Gefahr des Felds.
+  zu verlieren: 2 % an Land, 6 % auf Wasser, jeweils plus 4 % × Gefahr
+  des Felds (vom Nutzer vervierfacht, damit Verluste spürbar sind).
 - Die Würfe sind deterministisch (eigener Zufallsgenerator „trade“).
 
 ## 8. Bauentscheidung
@@ -109,10 +109,13 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
 - Handelsgebäude kommen nach Wachstum und Zufriedenheit. Einmal im Jahr,
   wenn eine Siedlung (mindestens 25 Einwohner) nichts anderes baut, prüft
   sie:
+  - **Abbaugebäude für Luxusgüter:** immer, wenn das Feld ein passendes
+    Vorkommen hat. Das ganze Reich braucht die Güter.
   - **Handelszentrum:** wenn eine Fahrt mit mindestens 15 Geld Wert
     erreichbar ist.
   - **Hafen:** wenn Häfen hier und an allen Küstensiedlungen des Volks die
-    beste Fahrt um mindestens 25 % verbessern würden.
+    beste Fahrt verbessern würden, also schon, wenn der Weg übers Wasser
+    kürzer ist.
   - **Kornspeicher, Wasserträger:** siehe Abschnitt 3.
 - Gebaut wird nur, wenn die Kosten im Vorrat liegen und die Ernte den
   Unterhalt dauerhaft trägt.
@@ -121,42 +124,34 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
 
 | | ohne Handel | mit Handel |
 |---|---|---|
-| Menschen | 57.111 | 65.321 (+14 %) |
-| besiedelte Felder | 784 | 878 (+12 %) |
-| Rechenzeit | 15,5 s | 19,3 s (+24 %) |
+| Menschen | 57.111 | 63.358 (+11 %) |
+| besiedelte Felder | 784 | 860 (+10 %) |
+| Rechenzeit | 15,5 s | 23,4 s (+51 %) |
 
-- **Fahrten:** 8.257, also etwa 2,3 pro Welt und Jahr.
-- **Straßenstücke:** 210, etwa 17 pro Welt.
-- **Geliefert:** Getreide 44.600, Wasser 43.400, Holz 3.400, Stein 760,
-  Salz 300; andere Luxusgüter 0.
-- **Verloren:** etwa 0,4 % der Ware.
-- **Gebäude:** 170 Handelszentren (19 % der Siedlungen), 39 Kornspeicher,
-  61 Wasserträger, 0 Häfen. Eine frühere Fassung ohne Grenze für
-  Kornspeicher und Wasserträger baute 352 Wasserträger.
-- **Geld:** liegt fast ungenutzt im Vorrat (333.000, etwa 380 je
+- **Fahrten:** 13.842, also etwa 3,8 pro Welt und Jahr.
+- **Straßenstücke:** 235, etwa 20 pro Welt.
+- **Geliefert:** Getreide 48.700, Wasser 52.300, Holz 3.500, Stein 760,
+  Salz 3.100, Pferde 2.000, Gewürze 520, Marmor 420.
+- **Verloren:** etwa 1,5 % der Ware, dazu 2.500 Geld.
+- **Gebäude:** 194 Handelszentren, 14 Häfen, 36 Kornspeicher,
+  57 Wasserträger, 12 Abbaugebäude für Luxusgüter. Eine frühere Fassung
+  ohne Grenze für Kornspeicher und Wasserträger baute 352 Wasserträger.
+- **Geld:** liegt fast ungenutzt im Vorrat (325.000, etwa 380 je
   Siedlung). Es entsteht, wird aber nirgends verbraucht.
+- **Erste Fassung zum Vergleich** (Verlust ein Viertel so hoch, Häfen
+  erst ab 25 % Verbesserung, Abbaugebäude nur bei Unzufriedenheit):
+  +14 % Menschen, 0,4 % Verlust, 0 Häfen, Luxushandel nur 300 Salz.
 
-## 10. Offene Punkte zur Entscheidung
+## 10. Entscheidungen des Nutzers
 
-1. **Geld ohne Senke:** Geld sammelt sich an, weil nur gekauft wird, was
-   fehlt. Bis Unterhalt, Steuern und Tribut kommen, schlage ich vor, das so
-   zu lassen.
-2. **Verlust kaum spürbar (0,4 %):** Die meisten Fahrten sind kurz. Für
-   spürbare Verluste die Chancen etwa vervierfachen (2 % an Land, 6 % auf
-   Wasser), dann gehen um 2 % verloren.
-3. **Häfen werden nie gebaut:** Ein Volk siedelt nie übers Wasser, sein
-   Land hängt immer über Land zusammen. Seewege sind deshalb nur
-   Abkürzungen. Nach 300 Jahren lohnt sich in 3 Testwelten nur für 4 von
-   91 Küstensiedlungen überhaupt eine Fahrt. Optionen:
-   - so lassen (Häfen werden wichtig mit Außenhandel oder Besiedlung über
-     Wasser)
-   - die Hürde senken, z. B. Hafen schon, wenn die beste Fahrt übers Wasser
-     kürzer ist
-4. **Kaum Luxushandel:** Abbaugebäude für Luxusgüter baut nur eine
-   unzufriedene Siedlung für sich selbst (2 in 12 Welten). Vorschlag: Ein
-   Feld mit Vorkommen baut sein Abbaugebäude auch, wenn sein Volk das Gut
-   verlangt (wie Kornspeicher). Das macht den Luxushandel der
-   Zufriedenheit erst lebendig.
+1. **Geld ohne Senke:** bleibt so, bis Unterhalt, Steuern und Tribut
+   kommen.
+2. **Verlust:** Chancen vervierfacht (Abschnitt 7).
+3. **Häfen:** Hürde gesenkt; ein Hafen kommt, sobald der Weg übers Wasser
+   kürzer ist (Abschnitt 8).
+4. **Abbaugebäude für Luxusgüter:** werden immer gebaut, wenn das Feld ein
+   passendes Vorkommen hat, weil das ganze Reich die Güter braucht
+   (Abschnitt 8).
 
 ## 11. Benchmark und Darstellung
 
