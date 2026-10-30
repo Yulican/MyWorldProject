@@ -27,9 +27,25 @@ export type GameState = {
   speed: number;
   /** Changes with every map snapshot the UI hasn't seen yet. */
   version: number;
+  /**
+   * Chronicle entries the player has seen; while there are more, the game
+   * is paused and the chronicle dialog shows the next one.
+   */
+  chronicleSeen: number;
+  /** Speed the game continues at once the chronicle dialog is closed. */
+  resumeSpeed: number;
+  /** Off while the benchmark runs: no dialogs, no pauses. */
+  chronicleDialogs: boolean;
 };
 
-let state: GameState = { sim: null, speed: DEFAULT_SPEED, version: 0 };
+let state: GameState = {
+  sim: null,
+  speed: DEFAULT_SPEED,
+  version: 0,
+  chronicleSeen: 0,
+  resumeSpeed: DEFAULT_SPEED,
+  chronicleDialogs: true,
+};
 const listeners = new Set<() => void>();
 
 let frame: number | null = null;
@@ -53,7 +69,13 @@ export function createNewWorld(seed: number = randomSeed()): World {
   const sim = createSimulation(generateWorld({ seed }));
   notifiedSnapshot = sim.snapshotVersion;
   pendingTicks = 0;
-  publish({ sim, speed: DEFAULT_SPEED });
+  const seen = state.chronicleDialogs ? nextShown(sim, 0) : sim.chronicle.length;
+  publish({
+    sim,
+    speed: seen < sim.chronicle.length ? 0 : DEFAULT_SPEED,
+    chronicleSeen: seen,
+    resumeSpeed: DEFAULT_SPEED,
+  });
   startClock();
   return sim.world;
 }
@@ -69,12 +91,44 @@ export function advanceYears(years: number, prepare?: (sim: Simulation) => void)
   for (let t = 0; t < years * TICKS_PER_YEAR && !sim.gameOver; t++) stepSimulation(sim);
   prepare?.(sim);
   notifiedSnapshot = sim.snapshotVersion;
-  publish({});
+  publish(state.chronicleDialogs ? {} : { chronicleSeen: sim.chronicle.length });
 }
 
 export function setSpeed(speed: number) {
   publish({ speed });
   if (SPEEDS[speed] > 0) startClock();
+}
+
+/** The speed chosen in the chronicle dialog, applied when it closes. */
+export function setResumeSpeed(resumeSpeed: number) {
+  publish({ resumeSpeed });
+}
+
+/**
+ * The player saw the current chronicle entry: shows the next one, or closes
+ * the dialog and continues at the chosen speed.
+ */
+export function acknowledgeChronicle() {
+  const { sim, chronicleSeen, resumeSpeed } = state;
+  if (!sim) return;
+  const seen = nextShown(sim, chronicleSeen + 1);
+  publish({ chronicleSeen: seen });
+  if (seen >= sim.chronicle.length) setSpeed(resumeSpeed);
+}
+
+/** Turns the chronicle dialogs off (and back on) for the benchmark. */
+export function setChronicleDialogs(enabled: boolean) {
+  publish({ chronicleDialogs: enabled, chronicleSeen: state.sim?.chronicle.length ?? 0 });
+}
+
+/**
+ * The first entry from `from` the dialog shows: the game-over entry has its
+ * own screen and is skipped.
+ */
+function nextShown(sim: Simulation, from: number): number {
+  let i = from;
+  while (i < sim.chronicle.length && sim.chronicle[i].cell < 0) i++;
+  return i;
 }
 
 /** Simulation, speed and a version that changes whenever the map snapshot does. */
@@ -115,7 +169,8 @@ function runFrame(now: number) {
   const start = performance.now();
   const deadline = start + FRAME_BUDGET_MS;
   let ticks = 0;
-  while (pendingTicks >= 1 && !sim.gameOver && performance.now() < deadline) {
+  const entries = sim.chronicle.length;
+  while (pendingTicks >= 1 && !sim.gameOver && performance.now() < deadline && sim.chronicle.length === entries) {
     stepSimulation(sim);
     pendingTicks--;
     ticks++;
@@ -123,6 +178,17 @@ function runFrame(now: number) {
   recordSimWork(performance.now() - start, ticks);
   // Drop what didn't fit instead of piling up a backlog.
   pendingTicks = Math.min(pendingTicks, 2);
+
+  // Something notable happened: pause and show it (the chronicle dialog).
+  if (state.chronicleDialogs && sim.chronicle.length > entries) {
+    const seen = nextShown(sim, state.chronicleSeen);
+    if (seen < sim.chronicle.length) {
+      notifiedSnapshot = sim.snapshotVersion;
+      pendingTicks = 0;
+      publish({ chronicleSeen: seen, speed: 0, resumeSpeed: speed });
+      return;
+    }
+  }
 
   if (sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
     notifiedSnapshot = sim.snapshotVersion;

@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
 import { perfEvents } from '../state/perfStats';
-import { advanceYears, createNewWorld } from '../state/worldStore';
+import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
 import { fillWithBuildings } from './fillBuildings';
 import {
   BENCHMARK,
@@ -41,6 +41,8 @@ export function useBenchmark(controller: { current: MapController | null }) {
   const run = useCallback(async (scenario: ScenarioName = 'young') => {
     if (running.current) return;
     running.current = true;
+    // Chronicle dialogs would pause the game; the benchmark keeps it running.
+    setChronicleDialogs(false);
     const plan = swipePlan();
     const results: SwipeResult[] = [];
     console.log(`${LOG}_START ${JSON.stringify({ ...BENCHMARK, scenario })}`);
@@ -72,6 +74,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
     const summary = { ...summarizeBenchmark(results), scenario };
     console.log(`${LOG}_DONE ${JSON.stringify(summary)}`);
     setStatus({ running: false, summary });
+    setChronicleDialogs(true);
     running.current = false;
   }, [controller]);
 

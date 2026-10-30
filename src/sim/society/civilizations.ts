@@ -1,5 +1,6 @@
 import type { Rng } from '../rng';
 import { CULTURE_COUNT } from './culture';
+import type { CivMood } from './satisfaction';
 
 /**
  * Soft cap: new tribes only appear while fewer civilizations than this live
@@ -13,8 +14,11 @@ export const MAX_CIVS = 6;
  */
 export const MAX_CIV_ID = 255;
 
-/** How a civilization came to be. */
-export type CivOrigin = 'start' | 'secession' | 'tribe';
+/**
+ * How a civilization came to be: the player's tribe, land cut off from its
+ * capital, a new tribe, or a league of unhappy settlements that broke away.
+ */
+export type CivOrigin = 'start' | 'secession' | 'tribe' | 'revolution';
 
 /**
  * Why a civilization's believers changed over one year, so faith gains and
@@ -33,17 +37,21 @@ export type FaithLedger = {
   lostToNeighbors: number;
   /** Stopped believing because their civilization doesn't worship the player. */
   forgot: number;
-  /** Believers who left with land cut off from the capital, founding their own people. */
+  /** Believers who left with land that broke away (cut off, or a league of unhappy settlements). */
   brokeAway: number;
+  /** Believers who moved to another people's settlement. */
+  emigrated: number;
+  /** Believers who moved here from another people. */
+  immigrated: number;
 };
 
 export function emptyFaithLedger(): FaithLedger {
-  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0, brokeAway: 0 };
+  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0, brokeAway: 0, emigrated: 0, immigrated: 0 };
 }
 
 /** Net change in believers the ledger explains. */
 export function ledgerNet(l: FaithLedger): number {
-  return l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot - l.brokeAway;
+  return l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot - l.brokeAway - l.emigrated + l.immigrated;
 }
 
 export type Civilization = {
@@ -52,7 +60,7 @@ export type Civilization = {
   /** Map color "#rrggbb", picked at random when founded (see pickCivColor). */
   color: string;
   origin: CivOrigin;
-  /** Name of the civilization it broke away from (secession only). */
+  /** Name of the civilization it broke away from (secession and revolution). */
   parentName: string | null;
   foundedTick: number;
   /** The player's own people. Breakaways and new tribes start without a god. */
@@ -70,6 +78,10 @@ export type Civilization = {
   believers: number;
   /** Mean faith in the player 0..1. */
   averageFaith: number;
+  /** Mean satisfaction of its people, -100..100 (see satisfaction.ts). */
+  averageSatisfaction: number;
+  /** Moods its whole people shares for a while, e.g. after a revolution. */
+  moods: CivMood[];
   /** Believer changes in the running year, and in the last complete year. */
   faithYear: FaithLedger;
   faithLastYear: FaithLedger;
@@ -149,6 +161,8 @@ export function createCivilization(
     territory: 0,
     believers: 0,
     averageFaith: 0,
+    averageSatisfaction: 0,
+    moods: [],
     faithYear: emptyFaithLedger(),
     faithLastYear: emptyFaithLedger(),
   };

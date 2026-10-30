@@ -79,12 +79,19 @@ test('buildings change supply and harvest exactly as their terms explain', () =>
   assert.ok(Math.abs(withBuildings(sim.economy, cell, Good.Wood, forageYield(sim.world, cell, Good.Wood)) - expected) < 1e-4);
 });
 
-test('settled hexes harvest wood and stone into their own stock', () => {
+test('settled hexes harvest wood and stone into their own stock, more when satisfied', () => {
   const sim = createSimulation(generateWorld({ seed: 12 }));
   const cell = sim.world.startCell;
-  runYears(sim, 1);
-  const wood = sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood];
-  assert.ok(Math.abs(wood - forageYield(sim.world, cell, Good.Wood)) < 1e-3, `wood ${wood}`);
+  const year = (satisfaction: number) => {
+    sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 0;
+    sim.satisfaction[cell] = satisfaction;
+    for (let q = 0; q < 4; q++) runEconomy(sim, false);
+    return sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood];
+  };
+  const forage = forageYield(sim.world, cell, Good.Wood);
+  assert.ok(Math.abs(year(0) - forage) < 1e-3);
+  assert.ok(Math.abs(year(50) - forage * 1.1) < 1e-3);
+  assert.ok(Math.abs(year(-100) - forage * 0.8) < 1e-3);
   const other = emptyLand(sim);
   assert.equal(sim.economy.stock[other * MATERIAL_COUNT + Material.Wood], 0);
 });
@@ -120,34 +127,34 @@ test('ruins make poor land worth settling', () => {
 });
 
 test('a ruin is repaired for half the cost and half the time', () => {
-  // The first buildings go up around year 200, once settlements are boxed in.
   const sim = createSimulation(generateWorld({ seed: 7 }));
-  runYears(sim, 220);
+  runYears(sim, 60);
   const { economy } = sim;
-  // A city whose loss of a building lowers its capacity.
-  let slot = -1;
-  for (let c = 0; c < sim.world.cellCount && slot < 0; c++) {
-    if (sim.cellPop[c] === 0) continue;
-    let busy = false;
-    for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) busy ||= economy.state[s] === SlotState.Construction || economy.state[s] === SlotState.Repair;
-    if (busy) continue;
-    for (let s = c * SLOTS; s < (c + 1) * SLOTS && slot < 0; s++) {
-      if (economy.state[s] !== SlotState.Standing || BUILDINGS[economy.type[s]].good >= SUPPLY_KINDS) continue;
-      const before = sim.cellCapacity[c];
-      economy.state[s] = SlotState.Ruin;
-      updateCellSupply(sim, c);
-      if (before - sim.cellCapacity[c] > 1 && sim.cellPop[c] >= 0.5 * sim.cellCapacity[c]) slot = s;
-      else {
-        economy.state[s] = SlotState.Standing;
-        updateCellSupply(sim, c);
-      }
+  const cell = sim.world.startCell;
+  // The building that raises the start hex's capacity most, standing...
+  let type = -1;
+  let gain = 0;
+  for (const name of ['Hut', 'Fields', 'Well']) {
+    const before = sim.cellCapacity[cell];
+    const slot = place(sim, cell, typeOf(name));
+    if (sim.cellCapacity[cell] - before > gain) {
+      gain = sim.cellCapacity[cell] - before;
+      type = typeOf(name);
     }
+    economy.state[slot] = SlotState.Empty;
+    economy.type[slot] = -1;
+    updateCellSupply(sim, cell);
   }
-  assert.ok(slot >= 0, 'found a city to damage');
-  const cell = Math.floor(slot / SLOTS);
-  const b = BUILDINGS[economy.type[slot]];
+  assert.ok(type >= 0 && gain > 1, 'a building raises the capacity');
+  const slot = place(sim, cell, type);
+  // ...falls to ruin.
+  economy.state[slot] = SlotState.Ruin;
+  updateCellSupply(sim, cell);
+  assert.ok(sim.cellPop[cell] >= 0.5 * sim.cellCapacity[cell], 'the hex is full enough to build');
+  const b = BUILDINGS[type];
   economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 1000;
   economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 1000;
+  sim.satisfaction[cell] = 0; // harvest without the satisfaction factor
   runEconomy(sim, false);
   assert.equal(economy.state[slot], SlotState.Repair);
   assert.ok(Math.abs(economy.work[slot] - b.years / 2) < 1e-6);
@@ -169,7 +176,12 @@ test('settlements build once they are boxed in, and pay for it from their stock'
   }
   assert.ok(standing > 0, 'some hex built something');
   // Building lines appear in the supply of a hex that has them.
-  const city = [...world.buildings.keys()].find((c) => world.buildings[c] > 0)!;
+  const city = [...world.buildings.keys()].find((c) => {
+    for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) {
+      if (economy.state[s] === SlotState.Standing && BUILDINGS[economy.type[s]].good < SUPPLY_KINDS) return true;
+    }
+    return false;
+  })!;
   const labels = hexSupplyTerms(sim, city).flat().map((t) => t.label);
   assert.ok(BUILDINGS.some((b) => labels.some((l) => l.startsWith(b.name))), labels.join(', '));
 });

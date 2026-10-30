@@ -64,6 +64,8 @@ export type TerritorySource = {
 export type MapController = {
   /** Zooms to `scale` and centers the map. */
   zoomToCenter: (scale: number) => void;
+  /** Centers the map on a hex, zooming in to at least START_SCALE (e.g. "Go to" in the chronicle). */
+  centerOn: (cell: number) => void;
   /** Moves the map at constant speed, like a drag, and measures its frames. */
   swipe: (swipe: Swipe) => Promise<SwipeStats>;
 };
@@ -216,6 +218,20 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
           ty.value = clampY(viewH / 2 - (mapHeight / 2) * z, mapHeight * z, viewH);
           reportView();
         }),
+      centerOn: (cell) => {
+        const col = cell % world.width;
+        const px = hexCenterX(col) * HEX_PX;
+        const py = hexCenterY(col, Math.floor(cell / world.width)) * HEX_PX;
+        scheduleOnUI(() => {
+          'worklet';
+          stopGlide();
+          const z = Math.max(scale.value, START_SCALE);
+          scale.value = z;
+          tx.value = wrapX(viewW / 2 - px * z, mapWidth * z);
+          ty.value = clampY(viewH / 2 - py * z, mapHeight * z, viewH);
+          reportView();
+        });
+      },
       swipe: ({ dx, dy, durationMs }) =>
         new Promise((resolve) => {
           swipeDone.current = resolve;

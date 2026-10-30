@@ -11,6 +11,7 @@ import {
   resourceCapacityTerms,
   sumTerms,
   type HexEconomy,
+  type HexSatisfaction,
   type Term,
   type World,
 } from '../sim';
@@ -28,6 +29,8 @@ type Props = {
   supply?: readonly (readonly Term[])[] | null;
   /** Stock, harvest and buildings; null for water. */
   economy?: HexEconomy | null;
+  /** How satisfied the settlement is and why; null if nobody lives here. */
+  satisfaction?: HexSatisfaction | null;
   onClose: () => void;
 };
 
@@ -35,7 +38,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, economy, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -131,6 +134,31 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, onClose }:
             </>
           )}
 
+          {satisfaction && (
+            <>
+              <Text style={styles.section}>
+                Satisfaction {signed(satisfaction.value, 0)} · heading for {signed(satisfaction.target, 0)}
+              </Text>
+              {satisfaction.terms.map((t, i) => (
+                <TermRow key={i} term={t} digits={1} />
+              ))}
+              {satisfaction.unhappyYears > 0 && (
+                <Row
+                  label="Unhappy"
+                  value={`for ${satisfaction.unhappyYears} year${satisfaction.unhappyYears > 1 ? 's' : ''}${satisfaction.restless ? ' · ready to break away' : ''}`}
+                />
+              )}
+              {satisfaction.luxury.map((g) => (
+                <Row key={g.name} label={g.name} value={`${Math.floor(g.stock)} in stock${g.covered ? ' · enough for everyone' : ''}`} />
+              ))}
+              <Text style={styles.note}>
+                Satisfaction moves a quarter of the way to its target each year. Satisfied settlements have more
+                children and harvest more; unhappy ones send people away, and after {UNHAPPY_NOTE} below zero,
+                settlements joined by roads break away together.
+              </Text>
+            </>
+          )}
+
           {economy && (
             <>
               <Text style={styles.section}>
@@ -217,6 +245,7 @@ function Bar({ label, value, capacity }: { label: string; value: number; capacit
 }
 
 const percent = (v: number) => `${Math.round(v * 100)} %`;
+const UNHAPPY_NOTE = '5 years';
 /** Settlement size by standing buildings, as the map icon shows it. */
 const settlementName = (buildings: number) => (buildings === 0 ? 'Tribe' : buildings <= 2 ? 'Small city' : 'Big city');
 const yearly = (harvest: number, upkeep: number) =>

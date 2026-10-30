@@ -3,8 +3,10 @@ import { sumTerms, type Term } from '../terms';
 import { isWaterBiome } from '../world/biomes';
 import {
   BUILDINGS,
+  FIRST_LUXURY,
   GOOD_NAMES,
   Good,
+  LUXURY_COUNT,
   MATERIAL_COUNT,
   Material,
   REPAIR_SHARE,
@@ -14,8 +16,22 @@ import {
   buildingSupplyModifiers,
   forageYield,
   harvestTerms,
+  isLuxury,
+  isMaterial,
   withBuildings,
 } from './buildings';
+import {
+  CONNECTION_NEAR,
+  LUXURY_EACH,
+  LUXURY_MAX,
+  LUXURY_PER_PERSON,
+  comfortServed,
+  comfortValue,
+  connectionValue,
+  luxuryValue,
+  seatField,
+  yieldFactor,
+} from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
@@ -40,6 +56,17 @@ const BUILD_FROM_CROWDING = 0.5;
 export const SAVE_UP_YEARS = 5;
 /** Smallest capacity gain (people) worth a building. */
 const MIN_GAIN = 0.5;
+/** Smallest satisfaction gain worth a comfort or luxury building. */
+const MIN_SATISFACTION_GAIN = 1;
+/**
+ * A new seat of government keeps this travel cost from the existing ones, so
+ * their best-connected surroundings don't overlap.
+ */
+const SEAT_MIN_COST = 2 * CONNECTION_NEAR;
+/** A seat is only worth it if the settlements it serves gain this much satisfaction together. */
+const SEAT_MIN_BENEFIT = 40;
+/** Seats of government a people considers per year (its worst-connected settlements). */
+const SEAT_CANDIDATES = 3;
 
 const NO_MODIFIERS: readonly SupplyModifier[] = [];
 
@@ -117,9 +144,13 @@ export function rawMaterials(sim: Simulation, cell: number): number {
   return forageYield(sim.world, cell, Good.Wood) + forageYield(sim.world, cell, Good.Stone);
 }
 
-/** Yearly wood or stone harvest with the standing buildings plus up to two extra types. */
+/**
+ * Yearly wood or stone harvest with the standing buildings plus up to two
+ * extra types; satisfied people harvest more (satisfaction.ts).
+ */
 function harvestWith(sim: Simulation, cell: number, good: number, extraA: number, extraB: number): number {
-  return withBuildings(sim.economy, cell, good, forageYield(sim.world, cell, good), extraA, extraB);
+  const harvest = withBuildings(sim.economy, cell, good, forageYield(sim.world, cell, good), extraA, extraB);
+  return harvest * yieldFactor(sim.satisfaction[cell]);
 }
 
 /** Yearly wood and stone upkeep of the standing buildings plus up to two extra types. */
@@ -164,6 +195,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
     if (people > 0) {
       economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
       economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
+      if (sim.hasBuildings[c]) harvestLuxury(sim, c, yearEnd);
     }
     let busy = false;
     let supplyChanged = false;
@@ -198,7 +230,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       }
     }
     if (supplyChanged) updateCellSupply(sim, c);
-    if (people > 0 && !busy && planBuilding(sim, c)) supplyChanged = true;
+    if (people > 0 && !busy && (planBuilding(sim, c) || planSatisfaction(sim, c))) supplyChanged = true;
     if (supplyChanged) changed = true;
   }
   return changed;
@@ -295,7 +327,7 @@ function planBuilding(sim: Simulation, cell: number): boolean {
         ptype = economy.type[pslot];
       }
       const p = BUILDINGS[ptype];
-      if (p.good < SUPPLY_KINDS) continue;
+      if (!isMaterial(p.good)) continue;
       const pshare = pslot >= 0 ? REPAIR_SHARE : 1;
       if (wood < p.wood * pshare || stone < p.stone * pshare) continue;
       const netWood2 = netWith(sim, cell, Material.Wood, ptype, -1);
@@ -324,6 +356,180 @@ function planBuilding(sim: Simulation, cell: number): boolean {
   if (firstType >= 0) return startConstruction(sim, cell, firstSlot, firstType);
   if (bestTime > 0) return false; // saving up
   return startConstruction(sim, cell, bestSlot, bestType);
+}
+
+/**
+ * A quarter of the luxury goods the hex's standing buildings harvest from
+ * its deposit; at the year's end its people use their yearly need of each,
+ * and the goods whose need the stock covered count for their satisfaction.
+ */
+function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
+  const { economy } = sim;
+  const factor = yieldFactor(sim.satisfaction[cell]);
+  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+    if (economy.state[s] !== SlotState.Standing) continue;
+    const b = BUILDINGS[economy.type[s]];
+    if (isLuxury(b.good)) economy.luxury[cell * LUXURY_COUNT + b.good - FIRST_LUXURY] += (b.amount * factor) / STEPS_PER_YEAR;
+  }
+  if (!yearEnd) return;
+  const need = sim.cellPop[cell] * LUXURY_PER_PERSON;
+  let covered = 0;
+  for (let k = 0; k < LUXURY_COUNT; k++) {
+    const i = cell * LUXURY_COUNT + k;
+    if (economy.luxury[i] <= 0) continue;
+    if (economy.luxury[i] >= need) covered |= 1 << k;
+    economy.luxury[i] = Math.max(0, economy.luxury[i] - need);
+  }
+  economy.luxuryCovered[cell] = covered;
+}
+
+/** Whether a hex can have a building of this type at all (deposit, water). */
+function buildingFits(sim: Simulation, cell: number, type: number): boolean {
+  const b = BUILDINGS[type];
+  if (b.deposit !== undefined && sim.world.deposit[cell] !== b.deposit) return false;
+  if (b.waterSurplus !== undefined && sim.cellSupply[cell * SUPPLY_KINDS + 1] - sim.cellPop[cell] < b.waterSurplus) return false;
+  return true;
+}
+
+/** Whether the hex has a building of this good standing, under construction or under repair. */
+function hasGood(sim: Simulation, cell: number, good: number): boolean {
+  const { economy } = sim;
+  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+    const st = economy.state[s];
+    if ((st === SlotState.Standing || st === SlotState.Construction || st === SlotState.Repair) && BUILDINGS[economy.type[s]].good === good) return true;
+  }
+  return false;
+}
+
+/**
+ * When a settlement is unhappy but has the food, water and space it needs
+ * (and nothing to build for its growth): the comfort building or luxury
+ * workshop that raises its satisfaction most among those it pays for within
+ * SAVE_UP_YEARS and keeps up for good, new or repaired. Starts it when
+ * affordable, else saves up. Returns whether construction started.
+ */
+function planSatisfaction(sim: Simulation, cell: number): boolean {
+  const { economy } = sim;
+  const people = sim.cellPop[cell];
+  if (sim.satisfaction[cell] >= 0 || people > sim.cellCapacity[cell]) return false;
+  let free = 0;
+  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
+  const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
+  const stone = economy.stock[cell * MATERIAL_COUNT + Material.Stone];
+  const netWood = netWith(sim, cell, Material.Wood, -1, -1);
+  const netStone = netWith(sim, cell, Material.Stone, -1, -1);
+  const served = comfortServed(economy, cell);
+  const luxuryNow = luxuryValue(economy.luxuryCovered[cell]);
+
+  let bestGain = MIN_SATISFACTION_GAIN;
+  let bestTime = Infinity;
+  let bestSlot = -1;
+  let bestType = -1;
+  for (let option = 0; option < BUILDINGS.length + SLOTS; option++) {
+    let type: number;
+    let slot = -1;
+    if (option < BUILDINGS.length) {
+      if (free === 0) continue;
+      type = option;
+    } else {
+      slot = cell * SLOTS + option - BUILDINGS.length;
+      if (economy.state[slot] !== SlotState.Ruin) continue;
+      type = economy.type[slot];
+    }
+    const b = BUILDINGS[type];
+    let gain: number;
+    if (b.good === Good.Comfort) gain = comfortValue(served + b.amount, people) - comfortValue(served, people);
+    else if (isLuxury(b.good) && !hasGood(sim, cell, b.good)) gain = Math.min(LUXURY_EACH, LUXURY_MAX - luxuryNow);
+    else continue;
+    if (gain < bestGain || !buildingFits(sim, cell, type)) continue;
+    if (netWith(sim, cell, Material.Wood, type, -1) < 0 || netWith(sim, cell, Material.Stone, type, -1) < 0) continue;
+    const share = slot >= 0 ? REPAIR_SHARE : 1;
+    const wait = Math.max(yearsUntil(wood, b.wood * share, netWood), yearsUntil(stone, b.stone * share, netStone));
+    if (wait > SAVE_UP_YEARS || (gain === bestGain && wait >= bestTime)) continue;
+    bestGain = gain;
+    bestTime = wait;
+    bestSlot = slot;
+    bestType = type;
+  }
+  if (bestType < 0 || bestTime > 0) return false; // nothing worth it, or saving up
+  return startConstruction(sim, cell, bestSlot, bestType);
+}
+
+const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
+
+/**
+ * Yearly, per people: a seat of government in the settlement whose
+ * settlements would gain the most connection satisfaction together (at
+ * least SEAT_MIN_BENEFIT), among its SEAT_CANDIDATES worst-connected
+ * settlements that keep SEAT_MIN_COST from every seat. The settlement pays
+ * it from its own stock (or repairs a ruined seat); one seat at a time.
+ */
+export function planSeats(sim: Simulation, owner: Uint8Array): void {
+  const { economy, world } = sim;
+  const n = world.cellCount;
+  // One pass: peoples already building a seat, and every people's candidates.
+  const busy = new Uint8Array(sim.civSlots);
+  const candidates: number[][] = [];
+  for (let c = 0; c < n; c++) {
+    const id = owner[c];
+    if (id === 0) continue;
+    if (sim.hasBuildings[c]) {
+      for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+        const st = economy.state[s];
+        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[id] = 1;
+      }
+    }
+    if (sim.cellPop[c] < EXPANSION_GROUP || sim.seatCost[c] < SEAT_MIN_COST || seatSlot(sim, c) === null) continue;
+    (candidates[id] ??= []).push(c);
+  }
+  const field = scratchField(n);
+  for (let id = 1; id < sim.civSlots; id++) {
+    const list = candidates[id];
+    if (!sim.civs[id] || busy[id] || !list) continue;
+    // Its worst-connected settlements.
+    list.sort((a, b) => sim.seatCost[b] - sim.seatCost[a] || a - b);
+    let best = -1;
+    let bestBenefit = SEAT_MIN_BENEFIT;
+    for (const c of list.slice(0, SEAT_CANDIDATES)) {
+      const reached = seatField(sim, owner, id, [c], field);
+      let benefit = 0;
+      for (const k of reached) {
+        benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
+        field[k] = Infinity;
+      }
+      if (benefit > bestBenefit) {
+        bestBenefit = benefit;
+        best = c;
+      }
+    }
+    if (best < 0) continue;
+    const slot = seatSlot(sim, best)!;
+    const b = BUILDINGS[SEAT_TYPE];
+    const share = slot >= 0 ? REPAIR_SHARE : 1;
+    if (economy.stock[best * MATERIAL_COUNT + Material.Wood] < b.wood * share) continue;
+    if (economy.stock[best * MATERIAL_COUNT + Material.Stone] < b.stone * share) continue;
+    if (netWith(sim, best, Material.Wood, SEAT_TYPE, -1) < 0 || netWith(sim, best, Material.Stone, SEAT_TYPE, -1) < 0) continue;
+    startConstruction(sim, best, slot, SEAT_TYPE);
+  }
+}
+
+let scratch = new Float32Array(0);
+/** A reusable all-Infinity field of `n` cells (seatField users reset what they touched). */
+function scratchField(n: number): Float32Array {
+  if (scratch.length !== n) scratch = new Float32Array(n).fill(Infinity);
+  return scratch;
+}
+
+/** Where a hex could get a seat of government: a ruined seat to repair, -1 for a free slot, null if neither. */
+function seatSlot(sim: Simulation, cell: number): number | null {
+  const { economy } = sim;
+  let free = false;
+  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+    if (economy.state[s] === SlotState.Ruin && economy.type[s] === SEAT_TYPE) return s;
+    if (economy.state[s] === SlotState.Empty) free = true;
+    if (economy.state[s] !== SlotState.Empty && economy.state[s] !== SlotState.Ruin && economy.type[s] === SEAT_TYPE) return null;
+  }
+  return free ? -1 : null;
 }
 
 /** Pays a building (or the repair of the ruin in `slot`) and starts the work; -1 = a new building in a free slot. */
@@ -388,17 +594,28 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
       state: STATE_NAMES[st],
       workLeft: economy.work[s],
       unpaidYears: st === SlotState.Standing ? economy.unpaid[s] : 0,
-      effect: b.percent ? `+${Math.round(b.percent * 100)} % ${good}` : `+${b.amount} ${good}${b.good >= SUPPLY_KINDS ? '/year' : ''}`,
+      effect: buildingEffect(b.good, b.amount, b.percent, good),
       upkeep: upkeep.join(' + ') || 'none',
     });
   }
   return {
     wood: economy.stock[cell * MATERIAL_COUNT + Material.Wood],
     stone: economy.stock[cell * MATERIAL_COUNT + Material.Stone],
-    harvest: { wood: harvestTerms(world, economy, cell, Good.Wood), stone: harvestTerms(world, economy, cell, Good.Stone) },
+    harvest: {
+      wood: harvestTerms(world, economy, cell, Good.Wood, yieldFactor(sim.satisfaction[cell])),
+      stone: harvestTerms(world, economy, cell, Good.Stone, yieldFactor(sim.satisfaction[cell])),
+    },
     upkeepWood: upkeepWith(sim, cell, Material.Wood, -1, -1),
     upkeepStone: upkeepWith(sim, cell, Material.Stone, -1, -1),
     buildings,
     slots: SLOTS,
   };
+}
+
+/** E.g. "+25 food", "+50 % water", "+5 wood/year", "comfort for 50", "+10 salt/year". */
+function buildingEffect(good: number, amount: number, percent: number, name: string): string {
+  if (good === Good.Comfort) return `comfort for ${amount}`;
+  if (good === Good.Seat) return 'seat of government';
+  if (percent) return `+${Math.round(percent * 100)} % ${name}`;
+  return `+${amount} ${name}${good >= SUPPLY_KINDS ? '/year' : ''}`;
 }
