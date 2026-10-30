@@ -3,6 +3,7 @@ import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
 import { perfEvents } from '../state/perfStats';
 import { advanceYears, createNewWorld } from '../state/worldStore';
+import { fillWithBuildings } from './fillBuildings';
 import {
   BENCHMARK,
   SCENARIOS,
@@ -46,7 +47,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
     for (let world = 0; world < BENCHMARK.worlds; world++) {
       const seed = randomSeed();
       createNewWorld(seed);
-      advanceYears(SCENARIOS[scenario].years);
+      advanceYears(SCENARIOS[scenario].years, SCENARIOS[scenario].buildings ? fillWithBuildings : undefined);
       setStatus({ running: true, scenario, world, swipe: 0, failed: results.filter((r) => !r.pass).length });
       await delay(WORLD_SETTLE_MS);
       const map = controller.current;

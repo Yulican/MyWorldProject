@@ -21,9 +21,20 @@ const ROAD_COLOR = 'rgba(92,65,40,0.9)';
 /** Settlement dot radius in hex sizes, by dotSize class. */
 const DOT_RADIUS = [0.14, 0.21, 0.28];
 
+const RUIN_COLOR = '#9a9284';
+const OUTLINE_COLOR = '#1b1b1b';
+
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
   return people < 10 ? 0 : people < 25 ? 1 : 2;
+}
+
+/**
+ * A settlement's icon by its standing buildings: 0 = tribe (a dot),
+ * 1 = small city (1–2 buildings), 2 = big city (3–4).
+ */
+function cityLevel(buildings: number): number {
+  return buildings === 0 ? 0 : buildings <= 2 ? 1 : 2;
 }
 
 /** Corner pair (unit offsets) of the hex edge facing each direction. */
@@ -73,7 +84,7 @@ export function buildTerritoryOverview(
 
 /**
  * A fingerprint of everything a territory tile shows (owners and their
- * colors, dot sizes, roads). Equal fingerprints draw the same image, so a new
+ * colors, dot sizes, city icons, ruins, roads). Equal fingerprints draw the same image, so a new
  * society snapshot only re-renders tiles that actually look different.
  */
 export function territoryTileSignature(
@@ -92,8 +103,12 @@ export function territoryTileSignature(
       const owner = world.owner[c];
       mix(world.roads[c]);
       mix(owner);
-      if (!owner) continue;
+      if (!owner) {
+        mix(world.ruins[c] > 0 ? 1 : 0);
+        continue;
+      }
       mix(dotSize(world.population[c]));
+      mix(cityLevel(world.buildings[c]));
       const color = colorOf(owner);
       for (let k = 1; k < color.length; k++) mix(color.charCodeAt(k));
     }
@@ -110,15 +125,16 @@ export function renderTerritoryTile(
   colorOf: (civ: number) => string,
 ): SkImage | null {
   const settled = tileCells(world, chunk, chunkCols).some(({ cells }) =>
-    cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0),
+    cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0 || world.ruins[c] !== 0),
   );
   if (!settled) return null;
   return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf)]);
 }
 
 /**
- * A tint and a border per civilization, roads, and a dot per settlement
- * sized by population. Each hex draws its half of a road (center to edge),
+ * A tint and a border per civilization, roads, a dot per tribe sized by
+ * population, a city icon per settlement with buildings, and a ruin icon on
+ * free hexes with ruins. Each hex draws its half of a road (center to edge),
  * so roads join across tiles and the map wrap.
  */
 function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string) {
@@ -127,6 +143,8 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   const dots = new Map<number, SkPathBuilder>();
   const rim = Skia.PathBuilder.Make();
   const roads = Skia.PathBuilder.Make();
+  const outlines = Skia.PathBuilder.Make();
+  const ruins = Skia.PathBuilder.Make();
   const pathFor = (paths: Map<number, SkPathBuilder>, civ: number) => {
     let path = paths.get(civ);
     if (!path) {
@@ -140,7 +158,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     const c = cells[i];
     const owner = world.owner[c];
     const roadBits = world.roads[c];
-    if (!owner && !roadBits) continue;
+    if (!owner && !roadBits && !world.ruins[c]) continue;
     const col = c % world.width;
     const row = (c - col) / world.width;
     const x = hexCenterX(col) * HEX_PX;
@@ -151,7 +169,13 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       roads.moveTo(x, y);
       roads.lineTo(x + dx * HEX_PX * 0.5, y + dy * HEX_PX * 0.5);
     }
-    if (!owner) continue;
+    if (!owner) {
+      if (world.ruins[c]) {
+        addRuin(ruins, x, y);
+        addRuin(outlines, x, y);
+      }
+      continue;
+    }
 
     addHex(pathFor(tints, owner), x, y, HEX_PX + 0.5);
 
@@ -167,6 +191,12 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       border.lineTo(x + bx * r, y + by * r);
     }
 
+    const level = cityLevel(world.buildings[c]);
+    if (level > 0) {
+      addCity(pathFor(dots, owner), x, y, level);
+      addCity(outlines, x, y, level);
+      continue;
+    }
     const radius = HEX_PX * DOT_RADIUS[dotSize(world.population[c])];
     rim.addCircle(x, y, radius + HEX_PX * 0.06);
     pathFor(dots, owner).addCircle(x, y, radius);
@@ -176,7 +206,47 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   canvas.drawPath(roads.detach(), strokePaint(ROAD_COLOR, HEX_PX * 0.1));
   for (const [civ, path] of borders) canvas.drawPath(path.detach(), strokePaint(colorOf(civ), HEX_PX * 0.12));
   canvas.drawPath(rim.detach(), fillPaint('#1b1b1b'));
+  canvas.drawPath(ruins.detach(), fillPaint(RUIN_COLOR));
   for (const [civ, path] of dots) canvas.drawPath(path.detach(), fillPaint(colorOf(civ)));
+  canvas.drawPath(outlines.detach(), strokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
+}
+
+/** Houses in the hex: two for a small city, three and a tower for a big one. */
+function addCity(path: SkPathBuilder, x: number, y: number, level: number) {
+  const u = HEX_PX * (level === 1 ? 0.22 : 0.18);
+  if (level === 1) {
+    addHouse(path, x - u * 1.1, y + u * 0.3, u);
+    addHouse(path, x + u * 1.1, y - u * 0.1, u);
+    return;
+  }
+  const t = u * 0.6;
+  path.moveTo(x - t, y + u * 0.3);
+  path.lineTo(x + t, y + u * 0.3);
+  path.lineTo(x + t, y - u * 1.8);
+  path.lineTo(x, y - u * 2.5);
+  path.lineTo(x - t, y - u * 1.8);
+  path.close();
+  addHouse(path, x - u * 1.8, y - u * 0.1, u);
+  addHouse(path, x + u * 1.8, y - u * 0.1, u);
+  addHouse(path, x, y + u * 1.5, u);
+}
+
+/** A house of half-width `u` standing on (x, y + 0.7 u). */
+function addHouse(path: SkPathBuilder, x: number, y: number, u: number) {
+  path.moveTo(x - u, y + u * 0.7);
+  path.lineTo(x + u, y + u * 0.7);
+  path.lineTo(x + u, y - u * 0.3);
+  path.lineTo(x, y - u * 1.2);
+  path.lineTo(x - u, y - u * 0.3);
+  path.close();
+}
+
+/** Broken walls: two pillars of different height and a fallen block. */
+function addRuin(path: SkPathBuilder, x: number, y: number) {
+  const u = HEX_PX * 0.16;
+  path.addRect(Skia.XYWHRect(x - u * 2, y - u * 1.6, u * 0.9, u * 2.6));
+  path.addRect(Skia.XYWHRect(x + u * 0.8, y - u * 0.6, u * 0.9, u * 1.6));
+  path.addRect(Skia.XYWHRect(x - u * 0.7, y + u * 0.6, u * 1.2, u * 0.5));
 }
 
 function addHex(path: SkPathBuilder, x: number, y: number, r: number) {

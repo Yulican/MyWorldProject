@@ -53,12 +53,16 @@ export type World = HexGrid & {
    * the neighbor in direction d (set on both ends). See roads.ts.
    */
   roads: Uint8Array;
+  /** Standing buildings per hex (see society/buildings.ts); the map draws cities by it. */
+  buildings: Uint8Array;
+  /** Ruins per hex (repairs in progress included); stay when the hex is lost. */
+  ruins: Uint8Array;
 
   /** Where the player's starting tribe settles. */
   startCell: number;
 };
 
-export const WORLD_VERSION = 1;
+export const WORLD_VERSION = 2;
 
 /** Allocates an empty world; generation fills it in. */
 export function allocateWorld(width: number, height: number, seed: number, shape: WorldShape): World {
@@ -85,6 +89,8 @@ export function allocateWorld(width: number, height: number, seed: number, shape
     population: new Float32Array(n),
     faith: new Float32Array(n),
     roads: new Uint8Array(n),
+    buildings: new Uint8Array(n),
+    ruins: new Uint8Array(n),
     startCell: -1,
   };
 }

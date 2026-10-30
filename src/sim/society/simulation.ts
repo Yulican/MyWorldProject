@@ -16,8 +16,17 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
+import { SlotState, buildingSupplyModifiers, countSlots, createEconomy, type Economy } from './buildings';
+import {
+  EXPANSION_GROUP,
+  capacityAfterRepair,
+  isSettlementTarget,
+  rawMaterials,
+  runEconomy,
+  updateCellSupply,
+} from './economy';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
-import { SUPPLY_KINDS, computeSupply, supplyTerms, supportedPeople, type SupplyModifier } from './supply';
+import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
 // The living world: inhabitants age, have children and die; when a hex can't
 // provide enough food, water or space, a group moves on to a free neighbor
@@ -42,14 +51,11 @@ const SECESSION_ENABLED = false;
 /** Settlements further than this many hexes from the capital may break away. */
 const SECESSION_REACH = 7;
 const SECESSION_CHANCE = 0.08;
-/**
- * When a hex's people need more than it provides, this many of them move to
- * a free neighboring hex that can hold them, and a road is built between the
- * two (design doc, section 5).
- */
-export const EXPANSION_GROUP = 25;
+export { EXPANSION_GROUP };
 /** Score lost per unit of travel cost into the new hex: easy land is settled first. */
 const TRAVEL_EFFORT = 0.05;
+/** Score per unit of wood and stone the new hex yields per year: building material is worth having. */
+const RAW_MATERIAL_APPEAL = 0.02;
 /** Space supply of the best land; normalizes how much a new hex can hold. */
 const GOOD_LAND_PEOPLE = 150;
 /** Years of population and believer counts kept for the trend chart. */
@@ -80,11 +86,18 @@ export type Simulation = {
   cellSupply: Float32Array;
   /** People a hex supports: its scarcest supply. */
   cellCapacity: Float32Array;
+  /** Food, water and space per hex without its buildings, for planning them (see economy.ts). */
+  baseSupply: Float32Array;
   /**
-   * Changes to hexes' supplies from outside nature's defaults (abilities,
-   * depletion; none yet). Recompute supply after changing them.
+   * Changes to hexes' supplies from outside nature's defaults other than
+   * buildings (abilities, depletion; none yet). Recompute supply after
+   * changing them (updateCellSupply).
    */
   supplyModifiers: Map<number, SupplyModifier[]>;
+  /** Wood and stone stock and buildings per hex (see buildings.ts). */
+  economy: Economy;
+  /** 1 for hexes that ever had a building (ruins stay forever), so the economy can skip the rest. */
+  hasBuildings: Uint8Array;
   /** Notable events, oldest first. */
   chronicle: ChronicleEntry[];
   /** Believers in all civilizations at the last refresh. */
@@ -112,7 +125,10 @@ export function createSimulation(world: World): Simulation {
     cellCivPop: new Int32Array(n * INITIAL_CIV_SLOTS),
     cellSupply: new Float32Array(n * SUPPLY_KINDS),
     cellCapacity: new Float32Array(n),
+    baseSupply: new Float32Array(n * SUPPLY_KINDS),
     supplyModifiers: new Map(),
+    economy: createEconomy(n),
+    hasBuildings: new Uint8Array(n),
     chronicle: [],
     believers: 0,
     history: { population: [], believers: [] },
@@ -144,6 +160,7 @@ export function stepSimulation(sim: Simulation): void {
   const yearEnd = sim.tick % TICKS_PER_YEAR === 0;
   if (yearEnd) updateCivilizations(sim);
   if (sim.tick % REFRESH_TICKS === 0) {
+    runEconomy(sim, yearEnd);
     expandSettlements(sim);
     splitCutOffLand(sim);
     refreshSnapshot(sim);
@@ -280,15 +297,16 @@ function updateInhabitant(sim: Simulation, i: number): void {
  * Each hex's supply and the people it supports, from its current natural
  * resources. Nature doesn't change yet, so this runs once per world; it has
  * to run again once resources deplete or abilities change the land.
+ * Buildings update their own hex (updateCellSupply).
  */
 function computeCapacity(sim: Simulation): void {
-  computeSupply(sim.world, sim.supplyModifiers, sim.cellSupply);
-  for (let c = 0; c < sim.world.cellCount; c++) sim.cellCapacity[c] = supportedPeople(sim.cellSupply, c);
+  for (let c = 0; c < sim.world.cellCount; c++) updateCellSupply(sim, c);
 }
 
-/** How a hex's food, water and space come about, indexed by SupplyKind (see supply.ts). */
+/** How a hex's food, water and space come about, indexed by SupplyKind (see supply.ts), buildings included. */
 export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
-  return supplyTerms(sim.world, cell, sim.supplyModifiers.get(cell) ?? []);
+  const mods = [...(sim.supplyModifiers.get(cell) ?? []), ...buildingSupplyModifiers(sim.economy, cell)];
+  return supplyTerms(sim.world, cell, mods);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,8 +315,10 @@ export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
 /**
  * Quarterly: every hex whose people need more than it provides sends a group
  * of EXPANSION_GROUP of the civilization living there to the best free
- * neighboring hex that can hold them, and a road links the two. Without such
- * a neighbor the people stay, and shortage thins them out.
+ * neighboring hex that can hold them (counting repairable ruins), and a road
+ * links the two. The best hex has room, appeals to the people's culture and
+ * yields building material. Without such a neighbor the people stay; they
+ * build (see economy.ts), and shortage thins them out.
  */
 function expandSettlements(sim: Simulation): void {
   const { world } = sim;
@@ -315,10 +335,11 @@ function expandSettlements(sim: Simulation): void {
       let bestScore = -Infinity;
       for (let d = 0; d < DIRECTION_COUNT; d++) {
         const target = world.neighbors[source * DIRECTION_COUNT + d];
-        if (target < 0 || sim.cellPop[target] > 0 || sim.cellCapacity[target] < EXPANSION_GROUP) continue;
+        if (target < 0 || !isSettlementTarget(sim, target)) continue;
         const score =
-          sim.cellCapacity[target] / GOOD_LAND_PEOPLE +
-          terrainAppeal(world, civ.culture, target) -
+          capacityAfterRepair(sim, target) / GOOD_LAND_PEOPLE +
+          terrainAppeal(world, civ.culture, target) +
+          RAW_MATERIAL_APPEAL * rawMaterials(sim, target) -
           TRAVEL_EFFORT * stepCost(world, source, d);
         if (score > bestScore) {
           bestScore = score;
@@ -462,6 +483,10 @@ function refreshSnapshot(sim: Simulation): void {
     }
     world.owner[c] = owner;
     if (owner) territory[owner]++;
+    if (sim.hasBuildings[c]) {
+      world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);
+      world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
+    }
   }
 
   sim.believers = 0;

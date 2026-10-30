@@ -7,7 +7,7 @@ import { CivPanel } from '../components/CivPanel';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
+import { hexEconomy, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
 import { createNewWorld, setSpeed, snapshotStore, useGameState } from '../state/worldStore';
 import { colors, spacing } from '../theme';
 
@@ -111,6 +111,7 @@ export function WorldScreen() {
             cell={panel.cell}
             civName={sim.civs[sim.world.owner[panel.cell]]?.name ?? null}
             supply={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexSupplyTerms(sim, panel.cell)}
+            economy={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexEconomy(sim, panel.cell)}
             onClose={closePanel}
           />
         )}

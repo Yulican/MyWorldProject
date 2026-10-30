@@ -3,10 +3,17 @@
 // useBenchmark) and CI fails when it doesn't pass (scripts/run-benchmark.sh).
 
 /**
- * Scenarios: the same swipes over young worlds (a single tribe) and over worlds
- * simulated for 300 years first (many peoples, territories and roads).
+ * Scenarios: the same swipes over young worlds (a single tribe), over worlds
+ * simulated for 300 years first (many peoples, territories, roads and
+ * cities), and over such worlds where every settled hex is a big city and
+ * free land next to them has ruins (the most icons the map can show, see
+ * fillBuildings.ts).
  */
-export const SCENARIOS = { young: { years: 0 }, aged: { years: 300 } } as const;
+export const SCENARIOS: Record<'young' | 'aged' | 'cities', { years: number; buildings?: boolean }> = {
+  young: { years: 0 },
+  aged: { years: 300 },
+  cities: { years: 300, buildings: true },
+};
 export type ScenarioName = keyof typeof SCENARIOS;
 
 export function scenarioFromUrl(url: string): ScenarioName {

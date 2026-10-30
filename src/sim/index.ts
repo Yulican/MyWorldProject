@@ -13,6 +13,8 @@ export { MAX_CIVS, MAX_CIV_ID, ledgerNet, type CivOrigin, type Civilization } fr
 export { CULTURE_COUNT, CULTURE_NAMES, Culture } from './society/culture';
 export { SUPPLY_KINDS, SUPPLY_NAMES, SupplyKind, type SupplyModifier } from './society/supply';
 export { sumTerms, type Term } from './terms';
+export { BUILDINGS, GOOD_NAMES, Good, SLOTS, type BuildingType } from './society/buildings';
+export { hexEconomy, type BuildingInfo, type HexEconomy } from './society/economy';
 export { resourceCapacityTerms } from './world/features';
 export {
   BELIEVER_FAITH,
