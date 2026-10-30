@@ -1,4 +1,4 @@
-import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage } from '@shopify/react-native-skia';
+import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage, type SkPicture } from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -134,12 +134,25 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
     minScale.value = Math.min(1, viewH / mapHeight);
     const col = world.startCell % world.width;
     const row = Math.floor(world.startCell / world.width);
-    scale.value = START_SCALE;
-    tx.value = wrapX(viewW / 2 - hexCenterX(col) * HEX_PX * START_SCALE, mapWidth * START_SCALE);
-    ty.value = clampY(viewH / 2 - hexCenterY(col, row) * HEX_PX * START_SCALE, mapHeight * START_SCALE, viewH);
-    const next = viewTiles(tx.value, ty.value, START_SCALE, viewW, viewH, null);
-    lastView.value = next;
-    onViewChange(next);
+    const x = wrapX(viewW / 2 - hexCenterX(col) * HEX_PX * START_SCALE, mapWidth * START_SCALE);
+    const y = clampY(viewH / 2 - hexCenterY(col, row) * HEX_PX * START_SCALE, mapHeight * START_SCALE, viewH);
+    // Placed and reported on the UI thread, the same way as every later view
+    // change, so the tile layer gets the first view exactly like a movement.
+    scheduleOnUI(
+      (startX: number, startY: number, w: number, h: number) => {
+        'worklet';
+        scale.value = START_SCALE;
+        tx.value = startX;
+        ty.value = startY;
+        const next = viewTiles(startX, startY, START_SCALE, w, h, null);
+        lastView.value = next;
+        scheduleOnRN(onViewChange, next);
+      },
+      x,
+      y,
+      viewW,
+      viewH,
+    );
   }, [world, mapWidth, mapHeight, viewW, viewH, tx, ty, scale, minScale, lastView, onViewChange]);
 
   /** Tells the tile layer when the view crosses a tile border or the detail threshold. */
@@ -351,6 +364,7 @@ type TileSet = {
   overview: SkImage | null;
 };
 const EMPTY_TILE_SET: TileSet = { terrain: {}, territory: {}, overview: null };
+const EMPTY_PICTURE = createPicture(() => {});
 
 /**
  * The detail tile images near the screen and the territories above them,
@@ -367,6 +381,7 @@ const EMPTY_TILE_SET: TileSet = { terrain: {}, territory: {}, overview: null };
 const TileLayer = memo(function TileLayer({ world, layers, listener, territory, view }: TileLayerProps) {
   countEvent('tileLayerRenders');
   const tileSet = useSharedValue<TileSet>(EMPTY_TILE_SET);
+  const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
   const current = useRef<ViewTiles>(NO_TILES);
   const publish = useRef<() => void>(() => {});
   const onReady = useCallback(() => publish.current(), []);
@@ -427,7 +442,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
     } else {
       set.overview = overviewFor(territory.getVersion());
     }
-    tileSet.value = set;
+    showTiles(set);
   };
   listener.current = (v) => {
     current.current = v;
@@ -457,10 +472,10 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
 
   const grid = { width: layers.width, chunkCols: layers.chunkCols, chunkRows: layers.chunkRows };
   const overviewRect = layers.overviewRect;
-  const picture = useDerivedValue(() => {
-    const v = view.value;
-    const set = tileSet.value;
-    return createPicture((canvas) => {
+  /** Records the tile picture for a view and image set (UI thread). */
+  const draw = (v: ViewTiles, set: TileSet) => {
+    'worklet';
+    picture.value = createPicture((canvas) => {
       const paint = Skia.Paint();
       if (!v.detail) {
         const image = set.overview;
@@ -500,7 +515,22 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
         canvas.drawImageRect(image, src, dst, paint, true);
       }
     });
-  });
+  };
+
+  // Redraw when the view crosses a tile border (gestures, UI thread)...
+  useAnimatedReaction(
+    () => view.value,
+    (v) => draw(v, tileSet.value),
+  );
+  // ...and when JS hands over new images: applied and drawn on the UI thread
+  // right away, without waiting for the next movement.
+  function showTiles(set: TileSet) {
+    scheduleOnUI((next: TileSet) => {
+      'worklet';
+      tileSet.value = next;
+      draw(view.value, next);
+    }, set);
+  }
 
   return <Picture picture={picture} />;
 });
