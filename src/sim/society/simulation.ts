@@ -343,6 +343,11 @@ function splitCutOffLand(sim: Simulation): void {
   const { world, pop } = sim;
   const n = world.cellCount;
   const owner = currentOwners(sim);
+  // Land is only cut off after a hex changed hands since the last snapshot
+  // (`world.owner`); otherwise skip the search.
+  let changed = false;
+  for (let c = 0; c < n && !changed; c++) changed = owner[c] !== world.owner[c] && world.owner[c] !== 0;
+  if (!changed) return;
   for (const parent of livingCivilizations(sim)) {
     if (owner[parent.capital] !== parent.id) {
       const capital = mostPopulousCell(sim, parent.id, null);
