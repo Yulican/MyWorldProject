@@ -4,12 +4,12 @@ import {
   CULTURE_NAMES,
   Culture,
   TICKS_PER_YEAR,
+  ledgerNet,
   livingCivilizations,
   simulationYear,
   type Civilization,
   type Simulation,
 } from '../sim';
-import { CIV_COLORS } from '../map/palette';
 import { colors, spacing } from '../theme';
 
 /** Chronicle entries shown, newest first. */
@@ -92,7 +92,7 @@ function CivRow({ civ }: { civ: Civilization }) {
   return (
     <View style={styles.civ}>
       <View style={styles.civHeader}>
-        <View style={[styles.swatch, { backgroundColor: CIV_COLORS[civ.color] }]} />
+        <View style={[styles.swatch, { backgroundColor: civ.color }]} />
         <Text style={styles.civName}>{civ.name}</Text>
         <Text style={[styles.tag, civ.worshipsPlayer && styles.tagHighlight]}>{originText(civ)}</Text>
       </View>
@@ -119,7 +119,7 @@ function CivRow({ civ }: { civ: Civilization }) {
 /** Last year's believer changes, e.g. "Last year +4: 12 born, 7 died, 1 swayed by neighbors". */
 function ledgerText(civ: Civilization): string {
   const l = civ.faithLastYear;
-  const net = l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot;
+  const net = ledgerNet(l);
   const parts = [
     l.born && `+${l.born} born believing`,
     l.died && `−${l.died} died`,
@@ -127,6 +127,7 @@ function ledgerText(civ: Civilization): string {
     l.wonByNeighbors && `+${l.wonByNeighbors} won over by neighbors`,
     l.lostToNeighbors && `−${l.lostToNeighbors} swayed by doubting neighbors`,
     l.forgot && `−${l.forgot} forgot you`,
+    l.brokeAway && `−${l.brokeAway} broke away`,
   ].filter(Boolean);
   const sign = net > 0 ? '+' : net < 0 ? '−' : '±';
   return `Believers last year ${sign}${Math.abs(net)}${parts.length ? ': ' + parts.join(', ') : ''}`;

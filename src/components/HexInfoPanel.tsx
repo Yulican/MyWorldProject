@@ -5,8 +5,12 @@ import {
   DEPOSITS,
   RESOURCE_COUNT,
   RESOURCE_NAMES,
+  SUPPLY_NAMES,
   elevationMeters,
   hasFreshWater,
+  resourceCapacityTerms,
+  sumTerms,
+  type Term,
   type World,
 } from '../sim';
 import { colors, spacing } from '../theme';
@@ -16,6 +20,11 @@ type Props = {
   cell: number;
   /** Name of the civilization living in the hex, if any. */
   civName?: string | null;
+  /**
+   * How the hex's food, water and space (in people, see SUPPLY_NAMES) are
+   * calculated; null for water.
+   */
+  supply?: readonly (readonly Term[])[] | null;
   onClose: () => void;
 };
 
@@ -23,7 +32,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -38,8 +47,13 @@ export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
     river > 0 ? riverSize(river) : null,
   ].filter(Boolean);
   const people = Math.round(world.population[cell]);
+  const totals = supply ? supply.map(sumTerms) : null;
+  const supports = totals ? Math.floor(Math.min(...totals)) : 0;
+  const scarcest = totals ? SUPPLY_NAMES[totals.indexOf(Math.min(...totals))] : null;
+  let roads = 0;
+  for (let d = 0; d < 6; d++) if (world.roads[cell] & (1 << d)) roads++;
   const highlights = [
-    civName ? `${civName} · ${people} people · ${percent(world.faith[cell])} faith` : null,
+    civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
   ].filter(Boolean);
@@ -72,18 +86,43 @@ export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
             <Row label="Fresh water" value={river > 0 || hasFreshWater(world, cell) ? 'Yes' : 'No'} />
           )}
           <Row label="Danger" value={percent(world.danger[cell])} />
-          <Row label="Travel cost" value={`×${world.moveCost[cell]}`} />
+          <Row
+            label="Travel cost"
+            value={`×${world.moveCost[cell]}${roads > 0 ? ` · ${roads} road${roads > 1 ? 's' : ''} (half cost)` : ''}`}
+          />
           {deposit && <Row label="Deposit" value={`${deposit.name} (${deposit.category})`} />}
 
           <Text style={styles.section}>Resources</Text>
           {RESOURCE_NAMES.map((name, r) => (
-            <Bar
-              key={name}
-              label={name}
-              value={world.resources[cell * RESOURCE_COUNT + r]}
-              capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
-            />
+            <View key={name}>
+              <Bar
+                label={name}
+                value={world.resources[cell * RESOURCE_COUNT + r]}
+                capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
+              />
+              <Text style={styles.terms}>{formatTerms(resourceCapacityTerms(world, cell, r))}</Text>
+            </View>
           ))}
+
+          {supply && totals && (
+            <>
+              <Text style={styles.section}>
+                Supports {supports} people · scarcest: {scarcest}
+              </Text>
+              {SUPPLY_NAMES.map((name, k) => (
+                <View key={name}>
+                  <Row label={name} value={`${Math.floor(totals[k])} people`} />
+                  {supply[k].map((t, i) => (
+                    <TermRow key={i} term={t} digits={0} />
+                  ))}
+                </View>
+              ))}
+              <Text style={styles.note}>
+                Each person needs one unit of food, water and space. Modifiers (abilities, depletion) appear as
+                extra lines; none apply yet.
+              </Text>
+            </>
+          )}
 
           <Text style={styles.section}>People</Text>
           <Row label="Civilization" value={civName ?? 'Nobody'} />
@@ -103,6 +142,27 @@ function Row({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
+
+/** One line of a calculation: what it is and how much it adds. */
+function TermRow({ term, digits }: { term: Term; digits: number }) {
+  return (
+    <View style={styles.termRow}>
+      <Text style={styles.termLabel}>{term.label}</Text>
+      <Text style={styles.termValue}>{signed(term.value, digits)}</Text>
+    </View>
+  );
+}
+
+/** A resource's calculation on one line, e.g. "Plains 0.80 · Terrain ×1.05 +0.04 · River +0.17 = 1.01". */
+function formatTerms(terms: readonly Term[]): string {
+  const parts = terms.map((t, i) => (i === 0 ? `${t.label} ${t.value.toFixed(2)}` : `${t.label} ${signed(t.value, 2)}`));
+  return `${parts.join(' · ')} = ${sumTerms(terms).toFixed(2)}`;
+}
+
+const signed = (v: number, digits: number) => {
+  const text = Math.abs(v).toFixed(digits);
+  return Number(text) === 0 ? `±${text}` : `${v < 0 ? '−' : '+'}${text}`;
+};
 
 function Bar({ label, value, capacity }: { label: string; value: number; capacity: number }) {
   return (
@@ -143,6 +203,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
   label: { color: colors.panelMuted, fontSize: 14, width: 110 },
   value: { color: colors.panelText, fontSize: 14, flex: 1 },
+  termRow: { flexDirection: 'row', paddingLeft: spacing.md, paddingVertical: 1 },
+  termLabel: { color: colors.panelMuted, fontSize: 12, flex: 1 },
+  termValue: { color: colors.panelMuted, fontSize: 12, fontVariant: ['tabular-nums'] },
+  terms: { color: colors.panelMuted, fontSize: 11, paddingLeft: 110, marginTop: -1, marginBottom: 3 },
+  note: { color: colors.panelMuted, fontSize: 11, marginTop: spacing.xs, fontStyle: 'italic' },
   barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.barTrack, overflow: 'hidden' },
   barCapacity: { position: 'absolute', top: 0, bottom: 0, left: 0, backgroundColor: colors.barCapacity },
   barFill: { position: 'absolute', top: 0, bottom: 0, left: 0, backgroundColor: colors.accent },

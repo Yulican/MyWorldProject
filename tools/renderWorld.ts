@@ -21,7 +21,7 @@ import {
   type Simulation,
   type World,
 } from '../src/sim';
-import { BIOME_COLORS, CIV_COLORS, DEPOSIT_COLORS } from '../src/map/palette';
+import { BIOME_COLORS, DEPOSIT_COLORS } from '../src/map/palette';
 
 const HEX_PX = 6;
 
@@ -47,7 +47,7 @@ function render(world: World, sim: Simulation | null): Buffer {
       if (c === world.startCell && d < 0.6) color = '#ff2030';
       const owner = sim ? world.owner[c] : 0;
       if (owner) {
-        const civColor = CIV_COLORS[sim!.civs[owner]?.color ?? 0];
+        const civColor = sim!.civs[owner]?.color ?? '#ffffff';
         color = d < 0.12 + Math.min(0.2, world.population[c] / 120) ? civColor : mix(color, civColor, d > 0.75 ? 0.7 : 0.3);
       }
       const [r, g, b] = hex(color);

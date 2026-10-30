@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { scenarioFromUrl } from '../bench/benchmark';
 import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
 import { CivPanel } from '../components/CivPanel';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { CIV_COLORS } from '../map/palette';
-import { simulationYear } from '../sim';
+import { hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
 import { createNewWorld, setSpeed, snapshotStore, useGameState } from '../state/worldStore';
 import { colors, spacing } from '../theme';
 
@@ -35,13 +35,13 @@ export function WorldScreen() {
   useEffect(() => {
     if (!hasWorld) return;
     Linking.getInitialURL().then((url) => {
-      if (url?.startsWith(BENCHMARK_URL)) runBenchmark();
+      if (url?.startsWith(BENCHMARK_URL)) runBenchmark(scenarioFromUrl(url));
     });
   }, [hasWorld, runBenchmark]);
 
   // Stable per world, so the map doesn't re-render with every simulation update.
   const territory = useMemo<TerritorySource>(
-    () => ({ ...snapshotStore, civColor: (id) => CIV_COLORS[sim?.civs[id]?.color ?? 0] }),
+    () => ({ ...snapshotStore, civColor: (id) => sim?.civs[id]?.color ?? '#ffffff' }),
     [sim],
   );
 
@@ -75,7 +75,12 @@ export function WorldScreen() {
           disabled={benchmarkRunning}
           onPress={() => {
             setPanel({ kind: 'none' });
-            runBenchmark();
+            runBenchmark('young');
+          }}
+          // A long press runs the aged-worlds scenario (300 simulated years first).
+          onLongPress={() => {
+            setPanel({ kind: 'none' });
+            runBenchmark('aged');
           }}
         >
           <Text style={styles.buttonText}>Bench</Text>
@@ -105,6 +110,7 @@ export function WorldScreen() {
             world={sim.world}
             cell={panel.cell}
             civName={sim.civs[sim.world.owner[panel.cell]]?.name ?? null}
+            supply={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexSupplyTerms(sim, panel.cell)}
             onClose={closePanel}
           />
         )}
@@ -143,7 +149,7 @@ function BenchmarkBanner({ status }: { status: BenchmarkStatus }) {
     return (
       <View style={styles.bench} pointerEvents="none">
         <Text style={styles.benchText}>
-          Benchmark · world {status.world + 1}/5 · swipe {status.swipe}/80 · failed {status.failed}
+          Benchmark ({status.scenario}) · world {status.world + 1}/5 · swipe {status.swipe}/80 · failed {status.failed}
         </Text>
       </View>
     );
@@ -152,7 +158,7 @@ function BenchmarkBanner({ status }: { status: BenchmarkStatus }) {
   return (
     <View style={[styles.bench, s.pass ? styles.benchPass : styles.benchFail]} pointerEvents="none">
       <Text style={styles.benchText}>
-        Benchmark {s.pass ? 'PASSED' : 'FAILED'} · {s.failed}/{s.swipes} swipes failed
+        Benchmark{s.scenario ? ` (${s.scenario})` : ''} {s.pass ? 'PASSED' : 'FAILED'} · {s.failed}/{s.swipes} swipes failed
       </Text>
       <Text style={styles.benchText}>
         fps min {s.minFps.toFixed(0)} · median {s.medianFps.toFixed(0)} · worst frame {s.worstMs.toFixed(0)} ms

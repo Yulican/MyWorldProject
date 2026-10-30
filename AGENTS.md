@@ -37,28 +37,32 @@ Run typecheck and tests before declaring any task done.
 
 ## Builds and testing
 
-- Every change happens on its own branch. Pushing a feature branch makes GitHub Actions (`.github/workflows/android-build.yml`, job `test`) build one signed test APK, run the map benchmark with it on an emulator and publish the APK as the pre-release `build-<branch>` (also when the benchmark fails); the user installs that on their phone to test. On `main`, job `release` builds the phone APK only.
+- Every change happens on its own branch. Pushing a feature branch makes GitHub Actions (`.github/workflows/android-build.yml`) build one test APK (job `test-apk`), run the map benchmark with it on emulators (job `benchmark`, one per scenario in parallel) and publish the APK as the pre-release `build-<branch>` (job `test-release`, also when a benchmark fails); the user installs that on their phone to test. On `main`, job `release` builds the phone APK only.
+- `test-apk` only rebuilds native code when the Expo native fingerprint changed (dependencies, `app.json`, config plugins). Otherwise it takes the cached native APK and swaps in the new JS bundle (`scripts/swap-js-bundle.sh`, byte-identical to a full build). If the JS ever imports images or other assets, that script fails on purpose and must learn to swap them.
 - CI passes the CPU architectures as `-PreactNativeArchitectures`: `arm64-v8a` (phone) on `main`, `arm64-v8a,x86_64` (phone + emulator) on feature branches. Don't hard-code CPU architectures in `app.json` or config plugins; when adding a native library, make sure it supports arm64-v8a and x86_64.
 - Commits that only touch `Design Documents/`, `*.md` or `LICENSE` don't trigger a build. To get an APK anyway, run the workflow manually (`workflow_dispatch`).
 - EAS is not used for builds.
 
 ## Mandatory performance test
 
-Every push to a feature branch runs the map benchmark in CI (job `test` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark`):
+Every push to a feature branch runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark?scenario=young|aged`):
 
 - 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world, with the simulation running at its default speed and territories on the map.
+- Two scenarios, run in parallel: `young` (new worlds) and `aged` (each world simulated for 300 years first: many peoples, territories and roads).
 - **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
 
 Rules for every agent and every change:
 
-- Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for the `test` job.
-- A task is not done, and its branch must not be merged into `main`, until the `test` job (including its benchmark step) passes. If it fails, keep optimizing and push again; don't hand the task back as finished.
+- Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for both `benchmark` jobs.
+- Never push while a pipeline run for the branch is still in progress, unless the user explicitly approves that push. A new push cancels the running run and makes the feedback loop longer. Commit locally, wait for the run to finish, then push.
+- A task is not done, and its branch must not be merged into `main`, until the whole run passes (both `benchmark` jobs). If it fails, keep optimizing and push again; don't hand the task back as finished.
 - Never weaken the thresholds, skip swipes or worlds, or disable the job to get it green. Only the user changes the rules.
 - New features extend the benchmark (new scenarios in `src/bench/`); all scenarios must always pass.
-- The failing swipes, their seeds and directions are in the job summary and the `benchmark-results` artifact. The **Bench** button in the app runs the same benchmark on a phone.
+- The failing swipes, their seeds and directions, and what else happened in the app during them, are in the job summaries and the `benchmark-results-<scenario>` artifacts. The **Bench** button in the app runs the young scenario on a phone, a long press the aged one.
 
 ## Rules
 
+- Discuss every change to game logic (simulation rules, balancing, what the player sees happen) with the user before implementing it: describe the planned rule and its open details, and wait for the user's go. Pure bug fixes that restore agreed behavior, performance work and tooling don't need this.
 - The `android/` directory is generated (Continuous Native Generation). Never create or edit it by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:android` locally, or `eas build --profile development --platform android`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md

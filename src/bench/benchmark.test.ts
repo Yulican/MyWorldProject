@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BENCHMARK, evaluateSwipe, summarizeBenchmark, swipePlan, type SwipeResult } from './benchmark';
+import { BENCHMARK, evaluateSwipe, scenarioFromUrl, summarizeBenchmark, swipePlan, type SwipeResult } from './benchmark';
 
 test('the plan has 10 swipes in each of the 8 directions at 1500 pt/s', () => {
   const plan = swipePlan();
@@ -35,4 +35,10 @@ test('the benchmark passes only when all 400 swipes pass', () => {
   all[123] = { ...ok, fps: 40, pass: false };
   assert.equal(summarizeBenchmark(all).pass, false);
   assert.equal(summarizeBenchmark(all.slice(0, 399)).pass, false);
+});
+
+test('the benchmark link picks the scenario, young by default', () => {
+  assert.equal(scenarioFromUrl('myworld://benchmark'), 'young');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=aged'), 'aged');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });

@@ -32,7 +32,7 @@ Builds are signed with the project keystore from the repository secrets `ANDROID
 
 ## Performance test
 
-Every push to a feature branch runs the map benchmark on an Android emulator (job `test`; the release notes show the result): 5 random worlds at zoom ×2, 80 swipes each at 1500 pt/s in all 8 directions; every swipe needs ≥ 60 fps and no frame over 25 ms. A change is only done when it passes; see `AGENTS.md`. The **Bench** button in the app runs the same test on the phone.
+Every push to a feature branch runs the map benchmark on Android emulators (job `benchmark`; the release notes show the results) in two scenarios in parallel, young worlds and worlds after 300 simulated years: 5 random worlds at zoom ×2, 80 swipes each at 1500 pt/s in all 8 directions; every swipe needs ≥ 60 fps and no frame over 25 ms. A change is only done when both pass; see `AGENTS.md`. The **Bench** button in the app runs the young scenario on the phone, a long press the aged one.
 
 ## Structure
 

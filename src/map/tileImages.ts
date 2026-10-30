@@ -7,19 +7,29 @@ const SLICE_MS = 8;
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
 const KEEP_MS = 1000;
+/**
+ * Outdated tiles still show their old image, so they are only redone once the
+ * view has rested this long: rendering them while the map moves takes CPU
+ * time from drawing frames, and each new image is uploaded to the GPU when
+ * first drawn.
+ */
+const REDO_IDLE_MS = 300;
 
 /** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
 export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
+/** A number that only changes when a tile's image would change (see `invalidate`). */
+export type TileSignature = (chunk: number) => number;
 
-type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean };
+type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; signature: number };
 export type TileRequest = TileRef & { tier: number };
 
 /**
  * Pre-rendered tile images of one map layer, per zoom tier. Tiles are
  * rendered in the background, nearest to the view first; `onReady` is called
  * when new ones are available. After `invalidate()` (the layer's data changed)
- * tiles are rendered again, and the old image stays visible until the new one
- * is ready. Least recently drawn tiles are freed when the memory budget is
+ * tiles whose signature changed are rendered again, and the old image stays
+ * visible until the new one is ready. Unchanged tiles keep their image, so the
+ * UI thread doesn't have to upload it again. Least recently drawn tiles are freed when the memory budget is
  * exceeded.
  */
 export class TileImages {
@@ -28,11 +38,15 @@ export class TileImages {
   /** Tiles of the current view (any tier): never freed. */
   private wanted = new Set<number>();
   private bytes = 0;
+  /** When the view last changed (`want`). */
+  private wantedAt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
   constructor(
     private render: RenderTile,
+    /** Without one, every tile counts as changed on `invalidate`. */
+    private signature: TileSignature | null,
     /** Pixels per picture pixel for each tier. */
     private tierScales: readonly number[],
     private onReady: () => void,
@@ -56,9 +70,10 @@ export class TileImages {
     return null;
   }
 
-  /** Replaces the wanted tiles; missing or outdated ones are rendered, nearest first. */
+  /** Replaces the wanted tiles; missing ones are rendered first, then outdated ones, nearest first. */
   want(requests: TileRequest[]) {
     if (this.disposed) return;
+    this.wantedAt = Date.now();
     this.wanted = new Set(requests.map((r) => r.chunk));
     const seen = new Set<string>();
     this.queue = requests
@@ -69,8 +84,13 @@ export class TileImages {
         seen.add(k);
         return true;
       })
-      .sort((a, b) => a.distance - b.distance);
+      // Missing tiles first (blank on screen), then outdated ones; nearest first.
+      .sort((a, b) => this.redo(a) - this.redo(b) || a.distance - b.distance);
     if (this.queue.length > 0 && this.timer === null) this.timer = setTimeout(this.work, 0);
+  }
+
+  private redo(r: TileRequest): number {
+    return this.entries.has(key(r.chunk, r.tier)) ? 1 : 0;
   }
 
   /**
@@ -79,8 +99,9 @@ export class TileImages {
    */
   invalidate() {
     for (const [k, e] of this.entries) {
-      if (this.wanted.has(chunkOf(k))) {
-        e.stale = true;
+      const chunk = chunkOf(k);
+      if (this.wanted.has(chunk)) {
+        if (!this.signature || this.signature(chunk) !== e.signature) e.stale = true;
       } else {
         this.entries.delete(k);
         this.free(e);
@@ -93,21 +114,31 @@ export class TileImages {
     if (this.disposed) return;
     const start = Date.now();
     let rendered = 0;
+    let wait = 0;
     while (this.queue.length > 0 && (rendered === 0 || Date.now() - start < SLICE_MS)) {
-      const r = this.queue.shift()!;
+      const r = this.queue[0];
       const k = key(r.chunk, r.tier);
       const old = this.entries.get(k);
-      if (old && !old.stale) continue;
+      if (old && !old.stale) {
+        this.queue.shift();
+        continue;
+      }
+      if (old) {
+        wait = this.wantedAt + REDO_IDLE_MS - Date.now();
+        if (wait > 0) break;
+      }
+      this.queue.shift();
+      const signature = this.signature ? this.signature(r.chunk) : 0;
       const image = this.render(r.chunk, this.tierScales[r.tier]);
       const bytes = image ? image.width() * image.height() * 4 : 0;
-      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false });
+      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, signature });
       this.bytes += bytes;
       if (old) this.free(old);
       rendered++;
     }
     this.evict();
     if (rendered > 0) this.onReady();
-    if (this.queue.length > 0) this.timer = setTimeout(this.work, 0);
+    if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(0, wait));
   };
 
   /** Frees the least recently drawn tiles while over budget. */

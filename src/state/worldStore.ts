@@ -1,6 +1,14 @@
 import { useSyncExternalStore } from 'react';
-import { createSimulation, generateWorld, randomSeed, stepSimulation, type Simulation, type World } from '../sim';
-import { recordSimWork } from './perfStats';
+import {
+  TICKS_PER_YEAR,
+  createSimulation,
+  generateWorld,
+  randomSeed,
+  stepSimulation,
+  type Simulation,
+  type World,
+} from '../sim';
+import { countEvent, recordSimWork } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
 // simulation state lives outside React, components subscribe to what they
@@ -48,6 +56,18 @@ export function createNewWorld(seed: number = randomSeed()): World {
   publish({ sim, speed: DEFAULT_SPEED });
   startClock();
   return sim.world;
+}
+
+/**
+ * Simulates the current world for `years` at once (for the benchmark's aged
+ * scenario) and shows the result.
+ */
+export function advanceYears(years: number) {
+  const { sim } = state;
+  if (!sim) return;
+  for (let t = 0; t < years * TICKS_PER_YEAR && !sim.gameOver; t++) stepSimulation(sim);
+  notifiedSnapshot = sim.snapshotVersion;
+  publish({});
 }
 
 export function setSpeed(speed: number) {
@@ -105,6 +125,7 @@ function runFrame(now: number) {
   if (sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
     notifiedSnapshot = sim.snapshotVersion;
     lastNotify = now;
+    countEvent('snapshots');
     publish({});
   }
   if (!sim.gameOver) frame = requestAnimationFrame(runFrame);
