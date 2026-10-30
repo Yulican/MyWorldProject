@@ -3,7 +3,7 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import type { Term } from '../terms';
 import { BIOMES, isWaterBiome } from '../world/biomes';
 import { clamp } from '../world/climate';
-import { addRoad, stepCost } from '../world/roads';
+import { addRoad, hasRoad, stepCost } from '../world/roads';
 import type { World } from '../world/world';
 import {
   CIV_COLOR_COUNT,
@@ -138,6 +138,7 @@ export function stepSimulation(sim: Simulation): void {
   if (yearEnd) updateCivilizations(sim);
   if (sim.tick % REFRESH_TICKS === 0) {
     expandSettlements(sim);
+    splitCutOffLand(sim);
     refreshSnapshot(sim);
   }
   if (yearEnd) closeYear(sim);
@@ -322,6 +323,81 @@ function expandSettlements(sim: Simulation): void {
       addRoad(world, source, best);
     }
   }
+}
+
+/**
+ * Quarterly: a people's hexes that are no longer connected to its capital by
+ * roads through its own hexes (e.g. because a hex between them emptied and
+ * was lost) found a new civilization, one per cut-off group, as long as a
+ * civilization slot is free. Its people keep 60 % of their faith and no
+ * longer worship the player (design doc, section 5).
+ */
+function splitCutOffLand(sim: Simulation): void {
+  const { world, pop } = sim;
+  const n = world.cellCount;
+  const owner = currentOwners(sim);
+  for (const parent of livingCivilizations(sim)) {
+    if (owner[parent.capital] !== parent.id) {
+      const capital = mostPopulousCell(sim, parent.id, null);
+      if (capital < 0 || owner[capital] !== parent.id) continue;
+      parent.capital = capital;
+    }
+    const group = new Int32Array(n).fill(-1);
+    const connect = (start: number, id: number): number[] => {
+      const cells = [start];
+      group[start] = id;
+      for (let k = 0; k < cells.length; k++) {
+        const c = cells[k];
+        for (let d = 0; d < DIRECTION_COUNT; d++) {
+          if (!hasRoad(world, c, d)) continue;
+          const nb = world.neighbors[c * DIRECTION_COUNT + d];
+          if (nb >= 0 && group[nb] < 0 && owner[nb] === parent.id) {
+            group[nb] = id;
+            cells.push(nb);
+          }
+        }
+      }
+      return cells;
+    };
+    connect(parent.capital, 0);
+    const cutOff: number[][] = [];
+    for (let c = 0; c < n; c++) {
+      if (owner[c] === parent.id && group[c] < 0) cutOff.push(connect(c, cutOff.length + 1));
+    }
+    // Largest groups first, while civilization slots last.
+    const people = (cells: number[]) => cells.reduce((sum, c) => sum + sim.cellCivPop[c * CIV_SLOTS + parent.id], 0);
+    cutOff.sort((a, b) => people(b) - people(a));
+    for (const cells of cutOff) {
+      if (livingCivilizations(sim).length >= MAX_CIVS) break;
+      const inGroup = new Uint8Array(n);
+      for (const c of cells) inGroup[c] = 1;
+      const capital = mostPopulousCell(sim, parent.id, inGroup);
+      const civ = foundCivilization(sim, 'secession', capital, parent);
+      for (let i = 0; i < pop.end; i++) {
+        if (!pop.alive[i] || pop.civ[i] !== parent.id || !inGroup[pop.cell[i]]) continue;
+        if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
+        changeCiv(sim, i, civ.id);
+        pop.faith[i] *= 0.6;
+      }
+      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`);
+    }
+  }
+}
+
+/** Who holds each hex right now: the civilization with the most people there, 0 if empty. */
+function currentOwners(sim: Simulation): Uint8Array {
+  const owner = new Uint8Array(sim.world.cellCount);
+  for (let c = 0; c < owner.length; c++) {
+    let most = 0;
+    for (let id = 1; id < CIV_SLOTS; id++) {
+      const k = sim.cellCivPop[c * CIV_SLOTS + id];
+      if (k > most) {
+        most = k;
+        owner[c] = id;
+      }
+    }
+  }
+  return owner;
 }
 
 /** Moves `count` people of a civilization from one hex to another. */

@@ -55,7 +55,16 @@ export function swipePlan(): Swipe[] {
 /** Frames measured during one swipe. */
 export type SwipeStats = { frames: number; timeMs: number; worstMs: number };
 
-export type SwipeResult = { world: number; seed: number; direction: string; fps: number; worstMs: number; pass: boolean };
+export type SwipeResult = {
+  world: number;
+  seed: number;
+  direction: string;
+  fps: number;
+  worstMs: number;
+  pass: boolean;
+  /** What else happened in the app during the swipe (see perfStats.perfEvents), to find what costs frames. */
+  events?: Record<string, number>;
+};
 
 export function evaluateSwipe(stats: SwipeStats): { fps: number; worstMs: number; pass: boolean } {
   const fps = stats.timeMs > 0 ? (stats.frames * 1000) / stats.timeMs : 0;

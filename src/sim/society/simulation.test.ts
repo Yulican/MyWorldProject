@@ -4,7 +4,7 @@ import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import { ROAD_TRAVEL_FACTOR, addRoad, hasRoad, travelCostField } from '../world/roads';
-import { MAX_CIVS } from './civilizations';
+import { MAX_CIVS, ledgerNet } from './civilizations';
 import {
   BELIEVER_FAITH,
   EXPANSION_GROUP,
@@ -81,7 +81,7 @@ for (const seed of [1, 3, 1234]) {
   });
 }
 
-test('breakaways are paused', () => {
+test('distant settlements don\'t break away while that rule is paused', () => {
   const sim = createSimulation(generateWorld({ seed: 1 }));
   runYears(sim, 200);
   assert.ok(livingCivilizations(sim).every((c) => c.origin !== 'secession'));
@@ -95,7 +95,7 @@ test('the faith ledger explains every change in believers', () => {
     const before = player.believers;
     runYears(sim, 1);
     const l = player.faithLastYear;
-    const net = l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot;
+    const net = ledgerNet(l);
     assert.equal(player.believers - before, net, `year ${31 + year}: ${JSON.stringify(l)}`);
   }
   assert.equal(sim.history.believers.length, 70);
@@ -236,4 +236,39 @@ test('modifiers appear as their own line and supplies never go below zero', () =
   const water = supplyTerms(world, cell, [drought])[SupplyKind.Water];
   assert.ok(water.some((t) => t.label === 'Drought'));
   assert.equal(sumTerms(water), 0);
+});
+
+/** Hexes of a people not connected to its capital by roads through its own hexes. */
+function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] {
+  const { world } = sim;
+  const reached = new Set([capital]);
+  const queue = [capital];
+  while (queue.length > 0) {
+    const c = queue.pop()!;
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      if (hasRoad(world, c, d) && world.owner[nb] === civId && !reached.has(nb)) {
+        reached.add(nb);
+        queue.push(nb);
+      }
+    }
+  }
+  return [...world.owner.keys()].filter((c) => world.owner[c] === civId && !reached.has(c));
+}
+
+test('land cut off from its capital becomes its own people', () => {
+  // In this world a settlement of the Vizani is cut off around year 250.
+  const sim = createSimulation(generateWorld({ seed: 77 }));
+  for (let year = 1; year <= 260; year++) {
+    runYears(sim, 1);
+    const civs = livingCivilizations(sim);
+    if (civs.length >= MAX_CIVS) continue;
+    for (const civ of civs) {
+      assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
+    }
+  }
+  const split = sim.chronicle.find((e) => e.text.includes('cut off from'));
+  assert.ok(split, 'a cut-off people was founded');
+  const civ = livingCivilizations(sim).find((c) => split.text.includes(c.name) && c.origin === 'secession');
+  assert.ok(civ && !civ.worshipsPlayer);
 });

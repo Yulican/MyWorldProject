@@ -28,10 +28,17 @@ export type FaithLedger = {
   lostToNeighbors: number;
   /** Stopped believing because their civilization doesn't worship the player. */
   forgot: number;
+  /** Believers who left with land cut off from the capital, founding their own people. */
+  brokeAway: number;
 };
 
 export function emptyFaithLedger(): FaithLedger {
-  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0 };
+  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0, brokeAway: 0 };
+}
+
+/** Net change in believers the ledger explains. */
+export function ledgerNet(l: FaithLedger): number {
+  return l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot - l.brokeAway;
 }
 
 export type Civilization = {

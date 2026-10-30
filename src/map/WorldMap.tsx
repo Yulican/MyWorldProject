@@ -22,7 +22,7 @@ import {
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
-import { recordMapBuild } from '../state/perfStats';
+import { countEvent, recordMapBuild } from '../state/perfStats';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
@@ -369,6 +369,7 @@ type TileLayerProps = {
  * territory tiles stay until the new ones are ready.
  */
 const TileLayer = memo(function TileLayer({ world, layers, listener, territory }: TileLayerProps) {
+  countEvent('tileLayerRenders');
   const [view, setView] = useState<ViewTiles>(NO_TILES);
   const [, setReady] = useState(0);
   listener.current = setView;
@@ -376,13 +377,25 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory }
   const scales = useMemo(() => TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()), []);
 
   const terrainTiles = useMemo(
-    () => new TileImages((chunk, px) => renderTile(world, chunk, layers.chunkCols, px), null, scales, onReady),
+    () =>
+      new TileImages(
+        (chunk, px) => {
+          countEvent('terrainTiles');
+          return renderTile(world, chunk, layers.chunkCols, px);
+        },
+        null,
+        scales,
+        onReady,
+      ),
     [world, layers, scales, onReady],
   );
   const territoryTiles = useMemo(
     () =>
       new TileImages(
-        (chunk, px) => renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor),
+        (chunk, px) => {
+          countEvent('territoryTiles');
+          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor);
+        },
         (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
         onReady,
@@ -407,6 +420,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory }
     const t0 = performance.now();
     const built = buildTerritoryOverview(world, territory.civColor, layers);
     recordMapBuild(performance.now() - t0);
+    countEvent('territoryOverviews');
     return built;
     // `version` stands in for the world's mutable society arrays.
   }, [world, layers, territory, version, view.detail]);

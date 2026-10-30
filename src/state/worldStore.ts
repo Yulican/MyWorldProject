@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { createSimulation, generateWorld, randomSeed, stepSimulation, type Simulation, type World } from '../sim';
-import { recordSimWork } from './perfStats';
+import { countEvent, recordSimWork } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
 // simulation state lives outside React, components subscribe to what they
@@ -105,6 +105,7 @@ function runFrame(now: number) {
   if (sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
     notifiedSnapshot = sim.snapshotVersion;
     lastNotify = now;
+    countEvent('snapshots');
     publish({});
   }
   if (!sim.gameOver) frame = requestAnimationFrame(runFrame);

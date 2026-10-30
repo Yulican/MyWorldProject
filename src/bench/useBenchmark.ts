@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
+import { perfEvents } from '../state/perfStats';
 import { createNewWorld } from '../state/worldStore';
 import {
   BENCHMARK,
@@ -51,8 +52,11 @@ export function useBenchmark(controller: { current: MapController | null }) {
       await map.swipe(plan[0]);
       for (let i = 0; i < plan.length; i++) {
         await delay(PAUSE_MS);
+        const before = { ...perfEvents };
         const stats = await map.swipe(plan[i]);
-        const result = { world, seed, direction: plan[i].direction, ...evaluateSwipe(stats) };
+        const events: Record<string, number> = {};
+        for (const [k, v] of Object.entries(perfEvents)) events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
+        const result = { world, seed, direction: plan[i].direction, ...evaluateSwipe(stats), events };
         results.push(result);
         console.log(`${LOG}_SWIPE ${JSON.stringify(result)}`);
         setStatus({ running: true, world, swipe: i + 1, failed: results.filter((r) => !r.pass).length });

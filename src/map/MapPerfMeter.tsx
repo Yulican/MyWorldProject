@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useFrameCallback, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import { takePerfSample } from '../state/perfStats';
+import { countEvent, takePerfSample } from '../state/perfStats';
 import { addFrame, newMotionStats, summarize, wrappedDelta, type MotionSummary } from './motionStats';
 
 /** How often the live line updates. */
@@ -142,6 +142,7 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
   }, []);
 
   if (!live) return null;
+  countEvent('meterUpdates');
   return (
     <View style={styles.box} pointerEvents="none">
       <Text style={styles.text}>

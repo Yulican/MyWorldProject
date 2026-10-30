@@ -84,6 +84,23 @@ for (const [key, g] of groups) {
   const worst = Math.max(...g.map((s) => s.worstMs));
   lines.push(`| ${+world + 1} | ${seed} | ${dir} | ${g.length} | ${failed} | ${minFps.toFixed(1)} | ${worst.toFixed(1)} |`);
 }
+// Diagnostics: what else happened in the app during failing vs. passing
+// swipes (counts per swipe, see src/state/perfStats.ts).
+const withEvents = swipes.filter((s) => s.events);
+if (withEvents.length > 0) {
+  const keys = Object.keys(withEvents[0].events);
+  const mean = (list, k) => (list.length ? list.reduce((sum, s) => sum + s.events[k], 0) / list.length : 0);
+  const failing = withEvents.filter((s) => !s.pass);
+  const passing = withEvents.filter((s) => s.pass);
+  lines.push('', '### What happened during the swipes (mean per swipe)', '', '| Event | Failing swipes | Passing swipes |', '|---|---|---|');
+  for (const k of keys) lines.push(`| ${k} | ${mean(failing, k).toFixed(2)} | ${mean(passing, k).toFixed(2)} |`);
+  if (failing.length > 0) {
+    lines.push('', '### Failing swipes', '', '| World | Direction | fps | Worst ms | ' + keys.join(' | ') + ' |', '|---|---|---|---|' + keys.map(() => '---|').join(''));
+    for (const s of failing) {
+      lines.push(`| ${s.world + 1} | ${s.direction} | ${s.fps.toFixed(1)} | ${s.worstMs.toFixed(1)} | ` + keys.map((k) => s.events[k]).join(' | ') + ' |');
+    }
+  }
+}
 const text = lines.join('\n') + '\n';
 fs.writeFileSync(`${out}/summary.md`, text);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
