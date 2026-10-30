@@ -40,9 +40,10 @@ import {
   connectionValue,
   hasSeat,
   pruneMoods,
+  seatsOf,
   updateSatisfaction,
 } from './satisfaction';
-import { WORKSHOP_OF, advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
+import { WORKSHOP_OF, buildSupplyRoad, advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
 import { PROTO } from './tuning';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
@@ -137,6 +138,8 @@ export type Simulation = {
    */
   seatSite: Uint16Array;
   seatRetry: Uint16Array;
+  /** Year + 1 a settlement last wanted to send settlers but the expansion stop held it back (prototype). */
+  frontierBlocked: Uint16Array;
   /** Merchants on their way and what settlements ask for and spare (see trade.ts). */
   trade: Trade;
   /** Inhabitants of 16 and older per hex, counted at every refresh (they earn money). */
@@ -180,6 +183,7 @@ export function createSimulation(world: World): Simulation {
     seatCost: new Float32Array(n).fill(Infinity),
     seatSite: new Uint16Array(n),
     seatRetry: new Uint16Array(n),
+    frontierBlocked: new Uint16Array(n),
     trade: createTrade(world.seed, n),
     cellAdults: new Int32Array(n),
     chronicle: [],
@@ -231,6 +235,7 @@ export function stepSimulation(sim: Simulation): void {
     breakAway(sim, owner);
     if (yearEnd) planSeats(sim, owner);
     if (yearEnd && PROTO.capture) captureDeposits(sim, owner);
+    if (yearEnd && PROTO.supplyRoads && PROTO.expandOnlyHappy) buildSupplyRoads(sim, owner);
     refreshSnapshot(sim);
   }
   if (yearEnd) closeYear(sim);
@@ -403,12 +408,16 @@ function expandSettlements(sim: Simulation): void {
     for (const source of sources) {
       let best = -1;
       let bestScore = -Infinity;
+      let held = false;
       for (let d = 0; d < DIRECTION_COUNT; d++) {
         const target = world.neighbors[source * DIRECTION_COUNT + d];
         if (target < 0 || !isSettlementTarget(sim, target)) continue;
         const step = stepCost(world, source, d);
         // Rather stop spreading than found a settlement that is unhappy from the start.
-        if (PROTO.expandOnlyHappy && connectionValue(sim.seatCost[source] + step) < PROTO.expandMinConnection) continue;
+        if (PROTO.expandOnlyHappy && connectionValue(sim.seatCost[source] + step) < PROTO.expandMinConnection) {
+          held = true;
+          continue;
+        }
         const score =
           capacityAfterRepair(sim, target) / GOOD_LAND_PEOPLE +
           terrainAppeal(world, civ.culture, target) +
@@ -420,10 +429,27 @@ function expandSettlements(sim: Simulation): void {
           best = d;
         }
       }
-      if (best < 0) continue;
+      if (best < 0) {
+        // Held back by the stop: its people first extend their reach (seat, roads).
+        if (held) sim.frontierBlocked[source] = Math.floor(sim.tick / TICKS_PER_YEAR) + 1;
+        continue;
+      }
       moveGroup(sim, source, world.neighbors[source * DIRECTION_COUNT + best], civ.id, EXPANSION_GROUP);
       addRoad(world, source, best);
     }
+  }
+}
+
+/** Yearly: every settlement the expansion stop held back this or last year builds on a road to its nearest seat (prototype). */
+function buildSupplyRoads(sim: Simulation, owner: Uint8Array): void {
+  const year = Math.floor(sim.tick / TICKS_PER_YEAR);
+  const seats = seatsOf(sim, owner);
+  const isSeat = new Uint8Array(sim.world.cellCount);
+  for (const list of seats) for (const c of list) isSeat[c] = 1;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (!owner[c] || !sim.frontierBlocked[c] || year + 1 - sim.frontierBlocked[c] > 1) continue;
+    if (sim.seatCost[c] === Infinity) continue;
+    buildSupplyRoad(sim, c, isSeat, sim.seatCost[c]);
   }
 }
 

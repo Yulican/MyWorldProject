@@ -181,7 +181,8 @@ function harvestWith(sim: Simulation, cell: number, good: number, extraA: number
 function upkeepWith(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
   const { economy } = sim;
   let sum = 0;
-  const of = (t: number) => (material === Material.Wood ? BUILDINGS[t].upkeepWood : BUILDINGS[t].upkeepStone);
+  const of = (t: number) =>
+    PROTO.seatUpkeepMoney > 0 && t === SEAT_TYPE ? 0 : material === Material.Wood ? BUILDINGS[t].upkeepWood : BUILDINGS[t].upkeepStone;
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     if (economy.state[s] === SlotState.Standing) sum += of(economy.type[s]);
   }
@@ -232,6 +233,16 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
         else {
           economy.state[s] = SlotState.Standing;
           economy.work[s] = 0;
+          economy.unpaid[s] = 0;
+          supplyChanged = true;
+        }
+      } else if (st === SlotState.Standing && yearEnd && PROTO.seatUpkeepMoney > 0 && economy.type[s] === SEAT_TYPE) {
+        // Prototype: a seat's upkeep in money.
+        if (people > 0 && economy.money[c] >= PROTO.seatUpkeepMoney) {
+          economy.money[c] -= PROTO.seatUpkeepMoney;
+          economy.unpaid[s] = 0;
+        } else if (++economy.unpaid[s] > UPKEEP_GRACE_YEARS) {
+          economy.state[s] = SlotState.Ruin;
           economy.unpaid[s] = 0;
           supplyChanged = true;
         }
@@ -627,7 +638,9 @@ function planSeatSites(sim: Simulation, owner: Uint8Array): void {
   for (let id = 1; id < sim.civSlots; id++) {
     const list = candidates[id];
     if (!sim.civs[id] || busy[id] || !list) continue;
-    list.sort((a, b) => sim.seatCost[b] - sim.seatCost[a] || a - b);
+    // Held back by the expansion stop first, then the worst connected.
+    const held = (c: number) => (sim.frontierBlocked[c] && year + 1 - sim.frontierBlocked[c] <= 1 ? 1 : 0);
+    list.sort((a, b) => held(b) - held(a) || sim.seatCost[b] - sim.seatCost[a] || a - b);
     let best = -1;
     let bestBenefit = SEAT_MIN_BENEFIT;
     for (const c of list.slice(0, PROTO.seatCandidates)) {
@@ -635,6 +648,8 @@ function planSeatSites(sim: Simulation, owner: Uint8Array): void {
       let benefit = 0;
       for (const k of reached) {
         benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
+        // A settlement held back whose next step would pass the stop with this seat.
+        if (held(k) && connectionValue(field[k] + 1) >= PROTO.expandMinConnection) benefit += PROTO.frontierBonus;
         field[k] = Infinity;
       }
       if (benefit > bestBenefit) {

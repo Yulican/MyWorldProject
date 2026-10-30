@@ -807,7 +807,7 @@ const landReached: number[] = [];
  * segment was built.
  */
 export function buildTradeRoad(sim: Simulation, home: number, year: number): boolean {
-  const { world, trade, economy } = sim;
+  const { world, trade } = sim;
   const owner = world.owner;
   const partner = trade.partner[home];
   const civ = owner[home];
@@ -818,8 +818,35 @@ export function buildTradeRoad(sim: Simulation, home: number, year: number): boo
   searchWays(sim, owner, home, MAX_TRIP_COST * 2, -1);
   const now = wayCost[partner];
   resetWays();
+  const built = roadTowards(sim, home, (c) => c === partner, false, now);
+  // After a segment, the next one follows next quarter; otherwise wait.
+  trade.roadChecked[home] = built ? -1 : partner;
+  trade.roadYear[home] = year;
+  return built;
+}
 
-  // The cheapest road there could be: every step on a road.
+/**
+ * A supply road (prototype): a settlement the expansion stop holds back
+ * builds the next missing segment of a road over its people's land to the
+ * nearest seat of government (`seat`), when the road makes that way
+ * ROAD_SAVING shorter than today (`now`, its travel cost to the seat).
+ */
+export function buildSupplyRoad(sim: Simulation, home: number, seat: Uint8Array, now: number): boolean {
+  if (!takeSearches(sim, 1)) return false;
+  return roadTowards(sim, home, (c) => seat[c] === 1, true, now);
+}
+
+/**
+ * The cheapest road from `home` to the first hex `isTarget` accepts, as if
+ * every step were on a road, over its people's land (and free land unless
+ * `ownOnly`). If it is ROAD_SAVING cheaper than `now`, builds its first
+ * missing segment from home's stock (wood and stone times the terrain's
+ * cost), keeping what home saves up for. Returns whether a segment was built.
+ */
+function roadTowards(sim: Simulation, home: number, isTarget: (c: number) => boolean, ownOnly: boolean, now: number): boolean {
+  const { world, trade, economy } = sim;
+  const owner = world.owner;
+  const civ = owner[home];
   const n = world.cellCount;
   if (landCost.length !== n) {
     landCost = new Float32Array(n).fill(Infinity);
@@ -829,12 +856,16 @@ export function buildTradeRoad(sim: Simulation, home: number, year: number): boo
   landCost[home] = 0;
   landReached.push(home);
   wayHeap.push(home, 0);
+  let target = -1;
   while (wayHeap.size > 0) {
     const c = wayHeap.pop();
-    if (c === partner) break;
+    if (c !== home && isTarget(c)) {
+      target = c;
+      break;
+    }
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
-      if (nb < 0 || isWaterBiome(world.biome[nb]) || (owner[nb] !== civ && owner[nb] !== 0)) continue;
+      if (nb < 0 || isWaterBiome(world.biome[nb]) || (owner[nb] !== civ && (ownOnly || owner[nb] !== 0))) continue;
       const next = landCost[c] + ((world.moveCost[c] + world.moveCost[nb]) / 2) * ROAD_TRAVEL_FACTOR;
       if (next >= landCost[nb] || next > MAX_TRIP_COST * 2) continue;
       if (landCost[nb] === Infinity) landReached.push(nb);
@@ -845,10 +876,9 @@ export function buildTradeRoad(sim: Simulation, home: number, year: number): boo
   }
   while (wayHeap.size > 0) wayHeap.pop();
   let built = false;
-  const road = landCost[partner];
-  if (road < Infinity && road <= now * (1 - ROAD_SAVING)) {
+  if (target >= 0 && landCost[target] <= now * (1 - ROAD_SAVING)) {
     // The first missing segment from home along the road.
-    let c = partner;
+    let c = target;
     let segment = -1;
     while (c !== home && c >= 0) {
       const prev = landPrev[c];
@@ -877,9 +907,6 @@ export function buildTradeRoad(sim: Simulation, home: number, year: number): boo
     landPrev[c] = -1;
   }
   landReached.length = 0;
-  // After a segment, the next one follows next quarter; otherwise wait.
-  trade.roadChecked[home] = built ? -1 : partner;
-  trade.roadYear[home] = year;
   return built;
 }
 

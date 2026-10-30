@@ -24,6 +24,12 @@ export const PROTO = {
   seatsV2: true,
   /** Settlements a people compares for its next seat (its worst connected first). */
   seatCandidates: 12,
+  /** Seat planning weighs each settlement the stop holds back that the seat would free by this much. */
+  frontierBonus: 20,
+  /** Settlements the stop holds back build roads to the nearest seat. */
+  supplyRoads: true,
+  /** >0: a seat's upkeep is this much money a year instead of wood and stone. */
+  seatUpkeepMoney: 0,
   /** Counters for the prototype measurements. */
   debug: { planned: 0, built: 0, expired: 0, noMaterial: 0, noUpkeep: 0, replaced: 0, lowBenefit: 0 },
 };
