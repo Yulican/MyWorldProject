@@ -56,10 +56,12 @@ export function useBenchmark(controller: { current: MapController | null }) {
       await map.swipe(plan[0]);
       for (let i = 0; i < plan.length; i++) {
         await delay(PAUSE_MS);
-        const before = { ...perfEvents };
+        const before = { ...perfEvents, ...gcStats() };
         const stats = await map.swipe(plan[i]);
         const events: Record<string, number> = {};
-        for (const [k, v] of Object.entries(perfEvents)) events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
+        for (const [k, v] of Object.entries({ ...perfEvents, ...gcStats() })) {
+          events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
+        }
         const result = { world, seed, direction: plan[i].direction, ...evaluateSwipe(stats), events };
         results.push(result);
         console.log(`${LOG}_SWIPE ${JSON.stringify(result)}`);
@@ -73,4 +75,17 @@ export function useBenchmark(controller: { current: MapController | null }) {
   }, [controller]);
 
   return { status, run };
+}
+
+/**
+ * Garbage collections of the JS engine so far and their time in ms (Hermes;
+ * zeros elsewhere). The collector also runs on other threads, so it can cost
+ * frames without any app work.
+ */
+function gcStats(): { gcCount: number; gcMs: number } {
+  const hermes = (globalThis as { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> } })
+    .HermesInternal;
+  const stats = hermes?.getInstrumentedStats?.();
+  // Hermes reports the GC time in seconds.
+  return { gcCount: stats?.js_numGCs ?? 0, gcMs: (stats?.js_gcTime ?? 0) * 1000 };
 }

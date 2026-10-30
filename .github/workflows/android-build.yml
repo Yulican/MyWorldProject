@@ -192,6 +192,9 @@ jobs:
 
       # System animations stay on: the benchmark measures real animation frames.
       - name: Run map benchmark on the emulator
+        # Boot, settle (at most 10 min) and benchmark take about 8-18 min. The
+        # emulator sometimes hangs on shutdown; don't let that hold the run.
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
