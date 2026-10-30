@@ -1,6 +1,6 @@
-import { Canvas, Group, Image, Path, Picture, Skia, createPicture } from '@shopify/react-native-skia';
+import { Canvas, Group, Image, Path, Skia } from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
   GestureDetector,
   usePanGesture,
@@ -18,16 +18,16 @@ import {
   useSharedValue,
   withDecay,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
-import { HEX_PX } from './mapGeometry';
+import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
-import { sameViewTiles, viewTiles, visibleTiles, type ViewTiles } from './viewport';
-import { buildWorldLayers, type WorldLayers } from './worldPicture';
+import { TileImages } from './tileImages';
+import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
+import { buildWorldLayers, TILE_BLEED, type WorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
 const START_SCALE = 1;
@@ -37,7 +37,9 @@ const TAP_COOLDOWN_MS = 300;
 const MIN_FLING_VELOCITY = 150;
 /** Lifting the fingers after a pinch reports a pan velocity that isn't a fling. */
 const FLING_AFTER_PINCH_MS = 150;
-const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false };
+const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false, tier: 0 };
+/** Rings of tiles around the screen rendered ahead, so panning finds them ready. */
+const PREFETCH_TILES = 1;
 
 /** Drives the map from code, for the performance benchmark. */
 export type MapController = {
@@ -57,7 +59,9 @@ type Props = {
 /**
  * Pannable, zoomable hex map. Gestures only change a transform on the UI
  * thread. Zoomed out, a single pre-rendered image is drawn; zoomed in, sharp
- * vector tiles near the screen are drawn on top of it. The map wraps left and
+ * pre-rendered tile images near the screen are drawn on top of it. Drawing
+ * images is cheap at any zoom, so moving the map never redraws vector paths;
+ * tiles are rendered on the JS thread ahead of time (see tileImages.ts). The map wraps left and
  * right: the horizontal offset is kept within one map width and the next map
  * copy is drawn beside the first.
  *
@@ -68,9 +72,8 @@ type Props = {
  * swipes flow into each other instead of stopping hard. Touching the map
  * catches it.
  *
- * Icons and outlines are hidden while pinching: redrawing thousands of icon
- * paths at a new scale every frame made zooming stutter. They return as soon
- * as the fingers lift.
+ * While pinching, tiles keep their zoom tier and are scaled; the sharper or
+ * lighter tier is rendered when the fingers lift.
  */
 export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) {
   const layers = useMemo(() => buildWorldLayers(world), [world]);
@@ -112,7 +115,7 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
     scale.value = START_SCALE;
     tx.value = wrapX(viewW / 2 - hexCenterX(col) * HEX_PX * START_SCALE, mapWidth * START_SCALE);
     ty.value = clampY(viewH / 2 - hexCenterY(col, row) * HEX_PX * START_SCALE, mapHeight * START_SCALE, viewH);
-    const next = viewTiles(tx.value, ty.value, START_SCALE, viewW, viewH, false);
+    const next = viewTiles(tx.value, ty.value, START_SCALE, viewW, viewH, null);
     lastView.value = next;
     onViewChange(next);
   }, [world, mapWidth, mapHeight, viewW, viewH, tx, ty, scale, minScale, lastView, onViewChange]);
@@ -121,7 +124,7 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
   const reportView = () => {
     'worklet';
     const prev = lastView.value;
-    const next = viewTiles(tx.value, ty.value, scale.value, viewW, viewH, prev.detail);
+    const next = viewTiles(tx.value, ty.value, scale.value, viewW, viewH, prev, zooming.value);
     if (sameViewTiles(next, prev)) return;
     lastView.value = next;
     scheduleOnRN(onViewChange, next);
@@ -236,6 +239,7 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
       'worklet';
       if (zooming.value) pinchEndedAt.value = Date.now();
       zooming.value = false;
+      reportView();
     },
     onUpdate: (e) => {
       'worklet';
@@ -293,7 +297,7 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
                 fit="fill"
               />
             ))}
-            <TileLayer layers={layers} listener={tileListener} zooming={zooming} />
+            <TileLayer world={world} layers={layers} listener={tileListener} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -309,41 +313,52 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
 }
 
 type TileLayerProps = {
+  world: World;
   layers: WorldLayers;
   listener: { current: (view: ViewTiles) => void };
-  zooming: SharedValue<boolean>;
 };
 
-/** The vector tiles near the screen. Owns the visible-tile state so only it re-renders. */
-const TileLayer = memo(function TileLayer({ layers, listener, zooming }: TileLayerProps) {
+/**
+ * The detail tile images near the screen. Owns the visible-tile state so only
+ * it re-renders. Tiles not rendered yet at the current tier show a ready tier
+ * meanwhile, or the overview image underneath.
+ */
+const TileLayer = memo(function TileLayer({ world, layers, listener }: TileLayerProps) {
   const [view, setView] = useState<ViewTiles>(NO_TILES);
+  const [, setReady] = useState(0);
   listener.current = setView;
-  const tiles = useMemo(() => visibleTiles(view, layers), [view, layers]);
-  // All visible icons in one picture, drawn after all fills so no tile covers
-  // the icons of its neighbor. Swapped for an empty one on the UI thread while
-  // pinching, without a React render.
-  const empty = useMemo(() => createPicture(() => {}), []);
-  const allIcons = useMemo(
+  const tiles = useMemo(
     () =>
-      createPicture((canvas) => {
-        for (const t of tiles) {
-          canvas.save();
-          canvas.translate(t.offsetX, 0);
-          canvas.drawPicture(layers.chunks[t.chunk].icons);
-          canvas.restore();
-        }
-      }),
-    [tiles, layers],
+      new TileImages(
+        world,
+        layers.chunkCols,
+        TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()),
+        () => setReady((n) => n + 1),
+      ),
+    [world, layers],
   );
-  const icons = useDerivedValue(() => (zooming.value ? empty : allIcons), [zooming, empty, allIcons]);
+  useEffect(() => () => tiles.dispose(), [tiles]);
+  useEffect(() => {
+    tiles.want(visibleTiles(view, layers, PREFETCH_TILES).map((t) => ({ ...t, tier: view.tier })));
+  }, [tiles, view, layers]);
+
   return (
     <>
-      {tiles.map((t) => (
-        <Group key={`f${t.key}`} transform={[{ translateX: t.offsetX }]}>
-          <Picture picture={layers.chunks[t.chunk].fills} />
-        </Group>
-      ))}
-      <Picture picture={icons} />
+      {visibleTiles(view, layers).map((t) => {
+        const image = tiles.get(t.chunk, view.tier);
+        if (!image) return null;
+        return (
+          <Image
+            key={t.key}
+            image={image}
+            x={t.col * CHUNK_W + t.offsetX - TILE_BLEED}
+            y={t.row * CHUNK_H - TILE_BLEED}
+            width={CHUNK_W + 2 * TILE_BLEED}
+            height={CHUNK_H + 2 * TILE_BLEED}
+            fit="fill"
+          />
+        );
+      })}
     </>
   );
 });
