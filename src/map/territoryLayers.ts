@@ -18,6 +18,13 @@ import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './wor
  */
 const OVERVIEW_PX_PER_HEX = 12;
 const ROAD_COLOR = 'rgba(92,65,40,0.9)';
+/** Settlement dot radius in hex sizes, by dotSize class. */
+const DOT_RADIUS = [0.14, 0.21, 0.28];
+
+/** Settlement dots come in three sizes by population. */
+function dotSize(people: number): number {
+  return people < 10 ? 0 : people < 25 ? 1 : 2;
+}
 
 /** Corner pair (unit offsets) of the hex edge facing each direction. */
 const EDGE_CORNERS = DIRECTION_OFFSETS.map(([dx, dy]) => {
@@ -62,6 +69,36 @@ export function buildTerritoryOverview(
   const image = drawAsImageFromPicture(picture, size);
   if (!image) throw new Error('Could not render the territory overview.');
   return { overview: image.makeNonTextureImage() ?? image, overviewRect: rect };
+}
+
+/**
+ * A fingerprint of everything a territory tile shows (owners and their
+ * colors, dot sizes, roads). Equal fingerprints draw the same image, so a new
+ * society snapshot only re-renders tiles that actually look different.
+ */
+export function territoryTileSignature(
+  world: World,
+  chunk: number,
+  chunkCols: number,
+  colorOf: (civ: number) => string,
+): number {
+  let h = 0x811c9dc5;
+  const mix = (v: number) => {
+    h = Math.imul(h ^ v, 0x01000193);
+  };
+  for (const { cells } of tileCells(world, chunk, chunkCols)) {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      const owner = world.owner[c];
+      mix(world.roads[c]);
+      mix(owner);
+      if (!owner) continue;
+      mix(dotSize(world.population[c]));
+      const color = colorOf(owner);
+      for (let k = 1; k < color.length; k++) mix(color.charCodeAt(k));
+    }
+  }
+  return h >>> 0;
 }
 
 /** One territory detail tile as a transparent image; null where nobody lives. */
@@ -130,8 +167,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       border.lineTo(x + bx * r, y + by * r);
     }
 
-    const people = world.population[c];
-    const radius = HEX_PX * (people < 10 ? 0.14 : people < 25 ? 0.21 : 0.28);
+    const radius = HEX_PX * DOT_RADIUS[dotSize(world.population[c])];
     rim.addCircle(x, y, radius + HEX_PX * 0.06);
     pathFor(dots, owner).addCircle(x, y, radius);
   }

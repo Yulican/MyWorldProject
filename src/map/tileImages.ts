@@ -10,16 +10,19 @@ const KEEP_MS = 1000;
 
 /** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
 export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
+/** A number that only changes when a tile's image would change (see `invalidate`). */
+export type TileSignature = (chunk: number) => number;
 
-type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean };
+type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; signature: number };
 export type TileRequest = TileRef & { tier: number };
 
 /**
  * Pre-rendered tile images of one map layer, per zoom tier. Tiles are
  * rendered in the background, nearest to the view first; `onReady` is called
  * when new ones are available. After `invalidate()` (the layer's data changed)
- * tiles are rendered again, and the old image stays visible until the new one
- * is ready. Least recently drawn tiles are freed when the memory budget is
+ * tiles whose signature changed are rendered again, and the old image stays
+ * visible until the new one is ready. Unchanged tiles keep their image, so the
+ * UI thread doesn't have to upload it again. Least recently drawn tiles are freed when the memory budget is
  * exceeded.
  */
 export class TileImages {
@@ -33,6 +36,8 @@ export class TileImages {
 
   constructor(
     private render: RenderTile,
+    /** Without one, every tile counts as changed on `invalidate`. */
+    private signature: TileSignature | null,
     /** Pixels per picture pixel for each tier. */
     private tierScales: readonly number[],
     private onReady: () => void,
@@ -79,8 +84,9 @@ export class TileImages {
    */
   invalidate() {
     for (const [k, e] of this.entries) {
-      if (this.wanted.has(chunkOf(k))) {
-        e.stale = true;
+      const chunk = chunkOf(k);
+      if (this.wanted.has(chunk)) {
+        if (!this.signature || this.signature(chunk) !== e.signature) e.stale = true;
       } else {
         this.entries.delete(k);
         this.free(e);
@@ -98,9 +104,10 @@ export class TileImages {
       const k = key(r.chunk, r.tier);
       const old = this.entries.get(k);
       if (old && !old.stale) continue;
+      const signature = this.signature ? this.signature(r.chunk) : 0;
       const image = this.render(r.chunk, this.tierScales[r.tier]);
       const bytes = image ? image.width() * image.height() * 4 : 0;
-      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false });
+      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, signature });
       this.bytes += bytes;
       if (old) this.free(old);
       rendered++;

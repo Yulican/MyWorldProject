@@ -26,7 +26,12 @@ import { recordMapBuild } from '../state/perfStats';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
-import { buildTerritoryOverview, renderTerritoryTile, TERRITORY_TILE_RESOLUTION } from './territoryLayers';
+import {
+  buildTerritoryOverview,
+  renderTerritoryTile,
+  TERRITORY_TILE_RESOLUTION,
+  territoryTileSignature,
+} from './territoryLayers';
 import { TileImages } from './tileImages';
 import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
 import { buildWorldLayers, renderTile, TILE_BLEED, type WorldLayers } from './worldPicture';
@@ -350,13 +355,14 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory }
   const scales = useMemo(() => TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()), []);
 
   const terrainTiles = useMemo(
-    () => new TileImages((chunk, px) => renderTile(world, chunk, layers.chunkCols, px), scales, onReady),
+    () => new TileImages((chunk, px) => renderTile(world, chunk, layers.chunkCols, px), null, scales, onReady),
     [world, layers, scales, onReady],
   );
   const territoryTiles = useMemo(
     () =>
       new TileImages(
         (chunk, px) => renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor),
+        (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
         onReady,
       ),
