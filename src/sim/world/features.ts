@@ -1,6 +1,7 @@
 import { DIRECTION_COUNT, hexCenterX, hexCenterY, wrapWidth } from '../hex';
 import { createNoise3, cylinderPoint, fbm } from '../noise';
 import { createRng, deriveSeed } from '../rng';
+import { clampTerms, sumTerms, type Term } from '../terms';
 import { BIOMES, Biome, RESOURCE_COUNT, Resource, isWaterBiome } from './biomes';
 import { clamp } from './climate';
 import { DEPOSITS } from './deposits';
@@ -81,29 +82,11 @@ export function computeHexStats(world: World): void {
     const row = (c - col) / world.width;
     cylinderPoint(hexCenterX(col), hexCenterY(col, row), ww, 9 / ww, p);
     const variation = 0.8 + 0.4 * (fbm(noise, p[0], p[1], p[2], 2) * 0.5 + 0.5);
+    world.terrainVariation[c] = variation;
 
     const base = c * RESOURCE_COUNT;
     for (let r = 0; r < RESOURCE_COUNT; r++) {
-      world.resourceCapacity[base + r] = info.resources[r] * variation;
-    }
-
-    if (!info.water) {
-      // Too cold or too hot land grows less.
-      const t = world.temperature[c];
-      const climate = clamp((t + 5) / 20, 0.2, 1) * (t > 32 ? 0.7 : 1);
-      world.resourceCapacity[base + Resource.Fertility] *= climate;
-      const flow = world.riverFlow[c];
-      if (flow > 0) {
-        world.resourceCapacity[base + Resource.Fertility] += 0.15 + 0.1 * Math.min(1, flow / 4);
-        world.resourceCapacity[base + Resource.Fish] += 0.3;
-      }
-    }
-
-    const deposit = DEPOSITS[world.deposit[c]];
-    if (deposit.bonus) world.resourceCapacity[base + deposit.bonus.resource] += deposit.bonus.amount;
-
-    for (let r = 0; r < RESOURCE_COUNT; r++) {
-      const v = clamp(world.resourceCapacity[base + r], 0, 1);
+      const v = sumTerms(resourceCapacityTerms(world, c, r));
       world.resourceCapacity[base + r] = v;
       world.resources[base + r] = v;
     }
@@ -111,6 +94,42 @@ export function computeHexStats(world: World): void {
     world.danger[c] = clamp(info.danger * (1.3 - variation * 0.5), 0, 1);
     world.moveCost[c] = info.moveCost;
   }
+}
+
+/**
+ * How a hex's natural capacity of one resource comes about (0..1): the
+ * biome's value, varied by the terrain; for land, fertility scaled by climate
+ * and raised by a river (which also brings fish); plus the deposit's bonus.
+ * Generation sums exactly these terms, so they explain the stored value.
+ */
+export function resourceCapacityTerms(world: World, cell: number, resource: number): Term[] {
+  const info = BIOMES[world.biome[cell]];
+  const base = info.resources[resource];
+  const variation = world.terrainVariation[cell];
+  const terms: Term[] = [
+    { label: info.name, value: base },
+    { label: `Terrain ×${variation.toFixed(2)}`, value: base * (variation - 1) },
+  ];
+  if (!info.water) {
+    if (resource === Resource.Fertility) {
+      // Too cold or too hot land grows less.
+      const t = world.temperature[cell];
+      const climate = clamp((t + 5) / 20, 0.2, 1) * (t > 32 ? 0.7 : 1);
+      if (climate !== 1) {
+        terms.push({ label: `Climate ${t.toFixed(0)} °C ×${climate.toFixed(2)}`, value: base * variation * (climate - 1) });
+      }
+    }
+    const flow = world.riverFlow[cell];
+    if (flow > 0 && resource === Resource.Fertility) {
+      terms.push({ label: 'River', value: 0.15 + 0.1 * Math.min(1, flow / 4) });
+    }
+    if (flow > 0 && resource === Resource.Fish) terms.push({ label: 'River', value: 0.3 });
+  }
+  const deposit = DEPOSITS[world.deposit[cell]];
+  if (deposit.bonus && deposit.bonus.resource === resource) {
+    terms.push({ label: deposit.name, value: deposit.bonus.amount });
+  }
+  return clampTerms(terms, 0, 1);
 }
 
 /**

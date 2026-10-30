@@ -10,11 +10,15 @@ import {
   EXPANSION_GROUP,
   TICKS_PER_YEAR,
   createSimulation,
+  hexSupplyTerms,
   livingCivilizations,
   stepSimulation,
   type Simulation,
 } from './simulation';
-import { SUPPLY_KINDS, SupplyKind } from './supply';
+import { SUPPLY_KINDS, SupplyKind, supplyTerms } from './supply';
+import { sumTerms } from '../terms';
+import { resourceCapacityTerms } from '../world/features';
+import { RESOURCE_COUNT } from '../world/biomes';
 
 function runYears(sim: Simulation, years: number): void {
   for (let t = 0; t < years * TICKS_PER_YEAR; t++) stepSimulation(sim);
@@ -200,4 +204,36 @@ test('roads make travel cheaper', () => {
   addRoad(world, from, d);
   const after = travelCostField(world, from, 100)[to];
   assert.ok(Math.abs(after - before * ROAD_TRAVEL_FACTOR) < 1e-6, `${before} -> ${after}`);
+});
+
+test('the shown calculations add up to the values the simulation uses', () => {
+  const sim = createSimulation(generateWorld({ seed: 12 }));
+  const { world } = sim;
+  for (let c = 0; c < world.cellCount; c++) {
+    for (let r = 0; r < RESOURCE_COUNT; r++) {
+      const shown = sumTerms(resourceCapacityTerms(world, c, r));
+      assert.ok(Math.abs(shown - world.resourceCapacity[c * RESOURCE_COUNT + r]) < 1e-5, `resource ${r} at ${c}`);
+    }
+    const terms = hexSupplyTerms(sim, c);
+    for (let k = 0; k < SUPPLY_KINDS; k++) {
+      assert.ok(Math.abs(sumTerms(terms[k]) - sim.cellSupply[c * SUPPLY_KINDS + k]) < 1e-3, `supply ${k} at ${c}`);
+    }
+  }
+});
+
+test('rivers and special locations show up in the calculation', () => {
+  const sim = createSimulation(generateWorld({ seed: 12 }));
+  const { world } = sim;
+  const river = [...world.riverFlow.keys()].find((c) => world.riverFlow[c] > 0 && !isWaterBiome(world.biome[c]))!;
+  assert.ok(hexSupplyTerms(sim, river)[SupplyKind.Water].some((t) => t.label === 'River'));
+  assert.ok(resourceCapacityTerms(world, river, 0).some((t) => t.label === 'River'));
+});
+
+test('modifiers appear as their own line and supplies never go below zero', () => {
+  const world = generateWorld({ seed: 12 });
+  const cell = world.startCell;
+  const drought = { kind: SupplyKind.Water, label: 'Drought', amount: -1000 };
+  const water = supplyTerms(world, cell, [drought])[SupplyKind.Water];
+  assert.ok(water.some((t) => t.label === 'Drought'));
+  assert.equal(sumTerms(water), 0);
 });

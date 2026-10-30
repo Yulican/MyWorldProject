@@ -33,6 +33,8 @@ export type World = HexGrid & {
   resources: Float32Array;
   /** Natural capacity 0..1 that current amounts regrow towards. */
   resourceCapacity: Float32Array;
+  /** Local terrain variation 0.8..1.2 that scales the biome's resources (noise, see features.ts). */
+  terrainVariation: Float32Array;
   /** Danger 0..1 (predators, disease, harsh climate). */
   danger: Float32Array;
   /** Travel cost relative to plains (= 1). */
@@ -75,6 +77,7 @@ export function allocateWorld(width: number, height: number, seed: number, shape
     riverDir: new Int8Array(n).fill(-1),
     resources: new Float32Array(n * RESOURCE_COUNT),
     resourceCapacity: new Float32Array(n * RESOURCE_COUNT),
+    terrainVariation: new Float32Array(n),
     danger: new Float32Array(n),
     moveCost: new Float32Array(n),
     deposit: new Uint8Array(n),

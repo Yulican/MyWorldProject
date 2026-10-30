@@ -11,12 +11,15 @@ export { ROAD_TRAVEL_FACTOR, hasRoad, stepCost, travelCostField } from './world/
 export { elevationMeters, resourceAt, WORLD_VERSION, type World, type WorldShape } from './world/world';
 export { CIV_COLOR_COUNT, MAX_CIVS, type CivOrigin, type Civilization } from './society/civilizations';
 export { CULTURE_COUNT, CULTURE_NAMES, Culture } from './society/culture';
-export { SUPPLY_KINDS, SUPPLY_NAMES, SupplyKind } from './society/supply';
+export { SUPPLY_KINDS, SUPPLY_NAMES, SupplyKind, type SupplyModifier } from './society/supply';
+export { sumTerms, type Term } from './terms';
+export { resourceCapacityTerms } from './world/features';
 export {
   BELIEVER_FAITH,
   EXPANSION_GROUP,
   TICKS_PER_YEAR,
   createSimulation,
+  hexSupplyTerms,
   livingCivilizations,
   simulationYear,
   stepSimulation,

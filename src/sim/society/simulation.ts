@@ -1,5 +1,6 @@
 import { DIRECTION_COUNT } from '../hex';
 import { createRng, deriveSeed, type Rng } from '../rng';
+import type { Term } from '../terms';
 import { BIOMES, isWaterBiome } from '../world/biomes';
 import { clamp } from '../world/climate';
 import { addRoad, stepCost } from '../world/roads';
@@ -15,7 +16,7 @@ import {
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
-import { SUPPLY_KINDS, computeSupply, supportedPeople } from './supply';
+import { SUPPLY_KINDS, computeSupply, supplyTerms, supportedPeople, type SupplyModifier } from './supply';
 
 // The living world: inhabitants age, have children and die; when a hex can't
 // provide enough food, water or space, a group moves on to a free neighbor
@@ -74,6 +75,11 @@ export type Simulation = {
   cellSupply: Float32Array;
   /** People a hex supports: its scarcest supply. */
   cellCapacity: Float32Array;
+  /**
+   * Changes to hexes' supplies from outside nature's defaults (abilities,
+   * depletion; none yet). Recompute supply after changing them.
+   */
+  supplyModifiers: Map<number, SupplyModifier[]>;
   /** Notable events, oldest first. */
   chronicle: ChronicleEntry[];
   /** Believers in all civilizations at the last refresh. */
@@ -99,6 +105,7 @@ export function createSimulation(world: World): Simulation {
     cellCivPop: new Int32Array(n * CIV_SLOTS),
     cellSupply: new Float32Array(n * SUPPLY_KINDS),
     cellCapacity: new Float32Array(n),
+    supplyModifiers: new Map(),
     chronicle: [],
     believers: 0,
     history: { population: [], believers: [] },
@@ -267,8 +274,13 @@ function updateInhabitant(sim: Simulation, i: number): void {
  * to run again once resources deplete or abilities change the land.
  */
 function computeCapacity(sim: Simulation): void {
-  computeSupply(sim.world, sim.cellSupply);
+  computeSupply(sim.world, sim.supplyModifiers, sim.cellSupply);
   for (let c = 0; c < sim.world.cellCount; c++) sim.cellCapacity[c] = supportedPeople(sim.cellSupply, c);
+}
+
+/** How a hex's food, water and space come about, indexed by SupplyKind (see supply.ts). */
+export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
+  return supplyTerms(sim.world, cell, sim.supplyModifiers.get(cell) ?? []);
 }
 
 // ---------------------------------------------------------------------------
