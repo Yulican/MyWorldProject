@@ -120,27 +120,36 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
 - Gebaut wird nur, wenn die Kosten im Vorrat liegen und die Ernte den
   Unterhalt dauerhaft trägt.
 
-## 9. Prototyp-Ergebnisse (12 Welten, je 300 Jahre)
+## 9. Ergebnisse (12 Welten, je 300 Jahre)
 
 | | ohne Handel | mit Handel |
 |---|---|---|
-| Menschen | 57.111 | 63.358 (+11 %) |
-| besiedelte Felder | 784 | 860 (+10 %) |
-| Rechenzeit | 15,5 s | 23,4 s (+51 %) |
+| Menschen | 57.912 | 61.839 (+7 %) |
+| besiedelte Felder | 800 | 833 (+4 %) |
+| Rechenzeit | 9,7 s | 10,7 s (+11 %) |
 
-- **Fahrten:** 13.842, also etwa 3,8 pro Welt und Jahr.
-- **Straßenstücke:** 235, etwa 20 pro Welt.
-- **Geliefert:** Getreide 48.700, Wasser 52.300, Holz 3.500, Stein 760,
-  Salz 3.100, Pferde 2.000, Gewürze 520, Marmor 420.
-- **Verloren:** etwa 1,5 % der Ware, dazu 2.500 Geld.
-- **Gebäude:** 194 Handelszentren, 14 Häfen, 36 Kornspeicher,
-  57 Wasserträger, 12 Abbaugebäude für Luxusgüter. Eine frühere Fassung
-  ohne Grenze für Kornspeicher und Wasserträger baute 352 Wasserträger.
-- **Geld:** liegt fast ungenutzt im Vorrat (325.000, etwa 380 je
+- **Fahrten:** 9.500, also etwa 2,6 pro Welt und Jahr.
+- **Straßenstücke:** 128, etwa 11 pro Welt.
+- **Geliefert:** Getreide 29.100, Wasser 42.400, Holz 3.100, Stein 720,
+  Salz 2.500, Pferde 1.600, Gewürze 340.
+- **Verloren:** etwa 1,5 % der Ware, dazu 1.400 Geld.
+- **Gebäude:** 160 Handelszentren, 8 Häfen, 31 Kornspeicher,
+  54 Wasserträger, 10 Abbaugebäude für Luxusgüter.
+- **Geld:** liegt fast ungenutzt im Vorrat (330.000, etwa 400 je
   Siedlung). Es entsteht, wird aber nirgends verbraucht.
+- **Rechenzeit pro Woche:** Damit kein Wochenschritt zu lang wird, sucht
+  die Simulation höchstens 3 Handelswege pro Woche, der Rest wartet ein
+  Quartal. Siedlungen suchen nur, wenn ihr Volk ihre Ware verlangt oder
+  die gesuchte Ware übrig hat, und eine Straße zum selben Partner wird nur
+  alle 4 Jahre neu geprüft. Damit liegt der längste Wochenschritt fast auf
+  dem Stand ohne Handel (Refresh-Woche: 1,74 statt 1,73 ms unter Node).
+  Ohne diese Grenzen brachte der Handel +11 % Menschen bei +51 %
+  Rechenzeit.
 - **Erste Fassung zum Vergleich** (Verlust ein Viertel so hoch, Häfen
-  erst ab 25 % Verbesserung, Abbaugebäude nur bei Unzufriedenheit):
-  +14 % Menschen, 0,4 % Verlust, 0 Häfen, Luxushandel nur 300 Salz.
+  erst ab 25 % Verbesserung, Abbaugebäude nur bei Unzufriedenheit, ohne
+  Suchgrenzen): +14 % Menschen, 0,4 % Verlust, 0 Häfen, Luxushandel nur
+  300 Salz. Eine Fassung ohne Grenze für Kornspeicher und Wasserträger
+  baute 352 Wasserträger.
 
 ## 10. Entscheidungen des Nutzers
 
@@ -156,7 +165,9 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
 ## 11. Benchmark und Darstellung
 
 - Neues Szenario `trade`: 300 Jahre, danach bekommt jede Siedlung ein
-  Handelszentrum und jede Küstensiedlung einen Hafen.
+  Handelszentrum, jede Küstensiedlung einen Hafen und einen Vorrat eines
+  Luxusguts (reihum, damit überall gehandelt wird), dann läuft ein halbes
+  Jahr.
 - Die Info-Leiste zeigt Geld, Getreide, Fässer, Händler daheim und
   unterwegs, die Ein- und Ausfuhr; „Grain in stock“ erscheint als Zeile
   bei der Nahrung.

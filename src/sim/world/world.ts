@@ -57,6 +57,8 @@ export type World = HexGrid & {
   buildings: Uint8Array;
   /** Ruins per hex (repairs in progress included); stay when the hex is lost. */
   ruins: Uint8Array;
+  /** 1 for hexes with a standing harbor (society/trade.ts); the map draws an anchor by it. */
+  harbors: Uint8Array;
 
   /** Where the player's starting tribe settles. */
   startCell: number;
@@ -91,6 +93,7 @@ export function allocateWorld(width: number, height: number, seed: number, shape
     roads: new Uint8Array(n),
     buildings: new Uint8Array(n),
     ruins: new Uint8Array(n),
+    harbors: new Uint8Array(n),
     startCell: -1,
   };
 }

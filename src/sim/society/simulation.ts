@@ -541,6 +541,7 @@ function refreshSnapshot(sim: Simulation): void {
     if (sim.hasBuildings[c]) {
       world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);
       world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
+      world.harbors[c] = sim.trade.harbor[c];
     }
   }
 

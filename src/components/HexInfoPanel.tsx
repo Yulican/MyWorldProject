@@ -184,11 +184,37 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
               {economy.harvest.stone.map((t, i) => (
                 <TermRow key={i} term={t} digits={1} />
               ))}
+              <Row label="Money" value={`${Math.floor(economy.trade.money)} · +${economy.trade.income.toFixed(1)} a year`} />
+              {economy.trade.grain >= 0.5 && <Row label="Grain" value={String(Math.floor(economy.trade.grain))} />}
+              {economy.trade.barrels >= 0.5 && <Row label="Water barrels" value={String(Math.floor(economy.trade.barrels))} />}
               <Text style={styles.note}>
                 {people > 0
-                  ? 'People harvest wood and stone on their own hex and pay buildings and upkeep from this stock.'
+                  ? 'People harvest wood and stone on their own hex and pay buildings and upkeep from this stock. Adults earn money; grain and water barrels in stock feed people.'
                   : 'Nobody lives here: nothing is harvested, buildings decay to ruins, the stock stays on the ground.'}
               </Text>
+
+              {people > 0 && (
+                <>
+                  <Text style={styles.section}>Trade</Text>
+                  <Row
+                    label="Merchants"
+                    value={
+                      economy.trade.merchants > 0
+                        ? `${economy.trade.merchants - economy.trade.away} at home · ${economy.trade.away} on the way`
+                        : 'None (needs a trade center or harbor)'
+                    }
+                  />
+                  {economy.trade.partner >= 0 && (
+                    <Row label="Last partner" value={`Hex ${economy.trade.partner % world.width}, ${Math.floor(economy.trade.partner / world.width)}`} />
+                  )}
+                  <Row label="Asks for" value={goodsList(economy.trade.asks)} />
+                  <Row label="Can spare" value={goodsList(economy.trade.spares)} />
+                  <Text style={styles.note}>
+                    Merchants carry goods between settlements of the same people on roads, rivers and between harbors,
+                    paid in money. Some of a load can get lost on the way.
+                  </Text>
+                </>
+              )}
             </>
           )}
 
@@ -245,6 +271,8 @@ function Bar({ label, value, capacity }: { label: string; value: number; capacit
 }
 
 const percent = (v: number) => `${Math.round(v * 100)} %`;
+const goodsList = (goods: readonly { good: string; amount: number }[]) =>
+  goods.length === 0 ? 'Nothing' : goods.map((g) => `${Math.round(g.amount)} ${g.good.toLowerCase()}`).join(', ');
 const UNHAPPY_NOTE = '5 years';
 /** Settlement size by standing buildings, as the map icon shows it. */
 const settlementName = (buildings: number) => (buildings === 0 ? 'Tribe' : buildings <= 2 ? 'Small city' : 'Big city');

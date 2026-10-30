@@ -34,7 +34,7 @@ import {
 } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
-import { buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { MONEY_PER_ADULT, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -631,6 +631,22 @@ export type HexEconomy = {
   upkeepStone: number;
   buildings: BuildingInfo[];
   slots: number;
+  trade: HexTrade;
+};
+
+/** A hex's trade for the hex info: money, grain and barrels, merchants, and what it asks for and spares. */
+export type HexTrade = {
+  money: number;
+  /** Money its adults earn per year. */
+  income: number;
+  grain: number;
+  barrels: number;
+  merchants: number;
+  away: number;
+  /** Where its merchants traded last, -1 = nowhere yet. */
+  partner: number;
+  asks: { good: string; amount: number }[];
+  spares: { good: string; amount: number }[];
 };
 
 const STATE_NAMES = ['standing', 'construction', 'standing', 'ruin', 'repair'] as const;
@@ -664,6 +680,30 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
     upkeepStone: upkeepWith(sim, cell, Material.Stone, -1, -1),
     buildings,
     slots: SLOTS,
+    trade: hexTrade(sim, cell),
+  };
+}
+
+function hexTrade(sim: Simulation, cell: number): HexTrade {
+  const { economy, trade } = sim;
+  const asks: HexTrade['asks'] = [];
+  const spares: HexTrade['spares'] = [];
+  for (let g = 0; g < TRADE_GOODS; g++) {
+    const want = trade.want[cell * TRADE_GOODS + g];
+    const spare = trade.surplus[cell * TRADE_GOODS + g];
+    if (want >= 0.5) asks.push({ good: TRADE_GOOD_NAMES[g], amount: want });
+    if (spare >= 0.5) spares.push({ good: TRADE_GOOD_NAMES[g], amount: spare });
+  }
+  return {
+    money: economy.money[cell],
+    income: sim.cellAdults[cell] * MONEY_PER_ADULT,
+    grain: economy.provisions[cell * 2],
+    barrels: economy.provisions[cell * 2 + 1],
+    merchants: trade.merchants[cell],
+    away: trade.away[cell],
+    partner: trade.partner[cell],
+    asks,
+    spares,
   };
 }
 
@@ -671,6 +711,10 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
 function buildingEffect(good: number, amount: number, percent: number, name: string): string {
   if (good === Good.Comfort) return `comfort for ${amount}`;
   if (good === Good.Seat) return 'seat of government';
+  if (good === Good.Merchants) return `${amount} merchants`;
+  if (good === Good.Harbor) return `trade over water, ${amount} merchants`;
+  if (good === Good.Grain) return `−${amount} food → +${amount} grain/year`;
+  if (good === Good.Barrels) return `−${amount} water → +${amount} water barrels/year`;
   if (percent) return `+${Math.round(percent * 100)} % ${name}`;
   return `+${amount} ${name}${good >= SUPPLY_KINDS ? '/year' : ''}`;
 }
