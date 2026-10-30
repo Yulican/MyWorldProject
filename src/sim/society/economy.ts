@@ -77,9 +77,7 @@ const NO_MODIFIERS: readonly SupplyModifier[] = [];
  * without buildings in `sim.baseSupply` for planning.
  */
 export function updateCellSupply(sim: Simulation, cell: number): void {
-  const given = sim.supplyModifiers.get(cell) ?? NO_MODIFIERS;
-  const provisions = provisionModifiers(sim.economy, cell);
-  const other = provisions.length > 0 ? [...given, ...provisions] : given;
+  const other = otherModifiers(sim, cell);
   const base = supplyTerms(sim.world, cell, other);
   const buildings = buildingSupplyModifiers(sim.economy, cell);
   const terms = buildings.length > 0 ? supplyTerms(sim.world, cell, [...other, ...buildings]) : base;
@@ -91,6 +89,18 @@ export function updateCellSupply(sim: Simulation, cell: number): void {
     capacity = Math.min(capacity, v);
   }
   sim.cellCapacity[cell] = capacity;
+}
+
+/** A hex's supply modifiers other than its buildings: `sim.supplyModifiers` and grain or water in stock. */
+function otherModifiers(sim: Simulation, cell: number): readonly SupplyModifier[] {
+  const given = sim.supplyModifiers.get(cell) ?? NO_MODIFIERS;
+  const provisions = provisionModifiers(sim.economy, cell);
+  return provisions.length > 0 ? [...given, ...provisions] : given;
+}
+
+/** Every supply modifier of a hex, as the simulation uses them (for the hex info). */
+export function cellModifiers(sim: Simulation, cell: number): SupplyModifier[] {
+  return [...otherModifiers(sim, cell), ...buildingSupplyModifiers(sim.economy, cell)];
 }
 
 /** People a hex would support with its standing buildings plus up to two extra types. */
@@ -246,7 +256,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       if (!busy && (planBuilding(sim, c) || planSatisfaction(sim, c) || (yearEnd && planTrade(sim, c)))) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
-        buildTradeRoad(sim, c);
+        buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
       }
     }
     if (supplyChanged) changed = true;

@@ -21,6 +21,7 @@ import { SlotState, buildingSupplyModifiers, countSlots, createEconomy, type Eco
 import {
   EXPANSION_GROUP,
   capacityAfterRepair,
+  cellModifiers,
   isSettlementTarget,
   planSeats,
   rawMaterials,
@@ -361,8 +362,7 @@ function computeCapacity(sim: Simulation): void {
 
 /** How a hex's food, water and space come about, indexed by SupplyKind (see supply.ts), buildings included. */
 export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
-  const mods = [...(sim.supplyModifiers.get(cell) ?? []), ...buildingSupplyModifiers(sim.economy, cell)];
-  return supplyTerms(sim.world, cell, mods);
+  return supplyTerms(sim.world, cell, cellModifiers(sim, cell));
 }
 
 // ---------------------------------------------------------------------------

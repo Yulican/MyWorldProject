@@ -58,6 +58,13 @@ const ROAD_WOOD = 3;
 const ROAD_STONE = 3;
 /** A road is built when it makes the way to the last partner this much shorter. */
 const ROAD_SAVING = 0.25;
+/**
+ * Way searches per week at most (trips, roads, trade buildings): hexes over
+ * budget try again next quarter, so no single tick gets long.
+ */
+const SEARCHES_PER_TICK = 3;
+/** Years before a partner without a worthwhile road is checked again. */
+const ROAD_RECHECK_YEARS = 4;
 /** A trade center needs a trip worth this much (money) in reach. */
 const CENTER_MIN_VALUE = 15;
 
@@ -74,6 +81,14 @@ export type Trade = {
   away: Uint8Array;
   /** 1 for hexes with a standing harbor. */
   harbor: Uint8Array;
+  /** 1 for settlements with something to sell, or something to buy and money: only they look for trips. */
+  interest: Uint8Array;
+  /** Way searches left this tick (see SEARCHES_PER_TICK), and the tick they count for. */
+  searchesLeft: number;
+  searchTick: number;
+  /** The partner a hex last checked a trade road to, and the year it did (-1 = never). */
+  roadChecked: Int32Array;
+  roadYear: Int32Array;
   /** The settlement the hex's merchants traded with last, -1 = none (roads lead there). */
   partner: Int32Array;
   /** What each people asks for and can spare in total (civ * TRADE_GOODS + good), from the last refresh. */
@@ -111,6 +126,11 @@ export function createTrade(seed: number, cellCount: number): Trade {
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     harbor: new Uint8Array(cellCount),
+    interest: new Uint8Array(cellCount),
+    searchesLeft: 0,
+    searchTick: -1,
+    roadChecked: new Int32Array(cellCount).fill(-1),
+    roadYear: new Int32Array(cellCount).fill(-1),
     partner: new Int32Array(cellCount).fill(-1),
     civWant: new Float32Array(0),
     civSpare: new Float32Array(0),
@@ -201,6 +221,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   const t = cell * TRADE_GOODS;
   trade.want.fill(0, t, t + TRADE_GOODS);
   trade.surplus.fill(0, t, t + TRADE_GOODS);
+  trade.interest[cell] = 0;
   if (people === 0) return changed;
 
   // Wood and stone: ask for what the next building lacks, spare what is
@@ -237,6 +258,20 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     trade.want[t + g] = Math.max(0, keep - stock - trade.incoming[t + g]);
     trade.surplus[t + g] = Math.max(0, stock - keep);
   }
+  // Only goods the rest of its people ask for or spare count (totals from the last refresh).
+  const civ = sim.world.owner[cell];
+  const c = civ * TRADE_GOODS;
+  const known = c + TRADE_GOODS <= trade.civWant.length;
+  let sell = 0;
+  let buy = 0;
+  for (let g = 0; g < TRADE_GOODS; g++) {
+    if (!known) break;
+    const othersWant = trade.civWant[c + g] - trade.want[t + g];
+    const othersSpare = trade.civSpare[c + g] - trade.surplus[t + g];
+    if (othersWant > 0) sell += Math.min(trade.surplus[t + g], othersWant) * PRICE[g];
+    if (othersSpare > 0) buy += Math.min(trade.want[t + g], othersSpare) * PRICE[g];
+  }
+  trade.interest[cell] = sell >= MIN_TRIP_VALUE || (buy >= MIN_TRIP_VALUE && economy.money[cell] >= MIN_TRIP_VALUE) ? 1 : 0;
   return changed;
 }
 
@@ -288,6 +323,30 @@ export function sumCivWants(sim: Simulation, owner: Uint8Array): void {
 // ---------------------------------------------------------------------------
 // Ways
 
+/** Takes `count` way searches from this tick's budget; false when it is used up. */
+function takeSearches(sim: Simulation, count: number): boolean {
+  const { trade } = sim;
+  if (trade.searchTick !== sim.tick) {
+    trade.searchTick = sim.tick;
+    trade.searchesLeft = SEARCHES_PER_TICK;
+  }
+  if (trade.searchesLeft < count) return false;
+  trade.searchesLeft -= count;
+  return true;
+}
+
+/** 1 for water hexes of the world last searched (a lookup is cheaper than the biome table). */
+let waterOf = new Uint8Array(0);
+let waterWorld: World | null = null;
+function water(world: World): Uint8Array {
+  if (waterWorld !== world) {
+    waterOf = new Uint8Array(world.cellCount);
+    for (let c = 0; c < world.cellCount; c++) waterOf[c] = isWaterBiome(world.biome[c]) ? 1 : 0;
+    waterWorld = world;
+  }
+  return waterOf;
+}
+
 let wayCost = new Float32Array(0);
 let wayPrev = new Int32Array(0);
 let waySea = new Uint8Array(0);
@@ -304,8 +363,9 @@ const wayReached: number[] = [];
 function wayStep(world: World, owner: Uint8Array, civ: number, harbor: (c: number) => boolean, cell: number, dir: number): number {
   const nb = world.neighbors[cell * DIRECTION_COUNT + dir];
   if (nb < 0) return Infinity;
-  const fromWater = isWaterBiome(world.biome[cell]);
-  const toWater = isWaterBiome(world.biome[nb]);
+  const wet = water(world);
+  const fromWater = wet[cell] === 1;
+  const toWater = wet[nb] === 1;
   if (toWater) return fromWater || harbor(cell) ? SEA_STEP : Infinity;
   if (owner[nb] !== civ && owner[nb] !== 0) return Infinity;
   if (fromWater) return owner[nb] === civ && harbor(nb) ? SEA_STEP : Infinity;
@@ -345,7 +405,7 @@ function searchWays(sim: Simulation, owner: Uint8Array, from: number, maxCost: n
       const step = wayStep(world, owner, civ, harbor, c, d);
       if (step === Infinity) continue;
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
-      const sea = isWaterBiome(world.biome[nb]) ? waySea[c] + 1 : 0;
+      const sea = waterOf[nb] === 1 ? waySea[c] + 1 : 0;
       if (sea > MAX_SEA_HEXES) continue;
       const next = here + step;
       if (next >= wayCost[nb] || next > maxCost) continue;
@@ -460,9 +520,9 @@ const tripOut = { cost: 0, rate: 0 };
 export function sendMerchants(sim: Simulation, home: number): void {
   const { trade, economy } = sim;
   const owner = sim.world.owner;
-  if (!owner[home]) return;
+  if (!owner[home] || !trade.interest[home]) return;
   const harbor = (c: number) => trade.harbor[c] === 1;
-  while (trade.away[home] < trade.merchants[home]) {
+  while (trade.away[home] < trade.merchants[home] && takeSearches(sim, 1)) {
     const target = bestTrip(sim, owner, home, harbor, tripOut);
     if (target < 0) {
       resetWays();
@@ -651,6 +711,8 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
   if (!civ) return -1;
   const workshop = WORKSHOP_OF[world.deposit[cell]];
   if (workshop !== undefined && !has(BUILDINGS[workshop].good)) return workshop;
+  if (!trade.interest[cell]) return granaryOrBarrels(sim, cell, civ);
+  if (!takeSearches(sim, 3)) return -1;
   if (!has(Good.Merchants)) {
     const target = bestTrip(sim, owner, cell, (c) => trade.harbor[c] === 1, tripOut);
     resetWays();
@@ -662,6 +724,12 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
     const withHarbors = tradeRate(sim, cell, coast);
     if (withHarbors > now) return TYPE_OF[Good.Harbor];
   }
+  return granaryOrBarrels(sim, cell, civ);
+}
+
+/** A granary or water carriers, when the hex has 25 more food or water than it can use and its people ask for more than they spare and make. */
+function granaryOrBarrels(sim: Simulation, cell: number, civ: number): number {
+  const { trade } = sim;
   const capacity = sim.cellCapacity[cell];
   for (let k = 0; k < 2; k++) {
     const good = k === 0 ? Good.Grain : Good.Barrels;
@@ -691,18 +759,22 @@ let landPrev = new Int32Array(0);
 const landReached: number[] = [];
 
 /**
- * Quarterly per hex with merchants: when the way to its last partner would
- * be ROAD_SAVING shorter on a road over its own and free land, it builds the
+ * Quarterly per hex with merchants (a partner without a worthwhile road only
+ * every ROAD_RECHECK_YEARS): when the way to its last partner would be
+ * ROAD_SAVING shorter on a road over its own and free land, it builds the
  * first missing segment of that road from its stock (wood and stone times
  * the terrain's cost), keeping what it saves up for. Returns whether a
  * segment was built.
  */
-export function buildTradeRoad(sim: Simulation, home: number): boolean {
+export function buildTradeRoad(sim: Simulation, home: number, year: number): boolean {
   const { world, trade, economy } = sim;
   const owner = world.owner;
   const partner = trade.partner[home];
   const civ = owner[home];
   if (partner < 0 || !civ || owner[partner] !== civ) return false;
+  // A partner checked without a road worth building is checked again after ROAD_RECHECK_YEARS.
+  if (trade.roadChecked[home] === partner && year - trade.roadYear[home] < ROAD_RECHECK_YEARS) return false;
+  if (!takeSearches(sim, 2)) return false;
   searchWays(sim, owner, home, MAX_TRIP_COST * 2, (c) => trade.harbor[c] === 1);
   const now = wayCost[partner];
   resetWays();
@@ -765,10 +837,21 @@ export function buildTradeRoad(sim: Simulation, home: number): boolean {
     landPrev[c] = -1;
   }
   landReached.length = 0;
+  // After a segment, the next one follows next quarter; otherwise wait.
+  trade.roadChecked[home] = built ? -1 : partner;
+  trade.roadYear[home] = year;
   return built;
 }
 
 function directionTo(world: World, from: number, to: number): number {
   for (let d = 0; d < DIRECTION_COUNT; d++) if (world.neighbors[from * DIRECTION_COUNT + d] === to) return d;
   return -1;
+}
+
+/** Travel cost on ways from one hex to another for the people of `from` (Infinity = no way); for tests and the hex info. */
+export function travelOnWays(sim: Simulation, from: number, to: number): number {
+  searchWays(sim, sim.world.owner, from, Infinity, (c) => sim.trade.harbor[c] === 1);
+  const cost = wayCost[to];
+  resetWays();
+  return cost;
 }
