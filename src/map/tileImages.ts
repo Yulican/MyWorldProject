@@ -8,11 +8,12 @@ const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
 const KEEP_MS = 1000;
 /**
- * Outdated tiles still show their old image, so they are redone one per frame:
- * each new image is uploaded to the GPU when first drawn, and a burst of them
- * after a snapshot would land in the same frame.
+ * Outdated tiles still show their old image, so they are only redone once the
+ * view has rested this long: rendering them while the map moves takes CPU
+ * time from drawing frames, and each new image is uploaded to the GPU when
+ * first drawn.
  */
-const REDO_GAP_MS = 16;
+const REDO_IDLE_MS = 300;
 
 /** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
 export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
@@ -37,6 +38,8 @@ export class TileImages {
   /** Tiles of the current view (any tier): never freed. */
   private wanted = new Set<number>();
   private bytes = 0;
+  /** When the view last changed (`want`). */
+  private wantedAt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
@@ -70,6 +73,7 @@ export class TileImages {
   /** Replaces the wanted tiles; missing ones are rendered first, then outdated ones, nearest first. */
   want(requests: TileRequest[]) {
     if (this.disposed) return;
+    this.wantedAt = Date.now();
     this.wanted = new Set(requests.map((r) => r.chunk));
     const seen = new Set<string>();
     this.queue = requests
@@ -110,7 +114,7 @@ export class TileImages {
     if (this.disposed) return;
     const start = Date.now();
     let rendered = 0;
-    let redone = false;
+    let wait = 0;
     while (this.queue.length > 0 && (rendered === 0 || Date.now() - start < SLICE_MS)) {
       const r = this.queue[0];
       const k = key(r.chunk, r.tier);
@@ -119,9 +123,11 @@ export class TileImages {
         this.queue.shift();
         continue;
       }
-      if (old && redone) break;
+      if (old) {
+        wait = this.wantedAt + REDO_IDLE_MS - Date.now();
+        if (wait > 0) break;
+      }
       this.queue.shift();
-      if (old) redone = true;
       const signature = this.signature ? this.signature(r.chunk) : 0;
       const image = this.render(r.chunk, this.tierScales[r.tier]);
       const bytes = image ? image.width() * image.height() * 4 : 0;
@@ -132,7 +138,7 @@ export class TileImages {
     }
     this.evict();
     if (rendered > 0) this.onReady();
-    if (this.queue.length > 0) this.timer = setTimeout(this.work, redone ? REDO_GAP_MS : 0);
+    if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(0, wait));
   };
 
   /** Frees the least recently drawn tiles while over budget. */
