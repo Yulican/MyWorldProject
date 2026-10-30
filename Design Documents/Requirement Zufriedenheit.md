@@ -103,6 +103,9 @@ Grundlage für den späteren Handel.
 
 \* gezählt in 8 erzeugten Welten mit je etwa 2.000 Landhexes.
 
+- Jahresbedarf: 1 Einheit je 100 Einwohner und Gut (anfangs 1 je 20; nach
+  dem Test im Spiel gesenkt, damit ein Abbaugebäude mehrere Städte
+  versorgt).
 - Teilwert: +5 je Gut, dessen Jahresbedarf aus dem Vorrat gedeckt ist,
   höchstens +15. Die Vielfalt zählt, nicht die Menge. Das macht den Handel
   später wertvoll.

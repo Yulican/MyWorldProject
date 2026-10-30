@@ -37,7 +37,7 @@ const COMFORT_MAX = 15;
 export const LUXURY_EACH = 5;
 export const LUXURY_MAX = 15;
 /** Units of each luxury good one inhabitant uses per year. */
-export const LUXURY_PER_PERSON = 0.05;
+export const LUXURY_PER_PERSON = 0.01;
 /** Years a people's mood events (new people, revolutions) take to fade away. */
 const MOOD_YEARS = 10;
 export const MOOD_NEW_PEOPLE = 10;

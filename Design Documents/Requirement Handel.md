@@ -61,7 +61,7 @@ Jedes Quartal kennt jede Siedlung, was sie verlangt und was sie übrig hat:
 |---|---|---|
 | Holz, Stein | was dem Gebäude fehlt, auf das sie spart | was über dem Sparziel und 2 Jahren Unterhalt (mindestens 10) liegt |
 | Getreide, Wasser | wenn das die knappste Versorgung ist und das Feld halb voll: bis zur nächsten Grenze, höchstens 50 | was die eigenen Leute nicht brauchen |
-| Luxusgüter | 2 Jahre Bedarf (0,05 je Person) | was darüber liegt |
+| Luxusgüter | 2 Jahre Bedarf (1 je 100 Einwohner und Jahr) | was darüber liegt |
 
 - Ein freier Händler wählt unter allen erreichbaren Siedlungen seines Volks
   die Fahrt mit dem meisten Wert pro Woche Hin- und Rückweg:
@@ -161,6 +161,13 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
 4. **Abbaugebäude für Luxusgüter:** werden immer gebaut, wenn das Feld ein
    passendes Vorkommen hat, weil das ganze Reich die Güter braucht
    (Abschnitt 8).
+5. **Luxusbedarf 1 je 100 Einwohner** statt 1 je 20 (nach dem Test auf dem
+   Handy: zwei Pferdezuchten deckten kaum ihr Volk). Ein Abbaugebäude mit
+   10 pro Jahr versorgt damit 1.000 Menschen, also mehrere Städte; vor
+   allem größere Städte führen ein. In 12 Welten über 300 Jahre deckt eine
+   Stadt ab 100 Einwohnern im Mittel 0,08 statt 0,02 Luxusgüter; die
+   Abdeckung bleibt niedrig, weil nur wenige Vorkommen in besiedeltem Land
+   liegen (11 Abbaugebäude in 12 Welten).
 
 ## 11. Benchmark und Darstellung
 
