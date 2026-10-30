@@ -43,10 +43,12 @@ export const SUPPLY_KINDS = 3;
 export const SUPPLY_NAMES = ['Food', 'Water', 'Space'] as const;
 
 /**
- * A change to one supply of one hex from outside nature's defaults, e.g. an
- * ability or depleted land (none exist yet). Shown as its own term.
+ * A change to one supply of one hex from outside nature's defaults, e.g. a
+ * building, an ability or depleted land. Shown as its own term. `amount` is
+ * in people, or with `percent` a share (0.5 = +50 %) of the total so far:
+ * percentages come after all absolute changes and multiply with each other.
  */
-export type SupplyModifier = { kind: number; label: string; amount: number };
+export type SupplyModifier = { kind: number; label: string; amount: number; percent?: boolean };
 /** Modifiers by cell. */
 export type SupplyModifiers = ReadonlyMap<number, readonly SupplyModifier[]>;
 
@@ -76,7 +78,8 @@ export function supportedPeople(supply: Float32Array, cell: number): number {
 export function supplyTerms(world: World, cell: number, modifiers: readonly SupplyModifier[]): Term[][] {
   if (isWaterBiome(world.biome[cell])) return [[], [], []];
   const terms = [foodTerms(world, cell), waterTerms(world, cell), spaceTerms(world, cell)];
-  for (const m of modifiers) terms[m.kind].push({ label: m.label, value: m.amount });
+  for (const m of modifiers) if (!m.percent) terms[m.kind].push({ label: m.label, value: m.amount });
+  for (const m of modifiers) if (m.percent) terms[m.kind].push({ label: m.label, value: Math.max(0, sumTerms(terms[m.kind])) * m.amount });
   return terms.map((t) => clampTerms(t, 0, Infinity));
 }
 

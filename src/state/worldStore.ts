@@ -60,12 +60,14 @@ export function createNewWorld(seed: number = randomSeed()): World {
 
 /**
  * Simulates the current world for `years` at once (for the benchmark's aged
- * scenario) and shows the result.
+ * scenarios), applies `prepare` (e.g. a benchmark's extra state) and shows
+ * the result.
  */
-export function advanceYears(years: number) {
+export function advanceYears(years: number, prepare?: (sim: Simulation) => void) {
   const { sim } = state;
   if (!sim) return;
   for (let t = 0; t < years * TICKS_PER_YEAR && !sim.gameOver; t++) stepSimulation(sim);
+  prepare?.(sim);
   notifiedSnapshot = sim.snapshotVersion;
   publish({});
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BENCHMARK, evaluateSwipe, scenarioFromUrl, summarizeBenchmark, swipePlan, type SwipeResult } from './benchmark';
+import { BENCHMARK, SCENARIOS, evaluateSwipe, scenarioFromUrl, summarizeBenchmark, swipePlan, type SwipeResult } from './benchmark';
 
 test('the plan has 10 swipes in each of the 8 directions at 1500 pt/s', () => {
   const plan = swipePlan();
@@ -40,5 +40,26 @@ test('the benchmark passes only when all 400 swipes pass', () => {
 test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark'), 'young');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=aged'), 'aged');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=cities'), 'cities');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
+});
+
+test('the cities scenario fills every settled hex with buildings and puts ruins beside them', async () => {
+  const { createSimulation, generateWorld, TICKS_PER_YEAR, stepSimulation } = await import('../sim');
+  const { fillWithBuildings } = await import('./fillBuildings');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 60 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  fillWithBuildings(sim);
+  const { world } = sim;
+  let cities = 0;
+  let ruins = 0;
+  for (let c = 0; c < world.cellCount; c++) {
+    if (sim.cellPop[c] > 0) {
+      assert.equal(world.buildings[c], 4);
+      cities++;
+    }
+    if (world.ruins[c] > 0) ruins++;
+  }
+  assert.ok(cities > 0 && ruins > 0);
+  assert.equal(SCENARIOS.cities.buildings, true);
 });

@@ -10,6 +10,7 @@ import {
   hasFreshWater,
   resourceCapacityTerms,
   sumTerms,
+  type HexEconomy,
   type Term,
   type World,
 } from '../sim';
@@ -25,6 +26,8 @@ type Props = {
    * calculated; null for water.
    */
   supply?: readonly (readonly Term[])[] | null;
+  /** Stock, harvest and buildings; null for water. */
+  economy?: HexEconomy | null;
   onClose: () => void;
 };
 
@@ -32,7 +35,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, economy, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -52,8 +55,12 @@ export function HexInfoPanel({ world, cell, civName, supply, onClose }: Props) {
   const scarcest = totals ? SUPPLY_NAMES[totals.indexOf(Math.min(...totals))] : null;
   let roads = 0;
   for (let d = 0; d < 6; d++) if (world.roads[cell] & (1 << d)) roads++;
+  const standing = economy ? economy.buildings.filter((b) => b.state === 'standing').length : 0;
+  const ruins = economy ? economy.buildings.filter((b) => b.state === 'ruin' || b.state === 'repair').length : 0;
   const highlights = [
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
+    civName ? settlementName(standing) : null,
+    !civName && ruins > 0 ? `${ruins} ruin${ruins > 1 ? 's' : ''}` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
   ].filter(Boolean);
@@ -118,8 +125,41 @@ export function HexInfoPanel({ world, cell, civName, supply, onClose }: Props) {
                 </View>
               ))}
               <Text style={styles.note}>
-                Each person needs one unit of food, water and space. Modifiers (abilities, depletion) appear as
-                extra lines; none apply yet.
+                Each person needs one unit of food, water and space. Buildings and other modifiers appear as extra
+                lines; percentages apply after the rest and multiply.
+              </Text>
+            </>
+          )}
+
+          {economy && (
+            <>
+              <Text style={styles.section}>
+                Buildings {economy.buildings.length}/{economy.slots}
+              </Text>
+              {economy.buildings.length === 0 && <Text style={styles.note}>No buildings yet.</Text>}
+              {economy.buildings.map((b, i) => (
+                <View key={i}>
+                  <Row label={b.name} value={`${buildingState(b.state, b.workLeft)} · ${b.effect}`} />
+                  <Text style={styles.terms}>
+                    Upkeep {b.upkeep} a year
+                    {b.unpaidYears > 0 ? ` · unpaid for ${b.unpaidYears} year${b.unpaidYears > 1 ? 's' : ''}` : ''}
+                  </Text>
+                </View>
+              ))}
+
+              <Text style={styles.section}>Stock</Text>
+              <Row label="Wood" value={`${Math.floor(economy.wood)} · ${yearly(sumTerms(economy.harvest.wood), economy.upkeepWood)}`} />
+              {economy.harvest.wood.map((t, i) => (
+                <TermRow key={i} term={t} digits={1} />
+              ))}
+              <Row label="Stone" value={`${Math.floor(economy.stone)} · ${yearly(sumTerms(economy.harvest.stone), economy.upkeepStone)}`} />
+              {economy.harvest.stone.map((t, i) => (
+                <TermRow key={i} term={t} digits={1} />
+              ))}
+              <Text style={styles.note}>
+                {people > 0
+                  ? 'People harvest wood and stone on their own hex and pay buildings and upkeep from this stock.'
+                  : 'Nobody lives here: nothing is harvested, buildings decay to ruins, the stock stays on the ground.'}
               </Text>
             </>
           )}
@@ -177,6 +217,18 @@ function Bar({ label, value, capacity }: { label: string; value: number; capacit
 }
 
 const percent = (v: number) => `${Math.round(v * 100)} %`;
+/** Settlement size by standing buildings, as the map icon shows it. */
+const settlementName = (buildings: number) => (buildings === 0 ? 'Tribe' : buildings <= 2 ? 'Small city' : 'Big city');
+const yearly = (harvest: number, upkeep: number) =>
+  `+${harvest.toFixed(1)}${upkeep > 0 ? ` −${upkeep} upkeep` : ''} a year`;
+
+function buildingState(state: string, workLeft: number): string {
+  const years = `${Math.round(workLeft * 4) / 4} y left`;
+  if (state === 'construction') return `Building, ${years}`;
+  if (state === 'repair') return `Repairing, ${years}`;
+  if (state === 'ruin') return 'Ruin';
+  return 'Standing';
+}
 const riverSize = (flow: number) => (flow < 2 ? 'Stream' : flow < 5 ? 'River' : 'Great river');
 
 const styles = StyleSheet.create({

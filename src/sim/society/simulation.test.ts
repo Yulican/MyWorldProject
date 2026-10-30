@@ -257,9 +257,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement of the Vizani is cut off around year 250.
-  const sim = createSimulation(generateWorld({ seed: 77 }));
-  for (let year = 1; year <= 260; year++) {
+  // In this world a settlement of the Yurok is cut off in year 185.
+  const sim = createSimulation(generateWorld({ seed: 23 }));
+  for (let year = 1; year <= 190; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
