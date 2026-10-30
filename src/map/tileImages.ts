@@ -42,6 +42,8 @@ export class TileImages {
   private wantedAt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** Longest recent tile render in ms (decays), to stop a slice before it overruns SLICE_MS. */
+  private tileMs = 0;
 
   constructor(
     private render: RenderTile,
@@ -115,7 +117,8 @@ export class TileImages {
     const start = Date.now();
     let rendered = 0;
     let wait = 0;
-    while (this.queue.length > 0 && (rendered === 0 || Date.now() - start < SLICE_MS)) {
+    // A further tile only if one more of the recent (worst) duration still fits the slice.
+    while (this.queue.length > 0 && (rendered === 0 || Date.now() - start + this.tileMs <= SLICE_MS)) {
       const r = this.queue[0];
       const k = key(r.chunk, r.tier);
       const old = this.entries.get(k);
@@ -129,7 +132,9 @@ export class TileImages {
       }
       this.queue.shift();
       const signature = this.signature ? this.signature(r.chunk) : 0;
+      const before = Date.now();
       const image = this.render(r.chunk, this.tierScales[r.tier]);
+      this.tileMs = Math.max(Date.now() - before, this.tileMs * 0.9);
       const bytes = image ? image.width() * image.height() * 4 : 0;
       this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, signature });
       this.bytes += bytes;
