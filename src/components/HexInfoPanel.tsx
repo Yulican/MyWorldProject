@@ -53,7 +53,8 @@ export function HexInfoPanel({ world, cell, civName, supply, onClose }: Props) {
   let roads = 0;
   for (let d = 0; d < 6; d++) if (world.roads[cell] & (1 << d)) roads++;
   const highlights = [
-    civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
+    civName && people === 0 ? `Abandoned land of the ${civName}` : null,
+    civName && people > 0 ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
   ].filter(Boolean);
