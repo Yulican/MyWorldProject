@@ -22,21 +22,40 @@ Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
 npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
 npx expo start              # start the dev server
 npx expo lint               # lint
-npx tsc --noEmit            # typecheck
+npm run typecheck           # app + tests/tools
+npm test                    # simulation and map logic tests (Node)
+npm run world:preview       # render generated worlds to PNG to check the generator
 npx expo-doctor             # diagnose dependency and config issues
 npx expo install --fix      # fix incompatible package versions
 ```
 
-Run lint and typecheck before declaring any task done.
+Run typecheck and tests before declaring any task done.
 
 ## Navigation
 
 - The app currently has a single screen rendered from `App.tsx` (`src/screens/`). No router is set up yet; decide on one when a second screen is needed.
 
-## Building with EAS
+## Builds and testing
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+- Every change happens on its own branch. Pushing a feature branch makes GitHub Actions (`.github/workflows/android-build.yml`, job `test`) build one signed test APK, run the map benchmark with it on an emulator and publish the APK as the pre-release `build-<branch>` (also when the benchmark fails); the user installs that on their phone to test. On `main`, job `release` builds the phone APK only.
+- CI passes the CPU architectures as `-PreactNativeArchitectures`: `arm64-v8a` (phone) on `main`, `arm64-v8a,x86_64` (phone + emulator) on feature branches. Don't hard-code CPU architectures in `app.json` or config plugins; when adding a native library, make sure it supports arm64-v8a and x86_64.
+- Commits that only touch `Design Documents/`, `*.md` or `LICENSE` don't trigger a build. To get an APK anyway, run the workflow manually (`workflow_dispatch`).
+- EAS is not used for builds.
+
+## Mandatory performance test
+
+Every push to a feature branch runs the map benchmark in CI (job `test` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark`):
+
+- 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world.
+- **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
+
+Rules for every agent and every change:
+
+- Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for the `test` job.
+- A task is not done, and its branch must not be merged into `main`, until the `test` job (including its benchmark step) passes. If it fails, keep optimizing and push again; don't hand the task back as finished.
+- Never weaken the thresholds, skip swipes or worlds, or disable the job to get it green. Only the user changes the rules.
+- New features extend the benchmark (new scenarios in `src/bench/`); all scenarios must always pass.
+- The failing swipes, their seeds and directions are in the job summary and the `benchmark-results` artifact. The **Bench** button in the app runs the same benchmark on a phone.
 
 ## Rules
 

@@ -1,0 +1,169 @@
+# Builds installable APKs and runs the mandatory map benchmark.
+#
+# - main: builds the phone APK (arm64) and publishes it as the pre-release
+#   build-main.
+# - Every other branch: builds one test APK (arm64 for the phone, x86_64 for
+#   the emulator), runs the map benchmark with it on an Android emulator and
+#   publishes it as the pre-release build-<branch>, also when the benchmark
+#   fails, so it can still be tried on the phone. The job fails unless the
+#   benchmark passes (rules in src/bench/benchmark.ts).
+#
+# Deleting a branch removes its release again.
+name: Android build
+
+on:
+  push:
+    branches: ['**']
+    # Docs-only commits don't change the app, so they don't need a new APK.
+    paths-ignore:
+      - 'Design Documents/**'
+      - '**/*.md'
+      - 'LICENSE'
+  delete:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.event.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: github.event_name != 'delete' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Only 64-bit ARM (practically every phone of the last years); compiling
+      # native code for all four CPU types took most of the build time.
+      # The build label is shown in the app so it's clear which build is installed.
+      - name: Build release APK
+        env:
+          EXPO_PUBLIC_BUILD_LABEL: ${{ github.ref_name }} · ${{ github.sha }}
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Sign and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: scripts/publish-apk.sh android/app/build/outputs/apk/release/app-release.apk
+
+  test:
+    if: github.event_name != 'delete' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # One APK for both: arm64 runs on the phone, x86_64 on the emulator.
+      - name: Build test APK
+        env:
+          EXPO_PUBLIC_BUILD_LABEL: ${{ github.ref_name }} · ${{ github.sha }}
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # System animations stay on: the benchmark measures real animation frames.
+      - name: Run map benchmark on the emulator
+        id: benchmark
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: scripts/run-benchmark.sh android/app/build/outputs/apk/release/app-release.apk benchmark-results
+
+      - name: Upload benchmark results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: benchmark-results
+          path: benchmark-results
+          if-no-files-found: ignore
+
+      # Published even when the benchmark failed, so the build can be tried on
+      # the phone; the release notes and the red job show the result.
+      - name: Sign and publish test APK
+        if: ${{ !cancelled() && steps.benchmark.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          BENCHMARK_OUTCOME: ${{ steps.benchmark.outcome }}
+        run: |
+          if [ -f benchmark-results/summary.json ]; then
+            FAILED=$(node -p "const s=require('./benchmark-results/summary.json'); s.failed+'/'+s.swipes")
+          else
+            FAILED="no result"
+          fi
+          if [ "$BENCHMARK_OUTCOME" = success ]; then RESULT=PASSED; else RESULT=FAILED; fi
+          export NOTES_EXTRA=$'\n\n'"Map benchmark: $RESULT (failed swipes: $FAILED)"
+          scripts/publish-apk.sh android/app/build/outputs/apk/release/app-release.apk
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove the deleted branch's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release delete "build-${{ github.event.ref }}" --cleanup-tag --yes || true

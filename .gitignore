@@ -42,3 +42,6 @@ yarn-error.*
 
 # Office lock files
 ~$*
+
+# World preview images (npm run world:preview)
+world-previews/
