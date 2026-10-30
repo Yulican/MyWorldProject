@@ -2,9 +2,9 @@
 # Runs the map benchmark on a connected Android device or emulator and fails
 # unless every swipe passes (rules in src/bench/benchmark.ts).
 #
-# Usage: scripts/run-benchmark.sh <benchmark.apk> [output dir]
-# The APK must be built with EXPO_PUBLIC_BENCHMARK=1, so it starts the
-# benchmark on launch and logs MYWORLD_BENCH_* lines.
+# Usage: scripts/run-benchmark.sh <apk> [output dir]
+# The app is opened with the link myworld://benchmark, which starts the
+# benchmark; it logs MYWORLD_BENCH_* lines.
 set -euo pipefail
 
 APK="$1"
@@ -16,7 +16,7 @@ mkdir -p "$OUT"
 adb wait-for-device
 adb install -r "$APK"
 adb logcat -c
-adb shell am start -n "$PACKAGE/.MainActivity"
+adb shell am start -W -a android.intent.action.VIEW -d "myworld://benchmark" "$PACKAGE"
 
 # Wait for the summary line, or for the app to die.
 start=$(date +%s)

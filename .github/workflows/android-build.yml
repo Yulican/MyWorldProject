@@ -1,5 +1,13 @@
-# Builds an installable APK for every pushed branch and publishes it on a
-# GitHub release named after the branch, so it can be downloaded on the phone.
+# Builds installable APKs and runs the mandatory map benchmark.
+#
+# - main: builds the phone APK (arm64) and publishes it as the pre-release
+#   build-main.
+# - Every other branch: builds one test APK (arm64 for the phone, x86_64 for
+#   the emulator), runs the map benchmark with it on an Android emulator and
+#   publishes it as the pre-release build-<branch>, also when the benchmark
+#   fails, so it can still be tried on the phone. The job fails unless the
+#   benchmark passes (rules in src/bench/benchmark.ts).
+#
 # Deleting a branch removes its release again.
 name: Android build
 
@@ -22,12 +30,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    if: github.event_name != 'delete'
+  release:
+    if: github.event_name != 'delete' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      TAG: build-${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v5
 
@@ -52,9 +58,8 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
 
-      # Test builds only target 64-bit ARM (practically every phone of the
-      # last years). Compiling native code for all four CPU types took most of
-      # the build time. Local builds still use the project default (all types).
+      # Only 64-bit ARM (practically every phone of the last years); compiling
+      # native code for all four CPU types took most of the build time.
       # The build label is shown in the app so it's clear which build is installed.
       - name: Build release APK
         env:
@@ -62,49 +67,17 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
-      # Re-sign with the project keystore so new builds install over old ones
-      # (keeps save games). Without the secrets the APK stays debug-signed.
-      - name: Sign APK
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          APK=android/app/build/outputs/apk/release/app-release.apk
-          # The commit in the name keeps file names unique: re-downloading a
-          # name that is already on the phone makes the browser ask to download
-          # it again and leaves two APKs behind.
-          OUT="MyWorld-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}.apk"
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::No keystore secrets set - APK is debug-signed. Installing it over a build with a different signature requires uninstalling first."
-            cp "$APK" "$OUT"
-          else
-            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
-            BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
-            "$BUILD_TOOLS/zipalign" -f -p 4 "$APK" aligned.apk
-            "$BUILD_TOOLS/apksigner" sign --ks release.keystore --ks-pass env:KEYSTORE_PASSWORD \
-              --ks-key-alias "$KEY_ALIAS" --out "$OUT" aligned.apk
-            rm release.keystore
-          fi
-          echo "APK_FILE=$OUT" >> "$GITHUB_ENV"
-
-      - name: Publish release for this branch
+      - name: Sign and publish
         env:
           GH_TOKEN: ${{ github.token }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          gh release delete "$TAG" --cleanup-tag --yes || true
-          gh release create "$TAG" "$APK_FILE" \
-            --prerelease \
-            --target "$GITHUB_SHA" \
-            --title "Build: $GITHUB_REF_NAME" \
-            --notes "Branch \`$GITHUB_REF_NAME\` at ${GITHUB_SHA::7}: $COMMIT_MESSAGE"
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: scripts/publish-apk.sh android/app/build/outputs/apk/release/app-release.apk
 
-  # Mandatory map performance test (rules in src/bench/benchmark.ts): an x86_64
-  # build with the benchmark switched on runs on an Android emulator; the job
-  # fails unless every swipe passes. Runs in parallel with the phone build.
-  benchmark:
-    if: github.event_name != 'delete'
+  test:
+    if: github.event_name != 'delete' && github.ref != 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -124,16 +97,19 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run typecheck
+
+      - run: npm test
+
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
 
-      # The emulator is x86_64, so this build targets x86_64 instead of arm64.
-      - name: Build benchmark APK
+      # One APK for both: arm64 runs on the phone, x86_64 on the emulator.
+      - name: Build test APK
         env:
-          EXPO_PUBLIC_BENCHMARK: '1'
-          EXPO_PUBLIC_BUILD_LABEL: benchmark · ${{ github.ref_name }} · ${{ github.sha }}
+          EXPO_PUBLIC_BUILD_LABEL: ${{ github.ref_name }} · ${{ github.sha }}
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=x86_64
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
 
       - name: Enable KVM for the emulator
         run: |
@@ -142,7 +118,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # System animations stay on: the benchmark measures real animation frames.
-      - name: Run benchmark on the emulator
+      - name: Run map benchmark on the emulator
+        id: benchmark
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -153,12 +130,33 @@ jobs:
           script: scripts/run-benchmark.sh android/app/build/outputs/apk/release/app-release.apk benchmark-results
 
       - name: Upload benchmark results
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v5
         with:
           name: benchmark-results
           path: benchmark-results
           if-no-files-found: ignore
+
+      # Published even when the benchmark failed, so the build can be tried on
+      # the phone; the release notes and the red job show the result.
+      - name: Sign and publish test APK
+        if: ${{ !cancelled() && steps.benchmark.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          BENCHMARK_OUTCOME: ${{ steps.benchmark.outcome }}
+        run: |
+          if [ -f benchmark-results/summary.json ]; then
+            FAILED=$(node -p "const s=require('./benchmark-results/summary.json'); s.failed+'/'+s.swipes")
+          else
+            FAILED="no result"
+          fi
+          if [ "$BENCHMARK_OUTCOME" = success ]; then RESULT=PASSED; else RESULT=FAILED; fi
+          export NOTES_EXTRA=$'\n\n'"Map benchmark: $RESULT (failed swipes: $FAILED)"
+          scripts/publish-apk.sh android/app/build/outputs/apk/release/app-release.apk
 
   cleanup:
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'

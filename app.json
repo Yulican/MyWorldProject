@@ -4,6 +4,7 @@
     "slug": "MyWorldProject",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "myworld",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "android": {

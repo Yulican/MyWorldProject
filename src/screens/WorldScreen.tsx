@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
@@ -9,8 +9,8 @@ import { colors, spacing } from '../theme';
 
 // Set by the CI build (branch · commit) so testers can see which build is installed.
 const buildLabel = process.env.EXPO_PUBLIC_BUILD_LABEL ?? 'local dev build';
-// Set for the CI benchmark build: the benchmark starts as soon as the app opens.
-const autoBenchmark = process.env.EXPO_PUBLIC_BENCHMARK === '1';
+// CI opens the app with this link to start the benchmark (scripts/run-benchmark.sh).
+const BENCHMARK_URL = 'myworld://benchmark';
 
 export function WorldScreen() {
   const world = useWorld();
@@ -24,9 +24,13 @@ export function WorldScreen() {
   }, [world]);
 
   const runBenchmark = benchmark.run;
+  const hasWorld = world !== null;
   useEffect(() => {
-    if (autoBenchmark && world) runBenchmark();
-  }, [world, runBenchmark]);
+    if (!hasWorld) return;
+    Linking.getInitialURL().then((url) => {
+      if (url?.startsWith(BENCHMARK_URL)) runBenchmark();
+    });
+  }, [hasWorld, runBenchmark]);
 
   // Tapping the selected hex again closes the info bar.
   const onTapCell = (cell: number) => setSelectedCell((current) => (cell === current ? -1 : cell));

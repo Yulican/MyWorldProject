@@ -37,22 +37,22 @@ Run typecheck and tests before declaring any task done.
 
 ## Builds and testing
 
-- Every change happens on its own branch. Pushing a branch makes GitHub Actions (`.github/workflows/android-build.yml`) build a signed release APK and publish it as the pre-release `build-<branch>`; the user installs that on their phone to test.
-- CI builds native code for `arm64-v8a` only (passed as `-PreactNativeArchitectures=arm64-v8a`). Don't hard-code CPU architectures in `app.json` or config plugins; when adding a native library, make sure it supports arm64-v8a.
+- Every change happens on its own branch. Pushing a feature branch makes GitHub Actions (`.github/workflows/android-build.yml`, job `test`) build one signed test APK, run the map benchmark with it on an emulator and publish the APK as the pre-release `build-<branch>` (also when the benchmark fails); the user installs that on their phone to test. On `main`, job `release` builds the phone APK only.
+- CI passes the CPU architectures as `-PreactNativeArchitectures`: `arm64-v8a` (phone) on `main`, `arm64-v8a,x86_64` (phone + emulator) on feature branches. Don't hard-code CPU architectures in `app.json` or config plugins; when adding a native library, make sure it supports arm64-v8a and x86_64.
 - Commits that only touch `Design Documents/`, `*.md` or `LICENSE` don't trigger a build. To get an APK anyway, run the workflow manually (`workflow_dispatch`).
 - EAS is not used for builds.
 
 ## Mandatory performance test
 
-Every push runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`):
+Every push to a feature branch runs the map benchmark in CI (job `test` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark`):
 
 - 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world.
 - **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
 
 Rules for every agent and every change:
 
-- Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for the `benchmark` job.
-- A task is not done, and its branch must not be merged into `main`, until the `benchmark` job passes. If it fails, keep optimizing and push again; don't hand the task back as finished.
+- Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for the `test` job.
+- A task is not done, and its branch must not be merged into `main`, until the `test` job (including its benchmark step) passes. If it fails, keep optimizing and push again; don't hand the task back as finished.
 - Never weaken the thresholds, skip swipes or worlds, or disable the job to get it green. Only the user changes the rules.
 - New features extend the benchmark (new scenarios in `src/bench/`); all scenarios must always pass.
 - The failing swipes, their seeds and directions are in the job summary and the `benchmark-results` artifact. The **Bench** button in the app runs the same benchmark on a phone.
