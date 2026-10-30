@@ -67,6 +67,8 @@ const MIN_SATISFACTION_GAIN = 1;
 const SEAT_MIN_COST = 2 * CONNECTION_NEAR;
 /** A seat is only worth it if the settlements it serves gain this much satisfaction together. */
 const SEAT_MIN_BENEFIT = 40;
+/** Years before a seat site that was not built in time may be chosen again (prototype). */
+const SEAT_RETRY_YEARS = 10;
 /** Seats of government a people considers per year (its worst-connected settlements). */
 const SEAT_CANDIDATES = 3;
 
@@ -268,6 +270,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
         !busy &&
         (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c));
       if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
+      if (PROTO.seatsV2 && sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
         buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
@@ -535,6 +538,7 @@ const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
  * it from its own stock (or repairs a ruined seat); one seat at a time.
  */
 export function planSeats(sim: Simulation, owner: Uint8Array): void {
+  if (PROTO.seatsV2) return planSeatSites(sim, owner);
   const { economy, world } = sim;
   const n = world.cellCount;
   // One pass: peoples already building a seat, and every people's candidates.
@@ -581,6 +585,124 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
     if (netWith(sim, best, Material.Wood, SEAT_TYPE, -1) < 0 || netWith(sim, best, Material.Stone, SEAT_TYPE, -1) < 0) continue;
     startConstruction(sim, best, slot, SEAT_TYPE);
   }
+}
+
+/**
+ * Seats, second version (prototype): yearly, per people without a planned
+ * or unfinished seat, the settlement (25+ people, SEAT_MIN_COST from every
+ * seat) whose seat would raise its people's connection most, among its
+ * PROTO.seatCandidates worst connected. Counting only gains over today's
+ * connection favors sites that cover new ground, not ground a seat covers.
+ * The site saves up for it (merchants bring the rest) and builds it in the
+ * economy step (buildPlannedSeat).
+ */
+function planSeatSites(sim: Simulation, owner: Uint8Array): void {
+  const { economy, world } = sim;
+  const n = world.cellCount;
+  const busy = new Uint8Array(sim.civSlots);
+  const candidates: number[][] = [];
+  const year = Math.floor(sim.tick / (STEPS_PER_YEAR * 13));
+  for (let c = 0; c < n; c++) {
+    const id = owner[c];
+    if (sim.seatSite[c] && (id === 0 || sim.cellPop[c] === 0)) sim.seatSite[c] = 0; // lost
+    if (sim.seatSite[c] && year + 1 - sim.seatSite[c] > SAVE_UP_YEARS) {
+      // Not built in time: try elsewhere, and this site again only later.
+      sim.seatSite[c] = 0;
+      sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
+      PROTO.debug.expired++;
+    }
+    if (id === 0) continue;
+    if (sim.seatSite[c]) busy[id] = 1;
+    if (sim.hasBuildings[c]) {
+      for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+        const st = economy.state[s];
+        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[id] = 1;
+      }
+    }
+    if (sim.cellPop[c] < EXPANSION_GROUP || sim.seatCost[c] < SEAT_MIN_COST || hasGood(sim, c, Good.Seat)) continue;
+    if (sim.seatRetry[c] > year + 1) continue;
+    (candidates[id] ??= []).push(c);
+  }
+  const field = scratchField(n);
+  for (let id = 1; id < sim.civSlots; id++) {
+    const list = candidates[id];
+    if (!sim.civs[id] || busy[id] || !list) continue;
+    list.sort((a, b) => sim.seatCost[b] - sim.seatCost[a] || a - b);
+    let best = -1;
+    let bestBenefit = SEAT_MIN_BENEFIT;
+    for (const c of list.slice(0, PROTO.seatCandidates)) {
+      const reached = seatField(sim, owner, id, [c], field);
+      let benefit = 0;
+      for (const k of reached) {
+        benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
+        field[k] = Infinity;
+      }
+      if (benefit > bestBenefit) {
+        bestBenefit = benefit;
+        best = c;
+      }
+    }
+    if (best >= 0) {
+      sim.seatSite[best] = year + 1;
+      PROTO.debug.planned++;
+    } else PROTO.debug.lowBenefit++;
+  }
+}
+
+/**
+ * A planned seat (planSeatSites) in the economy step: the site saves up for
+ * it; once it has the wood and stone and the harvest keeps its upkeep, it
+ * builds it, in a free slot, a ruined seat, or in place of its least needed
+ * building (the one whose loss costs the fewest people; imports make up for
+ * it). Returns whether construction started.
+ */
+function buildPlannedSeat(sim: Simulation, cell: number): boolean {
+  const { economy } = sim;
+  const b = BUILDINGS[SEAT_TYPE];
+  let slot = seatSlot(sim, cell);
+  const share = slot !== null && slot >= 0 ? REPAIR_SHARE : 1;
+  economy.goal[cell * MATERIAL_COUNT + Material.Wood] = b.wood * share;
+  economy.goal[cell * MATERIAL_COUNT + Material.Stone] = b.stone * share;
+  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood * share || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone * share) {
+    PROTO.debug.noMaterial++;
+    return false;
+  }
+  // Upkeep first: freeing a slot only ever lowers it.
+  if (netWith(sim, cell, Material.Wood, SEAT_TYPE, -1) < 0 || netWith(sim, cell, Material.Stone, SEAT_TYPE, -1) < 0) {
+    PROTO.debug.noUpkeep++;
+    return false;
+  }
+  if (slot === null) {
+    PROTO.debug.replaced++;
+    // Replace the least needed building.
+    const capacity = sim.cellCapacity[cell];
+    let bestCost = Infinity;
+    for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+      if (economy.state[s] !== SlotState.Standing && economy.state[s] !== SlotState.Ruin) continue;
+      const t = BUILDINGS[economy.type[s]];
+      if (t.good === Good.Seat) return false;
+      const was = economy.state[s];
+      economy.state[s] = SlotState.Empty;
+      const loss = Math.max(0, capacity - capacityWith(sim, cell, -1, -1));
+      economy.state[s] = was;
+      const cost = was === SlotState.Ruin ? -1 : loss + (isLuxury(t.good) ? 1000 : t.good === Good.Merchants || t.good === Good.Harbor ? 50 : t.good === Good.Comfort ? 10 : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        slot = s;
+      }
+    }
+    if (slot === null) return false;
+    economy.state[slot] = SlotState.Empty;
+    economy.type[slot] = -1;
+    updateTradeBuildings(sim, cell);
+    updateCellSupply(sim, cell);
+    slot = -1;
+  }
+  sim.seatSite[cell] = 0;
+  PROTO.debug.built++;
+  economy.goal[cell * MATERIAL_COUNT + Material.Wood] = 0;
+  economy.goal[cell * MATERIAL_COUNT + Material.Stone] = 0;
+  return startConstruction(sim, cell, slot, SEAT_TYPE);
 }
 
 let scratch = new Float32Array(0);

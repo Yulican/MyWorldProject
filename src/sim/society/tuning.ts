@@ -15,4 +15,15 @@ export const PROTO = {
   /** No settlers into a hex whose connection term would be below expandMinConnection. */
   expandOnlyHappy: true,
   expandMinConnection: 0,
+  /**
+   * Seats of government, second version: any settlement of 25+ may be the
+   * site (the one whose seat serves the most new area), it saves up and gets
+   * deliveries like any building, and replaces its least needed building
+   * when no slot is free.
+   */
+  seatsV2: true,
+  /** Settlements a people compares for its next seat (its worst connected first). */
+  seatCandidates: 12,
+  /** Counters for the prototype measurements. */
+  debug: { planned: 0, built: 0, expired: 0, noMaterial: 0, noUpkeep: 0, replaced: 0, lowBenefit: 0 },
 };

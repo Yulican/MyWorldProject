@@ -130,6 +130,13 @@ export type Simulation = {
   moodSet: Uint8Array;
   /** Travel cost to the nearest seat of government of the hex's people, Infinity if none in reach. */
   seatCost: Float32Array;
+  /**
+   * Settlements chosen for their people's next seat of government: the year
+   * they were chosen + 1 (0 = none); a plan expires after SAVE_UP_YEARS
+   * (economy.ts, prototype). A failed site is skipped for a while (seatRetry: year it may be chosen again + 1).
+   */
+  seatSite: Uint16Array;
+  seatRetry: Uint16Array;
   /** Merchants on their way and what settlements ask for and spare (see trade.ts). */
   trade: Trade;
   /** Inhabitants of 16 and older per hex, counted at every refresh (they earn money). */
@@ -171,6 +178,8 @@ export function createSimulation(world: World): Simulation {
     unhappyQuarters: new Uint8Array(n),
     moodSet: new Uint8Array(n),
     seatCost: new Float32Array(n).fill(Infinity),
+    seatSite: new Uint16Array(n),
+    seatRetry: new Uint16Array(n),
     trade: createTrade(world.seed, n),
     cellAdults: new Int32Array(n),
     chronicle: [],
