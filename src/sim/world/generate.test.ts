@@ -64,3 +64,15 @@ test('a large map generates fast enough', () => {
   const ms = performance.now() - t0;
   assert.ok(ms < 5000, `256x256 took ${ms.toFixed(0)} ms`);
 });
+
+test('rivers always flow downhill, into lower land, a lake or the sea', () => {
+  for (const seed of [1, 7, 42, 99, 2024]) {
+    const world = generateWorld({ seed });
+    for (let c = 0; c < world.cellCount; c++) {
+      if (world.riverFlow[c] <= 0 || world.riverDir[c] < 0) continue;
+      const next = world.neighbors[c * DIRECTION_COUNT + world.riverDir[c]];
+      if (next < 0 || isWaterBiome(world.biome[next])) continue;
+      assert.ok(world.elevation[next] < world.elevation[c], `seed ${seed}: river at ${c} flows uphill`);
+    }
+  }
+});
