@@ -19,6 +19,7 @@ import {
 import { scheduleOnRN } from 'react-native-worklets';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
+import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
 import { sameViewTiles, viewTiles, visibleTiles, type ViewTiles } from './viewport';
 import { buildWorldLayers, type WorldLayers } from './worldPicture';
@@ -236,6 +237,7 @@ export function WorldMap({ world, selectedCell, onTapCell }: Props) {
           </Group>
         </Canvas>
       </GestureDetector>
+      <MapPerfMeter tx={tx} ty={ty} scale={scale} mapWidth={mapWidth} />
     </View>
   );
 }
