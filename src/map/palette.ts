@@ -27,3 +27,15 @@ export const DEPOSIT_COLORS: Record<DepositCategory, string> = {
 export const RIVER_COLOR = '#4a8fd6';
 export const START_COLOR = '#ff4d4d';
 export const SELECTION_COLOR = '#ffffff';
+
+/** Civilization colors, indexed by `Civilization.color` (CIV_COLOR_COUNT entries). The player's tribe gets the first. */
+export const CIV_COLORS: readonly string[] = [
+  '#ff4d4d',
+  '#3fc6ff',
+  '#ffd23f',
+  '#b57cff',
+  '#ff8c42',
+  '#3ddc84',
+  '#ff6ec7',
+  '#f2f2f2',
+];

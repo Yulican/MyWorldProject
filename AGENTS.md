@@ -46,7 +46,7 @@ Run typecheck and tests before declaring any task done.
 
 Every push to a feature branch runs the map benchmark in CI (job `test` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark`):
 
-- 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world.
+- 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world, with the simulation running at its default speed and territories on the map.
 - **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
 
 Rules for every agent and every change:

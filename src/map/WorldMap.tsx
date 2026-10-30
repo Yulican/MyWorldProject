@@ -1,5 +1,5 @@
-import { Canvas, Group, Image, Path, Skia } from '@shopify/react-native-skia';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, Group, Image, Path, Skia, type SkImage } from '@shopify/react-native-skia';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
   GestureDetector,
@@ -22,12 +22,14 @@ import {
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
+import { recordMapBuild } from '../state/perfStats';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
+import { buildTerritoryOverview, renderTerritoryTile, TERRITORY_TILE_RESOLUTION } from './territoryLayers';
 import { TileImages } from './tileImages';
 import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
-import { buildWorldLayers, TILE_BLEED, type WorldLayers } from './worldPicture';
+import { buildWorldLayers, renderTile, TILE_BLEED, type WorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
 const START_SCALE = 1;
@@ -41,6 +43,17 @@ const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false, tier:
 /** Rings of tiles around the screen rendered ahead, so panning finds them ready. */
 const PREFETCH_TILES = 1;
 
+/**
+ * Where the territory layer gets the society snapshot from: an external
+ * store (as for useSyncExternalStore) whose version changes with every new
+ * snapshot, plus each civilization's color. Should be stable per world.
+ */
+export type TerritorySource = {
+  subscribe: (listener: () => void) => () => void;
+  getVersion: () => number;
+  civColor: (civ: number) => string;
+};
+
 /** Drives the map from code, for the performance benchmark. */
 export type MapController = {
   /** Zooms to `scale` and centers the map. */
@@ -53,6 +66,7 @@ type Props = {
   world: World;
   selectedCell: number;
   onTapCell: (cell: number) => void;
+  territory: TerritorySource;
   controller?: { current: MapController | null };
 };
 
@@ -66,7 +80,9 @@ type Props = {
  * copy is drawn beside the first.
  *
  * Which tiles are visible lives in <TileLayer>, so crossing a tile border
- * re-renders only the tiles and never the gesture setup mid-gesture.
+ * re-renders only the tiles and never the gesture setup mid-gesture. The
+ * territory layer follows the simulation there too, so new snapshots don't
+ * re-render the map either.
  *
  * Releasing a drag lets the map glide on and slow down, so short repeated
  * swipes flow into each other instead of stopping hard. Touching the map
@@ -75,7 +91,7 @@ type Props = {
  * While pinching, tiles keep their zoom tier and are scaled; the sharper or
  * lighter tier is rendered when the fingers lift.
  */
-export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) {
+export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell, territory, controller }: Props) {
   const layers = useMemo(() => buildWorldLayers(world), [world]);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -297,7 +313,7 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
                 fit="fill"
               />
             ))}
-            <TileLayer world={world} layers={layers} listener={tileListener} />
+            <TileLayer world={world} layers={layers} listener={tileListener} territory={territory} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -310,55 +326,93 @@ export function WorldMap({ world, selectedCell, onTapCell, controller }: Props) 
       <MapPerfMeter tx={tx} ty={ty} scale={scale} mapWidth={mapWidth} />
     </View>
   );
-}
+});
 
 type TileLayerProps = {
   world: World;
   layers: WorldLayers;
   listener: { current: (view: ViewTiles) => void };
+  territory: TerritorySource;
 };
 
 /**
- * The detail tile images near the screen. Owns the visible-tile state so only
- * it re-renders. Tiles not rendered yet at the current tier show a ready tier
- * meanwhile, or the overview image underneath.
+ * The detail tile images near the screen and the territories above them.
+ * Owns the visible-tile state and follows the society snapshot, so only it
+ * re-renders. Tiles not rendered yet at the current tier show a ready tier
+ * meanwhile, or the overview image underneath; after a new snapshot the old
+ * territory tiles stay until the new ones are ready.
  */
-const TileLayer = memo(function TileLayer({ world, layers, listener }: TileLayerProps) {
+const TileLayer = memo(function TileLayer({ world, layers, listener, territory }: TileLayerProps) {
   const [view, setView] = useState<ViewTiles>(NO_TILES);
   const [, setReady] = useState(0);
   listener.current = setView;
-  const tiles = useMemo(
+  const onReady = useCallback(() => setReady((n) => n + 1), []);
+  const scales = useMemo(() => TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()), []);
+
+  const terrainTiles = useMemo(
+    () => new TileImages((chunk, px) => renderTile(world, chunk, layers.chunkCols, px), scales, onReady),
+    [world, layers, scales, onReady],
+  );
+  const territoryTiles = useMemo(
     () =>
       new TileImages(
-        world,
-        layers.chunkCols,
-        TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()),
-        () => setReady((n) => n + 1),
+        (chunk, px) => renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor),
+        scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
+        onReady,
       ),
-    [world, layers],
+    [world, layers, scales, onReady, territory],
   );
-  useEffect(() => () => tiles.dispose(), [tiles]);
-  useEffect(() => {
-    tiles.want(visibleTiles(view, layers, PREFETCH_TILES).map((t) => ({ ...t, tier: view.tier })));
-  }, [tiles, view, layers]);
+  useEffect(() => () => terrainTiles.dispose(), [terrainTiles]);
+  useEffect(() => () => territoryTiles.dispose(), [territoryTiles]);
 
+  const version = useSyncExternalStore(territory.subscribe, territory.getVersion);
+  // Runs before the request below, so the visible territory tiles are redone.
+  useEffect(() => territoryTiles.invalidate(), [territoryTiles, version]);
+  useEffect(() => {
+    const wanted = visibleTiles(view, layers, PREFETCH_TILES).map((t) => ({ ...t, tier: view.tier }));
+    terrainTiles.want(wanted);
+    territoryTiles.want(wanted);
+  }, [terrainTiles, territoryTiles, view, layers, version]);
+
+  // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
+  const overview = useMemo(() => {
+    if (view.detail) return null;
+    const t0 = performance.now();
+    const built = buildTerritoryOverview(world, territory.civColor, layers);
+    recordMapBuild(performance.now() - t0);
+    return built;
+    // `version` stands in for the world's mutable society arrays.
+  }, [world, layers, territory, version, view.detail]);
+
+  const tiles = visibleTiles(view, layers);
+  const tileImage = (key: string, image: SkImage | null, t: (typeof tiles)[number]) =>
+    image && (
+      <Image
+        key={key}
+        image={image}
+        x={t.col * CHUNK_W + t.offsetX - TILE_BLEED}
+        y={t.row * CHUNK_H - TILE_BLEED}
+        width={CHUNK_W + 2 * TILE_BLEED}
+        height={CHUNK_H + 2 * TILE_BLEED}
+        fit="fill"
+      />
+    );
   return (
     <>
-      {visibleTiles(view, layers).map((t) => {
-        const image = tiles.get(t.chunk, view.tier);
-        if (!image) return null;
-        return (
+      {tiles.map((t) => tileImage(`g${t.key}`, terrainTiles.get(t.chunk, view.tier), t))}
+      {tiles.map((t) => tileImage(`t${t.key}`, territoryTiles.get(t.chunk, view.tier), t))}
+      {overview &&
+        [0, 1].map((copy) => (
           <Image
-            key={t.key}
-            image={image}
-            x={t.col * CHUNK_W + t.offsetX - TILE_BLEED}
-            y={t.row * CHUNK_H - TILE_BLEED}
-            width={CHUNK_W + 2 * TILE_BLEED}
-            height={CHUNK_H + 2 * TILE_BLEED}
+            key={`t${copy}`}
+            image={overview.overview}
+            x={overview.overviewRect.x + copy * layers.width}
+            y={overview.overviewRect.y}
+            width={overview.overviewRect.width}
+            height={overview.overviewRect.height}
             fit="fill"
           />
-        );
-      })}
+        ))}
     </>
   );
 });

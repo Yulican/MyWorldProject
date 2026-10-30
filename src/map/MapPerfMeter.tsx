@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useFrameCallback, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
+import { takePerfSample } from '../state/perfStats';
 import { addFrame, newMotionStats, summarize, wrappedDelta, type MotionSummary } from './motionStats';
 
 /** How often the live line updates. */
@@ -27,11 +28,14 @@ type Props = {
  * - Last move: the same, only over the frames of the last pan or glide
  *   (zooming excluded), so idle frames don't hide stutter. Use this as the
  *   benchmark: e.g. "missed < 5% at 3000 pt/s".
+ * - Sim: JavaScript time spent simulating per second, weeks simulated per
+ *   second, and the time of the last territory overview rebuild.
  */
 export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
   const [live, setLive] = useState<Live | null>(null);
   const [last, setLast] = useState<MotionSummary | null>(null);
   const [jsFps, setJsFps] = useState(0);
+  const [sim, setSim] = useState({ msPerS: 0, weeksPerS: 0, mapBuildMs: 0 });
 
   const prev = useSharedValue({ tx: 0, ty: 0, scale: 0 });
   const speed = useSharedValue(0);
@@ -124,7 +128,10 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
     const onFrame = (now: number) => {
       frames++;
       if (now - start >= WINDOW_MS) {
-        setJsFps((frames * 1000) / (now - start));
+        const perSecond = 1000 / (now - start);
+        const perf = takePerfSample();
+        setJsFps(frames * perSecond);
+        setSim({ msPerS: perf.simMs * perSecond, weeksPerS: perf.ticks * perSecond, mapBuildMs: perf.mapBuildMs });
         frames = 0;
         start = now;
       }
@@ -142,7 +149,8 @@ export function MapPerfMeter({ tx, ty, scale, mapWidth }: Props) {
         {jsFps.toFixed(0)} fps
       </Text>
       <Text style={styles.text}>
-        Speed {live.speed.toFixed(0)} pt/s · zoom {live.scale.toFixed(2)}×
+        Speed {live.speed.toFixed(0)} pt/s · zoom {live.scale.toFixed(2)}× · Sim {sim.msPerS.toFixed(0)} ms/s ·{' '}
+        {sim.weeksPerS.toFixed(0)} weeks/s · Map {sim.mapBuildMs.toFixed(0)} ms
       </Text>
       {last && (
         <Text style={styles.text}>

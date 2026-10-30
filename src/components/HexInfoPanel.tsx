@@ -14,6 +14,8 @@ import { colors, spacing } from '../theme';
 type Props = {
   world: World;
   cell: number;
+  /** Name of the civilization living in the hex, if any. */
+  civName?: string | null;
   onClose: () => void;
 };
 
@@ -21,7 +23,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -35,7 +37,9 @@ export function HexInfoPanel({ world, cell, onClose }: Props) {
     meters >= 0 ? `${meters} m` : `${-meters} m deep`,
     river > 0 ? riverSize(river) : null,
   ].filter(Boolean);
+  const people = Math.round(world.population[cell]);
   const highlights = [
+    civName ? `${civName} · ${people} people · ${percent(world.faith[cell])} faith` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
   ].filter(Boolean);
@@ -82,9 +86,9 @@ export function HexInfoPanel({ world, cell, onClose }: Props) {
           ))}
 
           <Text style={styles.section}>People</Text>
-          <Row label="Civilization" value={world.owner[cell] ? `#${world.owner[cell]}` : 'Nobody'} />
-          <Row label="Population" value={String(Math.round(world.population[cell]))} />
-          <Row label="Faith in you" value={world.population[cell] > 0 ? percent(world.faith[cell]) : '–'} />
+          <Row label="Civilization" value={civName ?? 'Nobody'} />
+          <Row label="Population" value={String(people)} />
+          <Row label="Faith in you" value={people > 0 ? percent(world.faith[cell]) : '–'} />
         </ScrollView>
       )}
     </View>

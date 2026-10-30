@@ -89,6 +89,52 @@ export function buildWorldLayers(world: World): WorldLayers {
  * image covers the tile plus TILE_BLEED on each side.
  */
 export function renderTile(world: World, chunk: number, chunkCols: number, pxPerUnit: number): SkImage | null {
+  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [
+    (canvas, cells) => drawFills(canvas, world, cells),
+    (canvas, cells) => drawFeatures(canvas, world, cells),
+    // Icons after all fills, so no hex covers the icons of its neighbor.
+    (canvas, cells) => drawIcons(canvas, world, cells),
+  ]);
+}
+
+/**
+ * Hexes a tile has to draw, by map copy: those reaching into the tile plus
+ * TILE_BLEED (rivers reach up to one hex beyond their own). Columns outside
+ * the map belong to the neighboring map copies.
+ */
+export function tileCells(world: World, chunk: number, chunkCols: number): { offsetX: number; cells: Int32Array }[] {
+  const col = chunk % chunkCols;
+  const row = (chunk - col) / chunkCols;
+  const x = col * CHUNK_W - TILE_BLEED;
+  const y = row * CHUNK_H - TILE_BLEED;
+  const unitX = 1.5 * HEX_PX;
+  const unitY = Math.sqrt(3) * HEX_PX;
+  const c0 = Math.floor(x / unitX) - 2;
+  const c1 = Math.ceil((x + CHUNK_W + 2 * TILE_BLEED) / unitX) + 2;
+  const r0 = Math.max(0, Math.floor(y / unitY) - 2);
+  const r1 = Math.min(world.height - 1, Math.ceil((y + CHUNK_H + 2 * TILE_BLEED) / unitY) + 2);
+  const segments: { offsetX: number; cells: Int32Array }[] = [];
+  const copyWidth = wrapWidth(world) * HEX_PX;
+  for (let copy = Math.floor(c0 / world.width); copy <= Math.floor(c1 / world.width); copy++) {
+    const lo = Math.max(c0, copy * world.width) - copy * world.width;
+    const hi = Math.min(c1 + 1, (copy + 1) * world.width) - copy * world.width;
+    if (lo < hi && r0 <= r1) segments.push({ offsetX: copy * copyWidth, cells: cellsInRange(world, lo, hi, r0, r1 + 1) });
+  }
+  return segments;
+}
+
+/**
+ * Renders a tile into a CPU image by running each pass over the tile's hexes
+ * (all segments of a pass before the next pass), clipped to the tile plus
+ * TILE_BLEED.
+ */
+export function renderTileWith(
+  world: World,
+  chunk: number,
+  chunkCols: number,
+  pxPerUnit: number,
+  passes: ((canvas: SkCanvas, cells: Int32Array) => void)[],
+): SkImage | null {
   const col = chunk % chunkCols;
   const row = (chunk - col) / chunkCols;
   const x = col * CHUNK_W - TILE_BLEED;
@@ -103,34 +149,15 @@ export function renderTile(world: World, chunk: number, chunkCols: number, pxPer
   canvas.scale(w / tileW, h / tileH);
   canvas.translate(-x, -y);
   canvas.clipRect(Skia.XYWHRect(x, y, tileW, tileH), ClipOp.Intersect, true);
-
-  // Hexes reaching into the tile; rivers reach up to one hex beyond their own.
-  const unitX = 1.5 * HEX_PX;
-  const unitY = Math.sqrt(3) * HEX_PX;
-  const c0 = Math.floor(x / unitX) - 2;
-  const c1 = Math.ceil((x + tileW) / unitX) + 2;
-  const r0 = Math.max(0, Math.floor(y / unitY) - 2);
-  const r1 = Math.min(world.height - 1, Math.ceil((y + tileH) / unitY) + 2);
-  // Columns outside the map belong to the neighboring map copies.
-  const segments: { offsetX: number; cells: Int32Array }[] = [];
-  const copyWidth = wrapWidth(world) * HEX_PX;
-  for (let copy = Math.floor(c0 / world.width); copy <= Math.floor(c1 / world.width); copy++) {
-    const lo = Math.max(c0, copy * world.width) - copy * world.width;
-    const hi = Math.min(c1 + 1, (copy + 1) * world.width) - copy * world.width;
-    if (lo < hi && r0 <= r1) segments.push({ offsetX: copy * copyWidth, cells: cellsInRange(world, lo, hi, r0, r1 + 1) });
-  }
-  const draw = (fn: (c: SkCanvas, cells: Int32Array) => void) => {
-    for (const s of segments) {
+  const segments = tileCells(world, chunk, chunkCols);
+  for (const pass of passes) {
+    for (const seg of segments) {
       canvas.save();
-      canvas.translate(s.offsetX, 0);
-      fn(canvas, s.cells);
+      canvas.translate(seg.offsetX, 0);
+      pass(canvas, seg.cells);
       canvas.restore();
     }
-  };
-  draw((c, cells) => drawFills(c, world, cells));
-  draw((c, cells) => drawFeatures(c, world, cells));
-  // Icons after all fills, so no hex covers the icons of its neighbor.
-  draw((c, cells) => drawIcons(c, world, cells));
+  }
 
   surface.flush();
   const image = surface.makeImageSnapshot();
@@ -138,7 +165,7 @@ export function renderTile(world: World, chunk: number, chunkCols: number, pxPer
   return image;
 }
 
-function cellsInRange(world: World, col0: number, col1: number, row0: number, row1: number): Int32Array {
+export function cellsInRange(world: World, col0: number, col1: number, row0: number, row1: number): Int32Array {
   const cells = new Int32Array((col1 - col0) * (row1 - row0));
   let i = 0;
   for (let row = row0; row < row1; row++) {

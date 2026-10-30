@@ -1,23 +1,26 @@
 import type { SkImage } from '@shopify/react-native-skia';
-import type { World } from '../sim';
 import type { TileRef } from './viewport';
-import { renderTile } from './worldPicture';
 
 /** JS time spent rendering tiles before yielding, so view updates aren't held up. */
 const SLICE_MS = 8;
 /** Memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
-/** A tile is only freed after not being drawn for this long (it may still be on screen). */
+/** A replaced or evicted image is only freed after this long (it may still be on screen). */
 const KEEP_MS = 1000;
 
-type Entry = { image: SkImage; bytes: number; usedAt: number };
+/** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
+export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
+
+type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean };
 export type TileRequest = TileRef & { tier: number };
 
 /**
- * Pre-rendered detail tile images of one world, per zoom tier. Tiles are
+ * Pre-rendered tile images of one map layer, per zoom tier. Tiles are
  * rendered in the background, nearest to the view first; `onReady` is called
- * when new ones are available. Least recently drawn tiles are freed when the
- * memory budget is exceeded.
+ * when new ones are available. After `invalidate()` (the layer's data changed)
+ * tiles are rendered again, and the old image stays visible until the new one
+ * is ready. Least recently drawn tiles are freed when the memory budget is
+ * exceeded.
  */
 export class TileImages {
   private entries = new Map<string, Entry>();
@@ -29,8 +32,7 @@ export class TileImages {
   private disposed = false;
 
   constructor(
-    private world: World,
-    private chunkCols: number,
+    private render: RenderTile,
     /** Pixels per picture pixel for each tier. */
     private tierScales: readonly number[],
     private onReady: () => void,
@@ -54,7 +56,7 @@ export class TileImages {
     return null;
   }
 
-  /** Replaces the wanted tiles; missing ones are rendered, nearest first. */
+  /** Replaces the wanted tiles; missing or outdated ones are rendered, nearest first. */
   want(requests: TileRequest[]) {
     if (this.disposed) return;
     this.wanted = new Set(requests.map((r) => r.chunk));
@@ -62,12 +64,28 @@ export class TileImages {
     this.queue = requests
       .filter((r) => {
         const k = key(r.chunk, r.tier);
-        if (this.entries.has(k) || seen.has(k)) return false;
+        const entry = this.entries.get(k);
+        if ((entry && !entry.stale) || seen.has(k)) return false;
         seen.add(k);
         return true;
       })
       .sort((a, b) => a.distance - b.distance);
     if (this.queue.length > 0 && this.timer === null) this.timer = setTimeout(this.work, 0);
+  }
+
+  /**
+   * The layer's data changed: tiles near the view are rendered again on the
+   * next `want`, the others are dropped.
+   */
+  invalidate() {
+    for (const [k, e] of this.entries) {
+      if (this.wanted.has(chunkOf(k))) {
+        e.stale = true;
+      } else {
+        this.entries.delete(k);
+        this.free(e);
+      }
+    }
   }
 
   private work = () => {
@@ -78,12 +96,13 @@ export class TileImages {
     while (this.queue.length > 0 && (rendered === 0 || Date.now() - start < SLICE_MS)) {
       const r = this.queue.shift()!;
       const k = key(r.chunk, r.tier);
-      if (this.entries.has(k)) continue;
-      const image = renderTile(this.world, r.chunk, this.chunkCols, this.tierScales[r.tier]);
-      if (!image) continue;
-      const bytes = image.width() * image.height() * 4;
-      this.entries.set(k, { image, bytes, usedAt: Date.now() });
+      const old = this.entries.get(k);
+      if (old && !old.stale) continue;
+      const image = this.render(r.chunk, this.tierScales[r.tier]);
+      const bytes = image ? image.width() * image.height() * 4 : 0;
+      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false });
       this.bytes += bytes;
+      if (old) this.free(old);
       rendered++;
     }
     this.evict();
@@ -101,18 +120,23 @@ export class TileImages {
     for (const [k, e] of old) {
       if (this.bytes <= BUDGET_BYTES) break;
       this.entries.delete(k);
-      this.bytes -= e.bytes;
-      e.image.dispose();
+      this.free(e);
     }
+  }
+
+  /** Releases an entry's image once it can no longer be on screen. */
+  private free(e: Entry) {
+    this.bytes -= e.bytes;
+    const image = e.image;
+    if (image) setTimeout(() => image.dispose(), KEEP_MS);
   }
 
   /** Stops rendering and frees all tiles once they can no longer be on screen. */
   dispose() {
     this.disposed = true;
     if (this.timer !== null) clearTimeout(this.timer);
-    const images = [...this.entries.values()].map((e) => e.image);
+    for (const e of this.entries.values()) this.free(e);
     this.entries.clear();
-    setTimeout(() => images.forEach((image) => image.dispose()), KEEP_MS);
   }
 }
 
