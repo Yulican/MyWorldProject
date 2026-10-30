@@ -33,8 +33,8 @@ import {
   yieldFactor,
 } from './satisfaction';
 import type { Simulation } from './simulation';
-import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
-import { MONEY_PER_ADULT, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
+import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -77,19 +77,27 @@ const NO_MODIFIERS: readonly SupplyModifier[] = [];
  * without buildings in `sim.baseSupply` for planning.
  */
 export function updateCellSupply(sim: Simulation, cell: number): void {
-  const other = otherModifiers(sim, cell);
-  const base = supplyTerms(sim.world, cell, other);
-  const buildings = buildingSupplyModifiers(sim.economy, cell);
-  const terms = buildings.length > 0 ? supplyTerms(sim.world, cell, [...other, ...buildings]) : base;
+  const grain = sim.economy.provisions[cell * 2];
+  const barrels = sim.economy.provisions[cell * 2 + 1];
+  supplySums(
+    sim.world,
+    cell,
+    sim.supplyModifiers.get(cell) ?? NO_MODIFIERS,
+    grain > 0 ? Math.min(grain, PROVISIONS_MAX) : 0,
+    barrels > 0 ? Math.min(barrels, PROVISIONS_MAX) : 0,
+    sums,
+  );
   let capacity = Infinity;
   for (let k = 0; k < SUPPLY_KINDS; k++) {
-    sim.baseSupply[cell * SUPPLY_KINDS + k] = sumTerms(base[k]);
-    const v = sumTerms(terms[k]);
+    sim.baseSupply[cell * SUPPLY_KINDS + k] = Math.max(0, sums[k]);
+    const v = sim.hasBuildings[cell] ? withBuildings(sim.economy, cell, k, sums[k]) : Math.max(0, sums[k]);
     sim.cellSupply[cell * SUPPLY_KINDS + k] = v;
     capacity = Math.min(capacity, v);
   }
   sim.cellCapacity[cell] = capacity;
 }
+
+const sums = new Float64Array(SUPPLY_KINDS);
 
 /** A hex's supply modifiers other than its buildings: `sim.supplyModifiers` and grain or water in stock. */
 function otherModifiers(sim: Simulation, cell: number): readonly SupplyModifier[] {

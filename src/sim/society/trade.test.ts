@@ -148,3 +148,15 @@ test('trade is the same for the same seed', () => {
   };
   assert.deepEqual(run(), run());
 });
+
+test('the simulation adds up supply exactly as the hex info shows it, in every hex', () => {
+  const sim = createSimulation(generateWorld({ seed: 7 }));
+  runYears(sim, 220);
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    const terms = hexSupplyTerms(sim, c);
+    for (let k = 0; k < SUPPLY_KINDS; k++) {
+      const shown = sumTerms(terms[k]);
+      assert.ok(Math.abs(shown - sim.cellSupply[c * SUPPLY_KINDS + k]) < 1e-3, `hex ${c} supply ${k}: ${shown} vs ${sim.cellSupply[c * SUPPLY_KINDS + k]}`);
+    }
+  }
+});

@@ -207,7 +207,9 @@ export function stepSimulation(sim: Simulation): void {
   // Every hex's economy runs once a quarter, a 13th of the hexes each week;
   // upkeep is due in the year's last quarter.
   const week = sim.tick - 1;
-  advanceTrips(sim, (cell) => updateCellSupply(sim, cell));
+  advanceTrips(sim);
+  for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
+  sim.trade.supplyDirtyCount = 0;
   runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
   if (sim.tick % REFRESH_TICKS === 0) {
     expandSettlements(sim);

@@ -139,3 +139,63 @@ function waterTerms(world: World, c: number): Term[] {
 function spaceTerms(world: World, c: number): Term[] {
   return [{ label: BIOMES[world.biome[c]].name, value: SPACE[world.biome[c]] ?? 0 }];
 }
+
+/**
+ * The sums of supplyTerms without building the terms (no allocation, for the
+ * simulation): food, water and space into `out`, with `extraFood` and
+ * `extraWater` as further absolute changes. Unclamped; the terms add a line
+ * that keeps each sum at 0 or above.
+ */
+export function supplySums(
+  world: World,
+  cell: number,
+  modifiers: readonly SupplyModifier[],
+  extraFood: number,
+  extraWater: number,
+  out: Float64Array,
+): void {
+  if (isWaterBiome(world.biome[cell])) {
+    out[0] = out[1] = out[2] = 0;
+    return;
+  }
+  // Food, in the order of foodTerms.
+  const r = cell * RESOURCE_COUNT;
+  let food = 0;
+  const fertility = world.resources[r + Resource.Fertility];
+  const game = world.resources[r + Resource.Game];
+  const fish = world.resources[r + Resource.Fish];
+  if (fertility > 0) food += fertility * 1 * PEOPLE_PER_FOOD;
+  if (game > 0) food += game * GAME_FOOD * PEOPLE_PER_FOOD;
+  if (fish > 0) food += fish * FISH_FOOD * PEOPLE_PER_FOOD;
+  let nearbyFish = 0;
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = world.neighbors[cell * DIRECTION_COUNT + d];
+    if (nb < 0 || !isWaterBiome(world.biome[nb])) continue;
+    const f = world.resources[nb * RESOURCE_COUNT + Resource.Fish];
+    if (f > nearbyFish) nearbyFish = f;
+  }
+  if (nearbyFish > 0) food += nearbyFish * NEARBY_FISH_FOOD * PEOPLE_PER_FOOD;
+  // Water, in the order of waterTerms.
+  let water = RAIN_WATER * clamp(world.moisture[cell], 0, 1);
+  const flow = world.riverFlow[cell];
+  if (flow > 0) {
+    water += FRESH_WATER;
+    water += RIVER_WATER * Math.min(flow, RIVER_STEPS);
+  } else {
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const nb = world.neighbors[cell * DIRECTION_COUNT + d];
+      if (nb < 0) continue;
+      if (world.biome[nb] === Biome.Lake || world.riverFlow[nb] > 0) {
+        water += FRESH_WATER;
+        break;
+      }
+    }
+  }
+  out[0] = food;
+  out[1] = water;
+  out[2] = SPACE[world.biome[cell]] ?? 0;
+  for (const m of modifiers) if (!m.percent) out[m.kind] += m.amount;
+  out[0] += extraFood;
+  out[1] += extraWater;
+  for (const m of modifiers) if (m.percent) out[m.kind] += Math.max(0, out[m.kind]) * m.amount;
+}
