@@ -33,6 +33,7 @@ import {
   yieldFactor,
 } from './satisfaction';
 import type { Simulation } from './simulation';
+import { PROTO } from './tuning';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
 import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
@@ -261,7 +262,12 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       }
       economy.goal[stock + Material.Wood] = 0;
       economy.goal[stock + Material.Stone] = 0;
-      if (!busy && (planBuilding(sim, c) || planSatisfaction(sim, c) || (yearEnd && planTrade(sim, c)))) supplyChanged = true;
+      // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
+      const moodFirst = PROTO.satisfactionFirst && sim.satisfaction[c] < PROTO.satisfactionFirstBelow;
+      const started =
+        !busy &&
+        (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c));
+      if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
         buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
@@ -473,7 +479,8 @@ function hasGood(sim: Simulation, cell: number, good: number): boolean {
 function planSatisfaction(sim: Simulation, cell: number): boolean {
   const { economy } = sim;
   const people = sim.cellPop[cell];
-  if (sim.satisfaction[cell] >= 0 || people > sim.cellCapacity[cell]) return false;
+  const below = PROTO.satisfactionFirst ? PROTO.satisfactionFirstBelow : 0;
+  if (sim.satisfaction[cell] >= below || people > sim.cellCapacity[cell]) return false;
   let free = 0;
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];

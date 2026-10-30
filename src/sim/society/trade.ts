@@ -7,6 +7,7 @@ import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, type Economy } from './buildings';
 import { LUXURY_PER_PERSON } from './satisfaction';
 import type { Simulation } from './simulation';
+import { PROTO } from './tuning';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
 // Internal trade (design doc, section 5; agreed requirement: "Design
@@ -474,11 +475,15 @@ const dealBuy = new Float32Array(TRADE_GOODS);
  * that the target asks for (dearest per weight first), then goods home asks
  * for that the target can spare, as far as home's money and the load allow.
  */
-function planDeal(trade: Trade, eco: Economy, home: number, target: number): number {
+function planDeal(sim: Simulation, home: number, target: number): number {
+  const { trade, economy: eco } = sim;
   dealSell.fill(0);
   dealBuy.fill(0);
   let load = MERCHANT_LOAD;
   let worth = 0;
+  dealPriority = 0;
+  const unhappyTarget = sim.satisfaction[target] < 0 ? PROTO.focusUnhappy : 1;
+  const unhappyHome = sim.satisfaction[home] < 0 ? PROTO.focusUnhappy : 1;
   for (const g of BY_VALUE) {
     if (g === TradeGood.Money || load <= 0) continue;
     const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], trade.want[target * TRADE_GOODS + g], load / WEIGHT[g]);
@@ -486,6 +491,7 @@ function planDeal(trade: Trade, eco: Economy, home: number, target: number): num
     dealSell[g] = amount;
     load -= amount * WEIGHT[g];
     worth += amount * PRICE[g];
+    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g);
   }
   let money = eco.money[home];
   let backLoad = MERCHANT_LOAD;
@@ -497,8 +503,18 @@ function planDeal(trade: Trade, eco: Economy, home: number, target: number): num
     backLoad -= amount * WEIGHT[g];
     money -= amount * PRICE[g];
     worth += amount * PRICE[g];
+    dealPriority += amount * PRICE[g] * unhappyHome * lacking(eco, home, g);
   }
   return worth;
+}
+
+/** How much a deal matters, from the last planDeal: its worth, more for luxury goods a settlement lacks and for unhappy settlements. */
+let dealPriority = 0;
+
+/** PROTO.focusLuxury for a luxury good the settlement's stock didn't cover last year, else 1. */
+function lacking(eco: Economy, cell: number, good: number): number {
+  if (good < TradeGood.Luxury) return 1;
+  return eco.luxuryCovered[cell] & (1 << (good - TradeGood.Luxury)) ? 1 : PROTO.focusLuxury;
 }
 
 /** Trade goods by price per weight, dearest first. */
@@ -517,9 +533,9 @@ function bestTrip(sim: Simulation, owner: Uint8Array, home: number, assume: numb
   let bestRate = 0;
   for (const t of reached) {
     if (t === home || owner[t] !== civ || sim.cellPop[t] === 0) continue;
-    const worth = planDeal(trade, economy, home, t);
+    const worth = planDeal(sim, home, t);
     if (worth < MIN_TRIP_VALUE) continue;
-    const rate = worth / (2 * wayCost[t] + 1);
+    const rate = dealPriority / (2 * wayCost[t] + 1);
     if (rate > bestRate || (rate === bestRate && t < best)) {
       bestRate = rate;
       best = t;
@@ -527,7 +543,7 @@ function bestTrip(sim: Simulation, owner: Uint8Array, home: number, assume: numb
   }
   out.cost = best >= 0 ? wayCost[best] : Infinity;
   out.rate = bestRate;
-  if (best >= 0) planDeal(trade, economy, home, best);
+  if (best >= 0) planDeal(sim, home, best);
   return best;
 }
 
@@ -769,7 +785,7 @@ function granaryOrBarrels(sim: Simulation, cell: number, civ: number): number {
 }
 
 /** The luxury workshop type per special deposit id. */
-const WORKSHOP_OF: Record<number, number> = {};
+export const WORKSHOP_OF: Record<number, number> = {};
 BUILDINGS.forEach((b, i) => {
   if (b.deposit !== undefined) WORKSHOP_OF[b.deposit] = i;
 });

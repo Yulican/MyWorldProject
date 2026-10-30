@@ -17,7 +17,7 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
-import { SlotState, buildingSupplyModifiers, countSlots, createEconomy, type Economy } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
   capacityAfterRepair,
@@ -42,7 +42,8 @@ import {
   pruneMoods,
   updateSatisfaction,
 } from './satisfaction';
-import { advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
+import { WORKSHOP_OF, advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
+import { PROTO } from './tuning';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
@@ -220,6 +221,7 @@ export function stepSimulation(sim: Simulation): void {
     emigrate(sim, owner);
     breakAway(sim, owner);
     if (yearEnd) planSeats(sim, owner);
+    if (yearEnd && PROTO.capture) captureDeposits(sim, owner);
     refreshSnapshot(sim);
   }
   if (yearEnd) closeYear(sim);
@@ -396,6 +398,8 @@ function expandSettlements(sim: Simulation): void {
         const target = world.neighbors[source * DIRECTION_COUNT + d];
         if (target < 0 || !isSettlementTarget(sim, target)) continue;
         const step = stepCost(world, source, d);
+        // Rather stop spreading than found a settlement that is unhappy from the start.
+        if (PROTO.expandOnlyHappy && connectionValue(sim.seatCost[source] + step) < PROTO.expandMinConnection) continue;
         const score =
           capacityAfterRepair(sim, target) / GOOD_LAND_PEOPLE +
           terrainAppeal(world, civ.culture, target) +
@@ -411,6 +415,72 @@ function expandSettlements(sim: Simulation): void {
       moveGroup(sim, source, world.neighbors[source * DIRECTION_COUNT + best], civ.id, EXPANSION_GROUP);
       addRoad(world, source, best);
     }
+  }
+}
+
+/**
+ * Yearly, per people that lacks a luxury good whose deposit lies on free land
+ * within PROTO.captureReach hexes: a group of PROTO.captureGroup from the
+ * nearest settlement big enough (twice the group) moves one hex towards it,
+ * with a road, over hexes that hold such a group. Year by year the people
+ * reaches the deposit and builds its workshop there.
+ */
+function captureDeposits(sim: Simulation, owner: Uint8Array): void {
+  const { world, economy } = sim;
+  const n = world.cellCount;
+  const group = PROTO.captureGroup;
+  // The luxury goods each people makes (workshops standing or being built).
+  const makes = new Uint8Array(sim.civSlots);
+  for (let c = 0; c < n; c++) {
+    if (!owner[c] || !sim.hasBuildings[c]) continue;
+    for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+      const st = economy.state[s];
+      if (st === SlotState.Empty || st === SlotState.Ruin) continue;
+      const good = BUILDINGS[economy.type[s]].good;
+      if (isLuxury(good)) makes[owner[c]] |= 1 << (good - FIRST_LUXURY);
+    }
+  }
+  const free = (c: number) => owner[c] === 0 && sim.cellPop[c] === 0 && !isWaterBiome(world.biome[c]) && sim.cellCapacity[c] >= group;
+  const prev = new Int32Array(n).fill(-2);
+  for (const civ of livingCivilizations(sim)) {
+    // Breadth-first from the people's big enough settlements over free land.
+    let frontier: number[] = [];
+    const touched: number[] = [];
+    for (let c = 0; c < n; c++) {
+      if (owner[c] === civ.id && sim.cellCivPop[c * sim.civSlots + civ.id] >= 2 * group) {
+        prev[c] = -1;
+        touched.push(c);
+        frontier.push(c);
+      }
+    }
+    let found = -1;
+    for (let step = 1; step <= PROTO.captureReach && found < 0 && frontier.length > 0; step++) {
+      const next: number[] = [];
+      for (const c of frontier) {
+        for (let d = 0; d < DIRECTION_COUNT && found < 0; d++) {
+          const nb = world.neighbors[c * DIRECTION_COUNT + d];
+          if (nb < 0 || prev[nb] !== -2 || !free(nb)) continue;
+          prev[nb] = c;
+          touched.push(nb);
+          const workshop = WORKSHOP_OF[world.deposit[nb]];
+          if (workshop !== undefined && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
+          else next.push(nb);
+        }
+      }
+      frontier = next;
+    }
+    if (found >= 0) {
+      // The first hex on the way, and the settlement it starts from.
+      let first = found;
+      while (prev[prev[first]] !== -1) first = prev[first];
+      const source = prev[first];
+      const dir = world.neighbors.subarray(source * DIRECTION_COUNT, source * DIRECTION_COUNT + DIRECTION_COUNT).indexOf(first);
+      moveGroup(sim, source, first, civ.id, group);
+      addRoad(world, source, dir);
+      owner[first] = civ.id;
+      if (first === found) record(sim, `The ${civ.name} settled the ${GOOD_NAMES[BUILDINGS[WORKSHOP_OF[world.deposit[found]]].good].toLowerCase()} of the ${biomeName(world, found)}.`, found);
+    }
+    for (const c of touched) prev[c] = -2;
   }
 }
 
