@@ -5,6 +5,8 @@ import type { World } from './world';
 
 /** Share of land hexes (by water flow) that carry a river. */
 const RIVER_SHARE = 0.07;
+/** A river's bed sinks at least this much (elevation units, ~0.5 m) from one hex to the next. */
+const RIVER_CUT = 1e-4;
 /** How deep a land depression must be (in elevation units) to fill up as a lake. */
 const LAKE_DEPTH = 0.05;
 
@@ -145,6 +147,17 @@ export function generateRivers(world: World): void {
         break;
       }
     }
+  }
+
+  // Rivers flow downhill: where a filled depression made the next hex
+  // downstream higher, the river cuts its bed into it. From the highest
+  // river hexes down, so a cut carries on downstream.
+  for (let i = orderCount - 1; i >= 0; i--) {
+    const c = order[i];
+    if (world.riverFlow[c] <= 0) continue;
+    const ds = downstream[c];
+    if (ds < 0 || elevation[ds] < 0 || biome[ds] === Biome.Lake) continue;
+    if (elevation[ds] >= elevation[c]) elevation[ds] = Math.max(0, elevation[c] - RIVER_CUT);
   }
 }
 

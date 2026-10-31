@@ -4,8 +4,8 @@
 #   build-main.
 # - Every other branch: builds one test APK (arm64 for the phone, x86_64 for
 #   the emulator; only the JS bundle is rebuilt when nothing native changed),
-#   runs the map benchmark with it on Android emulators (young, aged and
-#   cities worlds in parallel) and publishes it as the pre-release
+#   runs the map benchmark with it on Android emulators (one per scenario,
+#   in parallel) and publishes it as the pre-release
 #   build-<branch>, also when a benchmark fails, so it can still be tried on
 #   the phone. The run fails unless all benchmarks pass (rules in
 #   src/bench/benchmark.ts).
@@ -159,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [young, aged, cities, unrest]
+        scenario: [young, aged, cities, unrest, trade]
     steps:
       - uses: actions/checkout@v5
 
@@ -245,7 +245,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           NOTES=""
-          for scenario in young aged cities unrest; do
+          for scenario in young aged cities unrest trade; do
             f="results/benchmark-results-$scenario/summary.json"
             if [ -f "$f" ]; then
               RESULT=$(node -p "const s=require('./$f'); (s.pass ? 'PASSED' : 'FAILED') + ' (failed swipes: ' + s.failed + '/' + s.swipes + ')'")

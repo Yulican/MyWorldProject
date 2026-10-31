@@ -10,11 +10,15 @@
  * fillBuildings.ts), and over such worlds where every settlement but the
  * capitals rose up (the most peoples and borders, see stirUnrest.ts).
  */
-export const SCENARIOS: Record<'young' | 'aged' | 'cities' | 'unrest', { years: number; buildings?: boolean; unrest?: boolean }> = {
+export const SCENARIOS: Record<
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade',
+  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean }
+> = {
   young: { years: 0 },
   aged: { years: 300 },
   cities: { years: 300, buildings: true },
   unrest: { years: 300, unrest: true },
+  trade: { years: 300, trade: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 

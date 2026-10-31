@@ -6,7 +6,7 @@ import {
   type SkImage,
   type SkPathBuilder,
 } from '@shopify/react-native-skia';
-import { DIRECTION_COUNT, DIRECTION_OFFSETS, hexCenterX, hexCenterY, type World } from '../sim';
+import { DIRECTION_COUNT, DIRECTION_OFFSETS, hexCenterX, hexCenterY, isWaterBiome, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
 import { fillPaint, strokePaint } from './paints';
 import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
@@ -23,6 +23,7 @@ const DOT_RADIUS = [0.14, 0.21, 0.28];
 
 const RUIN_COLOR = '#9a9284';
 const OUTLINE_COLOR = '#1b1b1b';
+const ANCHOR_COLOR = '#1f3b63';
 
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
@@ -109,6 +110,7 @@ export function territoryTileSignature(
       }
       mix(dotSize(world.population[c]));
       mix(cityLevel(world.buildings[c]));
+      mix(world.harbors[c]);
       const color = colorOf(owner);
       for (let k = 1; k < color.length; k++) mix(color.charCodeAt(k));
     }
@@ -145,6 +147,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   const roads = Skia.PathBuilder.Make();
   const outlines = Skia.PathBuilder.Make();
   const ruins = Skia.PathBuilder.Make();
+  const anchors = Skia.PathBuilder.Make();
   const pathFor = (paths: Map<number, SkPathBuilder>, civ: number) => {
     let path = paths.get(civ);
     if (!path) {
@@ -191,6 +194,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       border.lineTo(x + bx * r, y + by * r);
     }
 
+    if (world.harbors[c]) addAnchor(anchors, world, c, x, y);
     const level = cityLevel(world.buildings[c]);
     if (level > 0) {
       addCity(pathFor(dots, owner), x, y, level);
@@ -209,6 +213,33 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   canvas.drawPath(ruins.detach(), fillPaint(RUIN_COLOR));
   for (const [civ, path] of dots) canvas.drawPath(path.detach(), fillPaint(colorOf(civ)));
   canvas.drawPath(outlines.detach(), strokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
+  canvas.drawPath(anchors.detach(), strokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
+}
+
+/** A harbor's anchor, towards the first water next to the hex. */
+function addAnchor(path: SkPathBuilder, world: World, cell: number, x: number, y: number) {
+  let dx = 0.45;
+  let dy = 0.45;
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = world.neighbors[cell * DIRECTION_COUNT + d];
+    if (nb >= 0 && isWaterBiome(world.biome[nb])) {
+      [dx, dy] = DIRECTION_OFFSETS[d];
+      dx *= 0.55;
+      dy *= 0.55;
+      break;
+    }
+  }
+  const u = HEX_PX * 0.16;
+  const ax = x + dx * HEX_PX;
+  const ay = y + dy * HEX_PX;
+  path.addCircle(ax, ay - u * 1.1, u * 0.3);
+  path.moveTo(ax, ay - u * 0.8);
+  path.lineTo(ax, ay + u);
+  path.moveTo(ax - u * 0.6, ay - u * 0.3);
+  path.lineTo(ax + u * 0.6, ay - u * 0.3);
+  path.moveTo(ax - u, ay + u * 0.2);
+  path.quadTo(ax - u * 0.8, ay + u * 1.1, ax, ay + u);
+  path.quadTo(ax + u * 0.8, ay + u * 1.1, ax + u, ay + u * 0.2);
 }
 
 /** Houses in the hex: two for a small city, three and a tower for a big one. */

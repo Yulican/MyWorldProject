@@ -46,10 +46,10 @@ Run typecheck and tests before declaring any task done.
 
 ## Mandatory performance test
 
-Every push to a feature branch runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark?scenario=young|aged|cities|unrest`):
+Every push to a feature branch runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark?scenario=young|aged|cities|unrest|trade`):
 
 - 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world, with the simulation running at its default speed and territories on the map.
-- Four scenarios, run in parallel: `young` (new worlds), `aged` (each world simulated for 300 years first: many peoples, territories and roads), `cities` (aged, and every settlement a big city with ruins around it) and `unrest` (aged, and every settlement but the capitals rose up: the most peoples and borders).
+- Five scenarios, run in parallel: `young` (new worlds), `aged` (each world simulated for 300 years first: many peoples, territories and roads), `cities` (aged, and every settlement a big city with ruins around it), `unrest` (aged, and every settlement but the capitals rose up: the most peoples and borders) and `trade` (aged, and every settlement a trade center, every coast a harbor and goods to sell: the most merchants).
 - **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
 
 Rules for every agent and every change:

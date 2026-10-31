@@ -17,10 +17,12 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
-import { SlotState, buildingSupplyModifiers, countSlots, createEconomy, type Economy } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
+  EXPAND_MIN_CONNECTION,
   capacityAfterRepair,
+  cellModifiers,
   isSettlementTarget,
   planSeats,
   rawMaterials,
@@ -39,8 +41,10 @@ import {
   connectionValue,
   hasSeat,
   pruneMoods,
+  seatsOf,
   updateSatisfaction,
 } from './satisfaction';
+import { WORKSHOP_OF, buildSupplyRoad, advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
@@ -55,9 +59,15 @@ import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 export const TICKS_PER_YEAR = 52;
 /** Map snapshot and civilization stats are refreshed this often (quarterly). */
 const REFRESH_TICKS = 13;
+/** Weeks of the year (0..51, none a refresh) for seats of government, deposit capture and supply roads. */
+const SEATS_WEEK = 6;
+const CAPTURE_WEEK = 19;
+const SUPPLY_ROADS_WEEK = 32;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
 export const BELIEVER_FAITH = 0.5;
 const START_TRIBE_SIZE = 20;
+/** From this age inhabitants count as adults (they have children and earn money). */
+const ADULT_AGE = 16;
 /** Civilization slots per cell in `cellCivPop` at first (index 0 = nobody); doubles as needed. */
 const INITIAL_CIV_SLOTS = 8;
 export { EXPANSION_GROUP };
@@ -74,6 +84,16 @@ const SATISFACTION_APPEAL = 0.5;
 const TRAVEL_EFFORT = 0.05;
 /** Score per unit of wood and stone the new hex yields per year: building material is worth having. */
 const RAW_MATERIAL_APPEAL = 0.02;
+/**
+ * A people lacking a luxury good sends groups of CAPTURE_GROUP towards a
+ * free deposit of it within CAPTURE_REACH hexes, one hex a year, once it
+ * has CAPTURE_MIN_PEOPLE (smaller peoples hardly need luxury goods), from
+ * settlements of CAPTURE_MIN_SOURCE.
+ */
+export const CAPTURE_GROUP = 10;
+const CAPTURE_REACH = 4;
+const CAPTURE_MIN_PEOPLE = 100;
+export const CAPTURE_MIN_SOURCE = 2 * EXPANSION_GROUP;
 /** Space supply of the best land; normalizes how much a new hex can hold. */
 const GOOD_LAND_PEOPLE = 150;
 /** Years of population and believer counts kept for the trend chart. */
@@ -125,6 +145,19 @@ export type Simulation = {
   moodSet: Uint8Array;
   /** Travel cost to the nearest seat of government of the hex's people, Infinity if none in reach. */
   seatCost: Float32Array;
+  /**
+   * Settlements chosen for their people's next seat of government: the year
+   * they were chosen + 1 (0 = none); a plan expires after SAVE_UP_YEARS
+   * (economy.ts). A failed site is skipped for a while (seatRetry: year it may be chosen again + 1).
+   */
+  seatSite: Uint16Array;
+  seatRetry: Uint16Array;
+  /** Year + 1 a settlement last wanted to send settlers but the expansion stop held it back. */
+  frontierBlocked: Uint16Array;
+  /** Merchants on their way and what settlements ask for and spare (see trade.ts). */
+  trade: Trade;
+  /** Inhabitants of 16 and older per hex, counted at every refresh (they earn money). */
+  cellAdults: Int32Array;
   /** Notable events, oldest first. */
   chronicle: ChronicleEntry[];
   /** Groups that left unhappy settlements so far, and how many of them joined another people. */
@@ -162,6 +195,11 @@ export function createSimulation(world: World): Simulation {
     unhappyQuarters: new Uint8Array(n),
     moodSet: new Uint8Array(n),
     seatCost: new Float32Array(n).fill(Infinity),
+    seatSite: new Uint16Array(n),
+    seatRetry: new Uint16Array(n),
+    frontierBlocked: new Uint16Array(n),
+    trade: createTrade(world.seed, n),
+    cellAdults: new Int32Array(n),
     chronicle: [],
     migrations: { groups: 0, abroad: 0 },
     believers: 0,
@@ -197,17 +235,26 @@ export function stepSimulation(sim: Simulation): void {
   // Every hex's economy runs once a quarter, a 13th of the hexes each week;
   // upkeep is due in the year's last quarter.
   const week = sim.tick - 1;
+  advanceTrips(sim);
+  for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
+  sim.trade.supplyDirtyCount = 0;
   runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
   if (sim.tick % REFRESH_TICKS === 0) {
     expandSettlements(sim);
     const owner = cellOwners(sim);
     splitCutOffLand(sim, owner);
     updateSatisfaction(sim, owner);
+    sumCivWants(sim, owner);
     emigrate(sim, owner);
     breakAway(sim, owner);
-    if (yearEnd) planSeats(sim, owner);
     refreshSnapshot(sim);
   }
+  // The people's yearly plans each get a week of their own, away from the
+  // refreshes, so no single tick carries them all.
+  const weekOfYear = sim.tick % TICKS_PER_YEAR;
+  if (weekOfYear === SEATS_WEEK) planSeats(sim, sim.world.owner);
+  else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, sim.world.owner);
+  else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
   if (yearEnd) closeYear(sim);
 }
 
@@ -350,8 +397,7 @@ function computeCapacity(sim: Simulation): void {
 
 /** How a hex's food, water and space come about, indexed by SupplyKind (see supply.ts), buildings included. */
 export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
-  const mods = [...(sim.supplyModifiers.get(cell) ?? []), ...buildingSupplyModifiers(sim.economy, cell)];
-  return supplyTerms(sim.world, cell, mods);
+  return supplyTerms(sim.world, cell, cellModifiers(sim, cell));
 }
 
 // ---------------------------------------------------------------------------
@@ -362,8 +408,12 @@ export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
  * of EXPANSION_GROUP of the civilization living there to the best free
  * neighboring hex that can hold them (counting repairable ruins), and a road
  * links the two. The best hex has room, appeals to the people's culture and
- * yields building material. Without such a neighbor the people stay; they
- * build (see economy.ts), and shortage thins them out.
+ * yields building material. No settlers go where the connection to the
+ * nearest seat of government would be below EXPAND_MIN_CONNECTION: such a
+ * settlement is marked as held back, and its people first extend their
+ * reach (a seat nearby, roads to the seat; planSeats, buildSupplyRoads).
+ * Without a neighbor the people stay; they build (see economy.ts), and
+ * shortage thins them out.
  */
 function expandSettlements(sim: Simulation): void {
   const { world } = sim;
@@ -379,10 +429,16 @@ function expandSettlements(sim: Simulation): void {
     for (const source of sources) {
       let best = -1;
       let bestScore = -Infinity;
+      let held = false;
       for (let d = 0; d < DIRECTION_COUNT; d++) {
         const target = world.neighbors[source * DIRECTION_COUNT + d];
         if (target < 0 || !isSettlementTarget(sim, target)) continue;
         const step = stepCost(world, source, d);
+        // Rather stop spreading than found a settlement that is unhappy from the start.
+        if (connectionValue(sim.seatCost[source] + step) < EXPAND_MIN_CONNECTION) {
+          held = true;
+          continue;
+        }
         const score =
           capacityAfterRepair(sim, target) / GOOD_LAND_PEOPLE +
           terrainAppeal(world, civ.culture, target) +
@@ -394,10 +450,98 @@ function expandSettlements(sim: Simulation): void {
           best = d;
         }
       }
-      if (best < 0) continue;
+      if (best < 0) {
+        // Held back by the stop: its people first extend their reach (seat, roads).
+        if (held) sim.frontierBlocked[source] = Math.floor(sim.tick / TICKS_PER_YEAR) + 1;
+        continue;
+      }
       moveGroup(sim, source, world.neighbors[source * DIRECTION_COUNT + best], civ.id, EXPANSION_GROUP);
       addRoad(world, source, best);
     }
+  }
+}
+
+/** Breadth-first predecessors for captureDeposits, all -2 between calls. */
+let capturePrev = new Int32Array(0);
+
+/** Yearly: every settlement the expansion stop held back this or last year builds on a road to its nearest seat. */
+function buildSupplyRoads(sim: Simulation, owner: Uint8Array): void {
+  const year = Math.floor(sim.tick / TICKS_PER_YEAR);
+  const seats = seatsOf(sim, owner);
+  const isSeat = new Uint8Array(sim.world.cellCount);
+  for (const list of seats) for (const c of list) isSeat[c] = 1;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (!owner[c] || !sim.frontierBlocked[c] || year + 1 - sim.frontierBlocked[c] > 1) continue;
+    if (sim.seatCost[c] === Infinity) continue;
+    buildSupplyRoad(sim, c, isSeat, sim.seatCost[c]);
+  }
+}
+
+/**
+ * Yearly, per people of CAPTURE_MIN_PEOPLE that lacks a luxury good whose
+ * deposit lies on free land within CAPTURE_REACH hexes: a group of
+ * CAPTURE_GROUP from the nearest settlement of CAPTURE_MIN_SOURCE moves one hex towards it,
+ * with a road, over hexes that hold such a group. Year by year the people
+ * reaches the deposit and builds its workshop there.
+ */
+function captureDeposits(sim: Simulation, owner: Uint8Array): void {
+  const { world, economy } = sim;
+  const n = world.cellCount;
+  const group = CAPTURE_GROUP;
+  // The luxury goods each people makes (workshops standing or being built).
+  const makes = new Uint8Array(sim.civSlots);
+  for (let c = 0; c < n; c++) {
+    if (!owner[c] || !sim.hasBuildings[c]) continue;
+    for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+      const st = economy.state[s];
+      if (st === SlotState.Empty || st === SlotState.Ruin) continue;
+      const good = BUILDINGS[economy.type[s]].good;
+      if (isLuxury(good)) makes[owner[c]] |= 1 << (good - FIRST_LUXURY);
+    }
+  }
+  const free = (c: number) => owner[c] === 0 && sim.cellPop[c] === 0 && !isWaterBiome(world.biome[c]) && sim.cellCapacity[c] >= group;
+  if (capturePrev.length !== n) capturePrev = new Int32Array(n).fill(-2);
+  const prev = capturePrev;
+  for (const civ of livingCivilizations(sim)) {
+    if (civ.population < CAPTURE_MIN_PEOPLE) continue;
+    // Breadth-first from the people's big enough settlements over free land.
+    let frontier: number[] = [];
+    const touched: number[] = [];
+    for (let c = 0; c < n; c++) {
+      if (owner[c] === civ.id && sim.cellCivPop[c * sim.civSlots + civ.id] >= CAPTURE_MIN_SOURCE) {
+        prev[c] = -1;
+        touched.push(c);
+        frontier.push(c);
+      }
+    }
+    let found = -1;
+    for (let step = 1; step <= CAPTURE_REACH && found < 0 && frontier.length > 0; step++) {
+      const next: number[] = [];
+      for (const c of frontier) {
+        for (let d = 0; d < DIRECTION_COUNT && found < 0; d++) {
+          const nb = world.neighbors[c * DIRECTION_COUNT + d];
+          if (nb < 0 || prev[nb] !== -2 || !free(nb)) continue;
+          prev[nb] = c;
+          touched.push(nb);
+          const workshop = WORKSHOP_OF[world.deposit[nb]];
+          if (workshop !== undefined && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
+          else next.push(nb);
+        }
+      }
+      frontier = next;
+    }
+    if (found >= 0) {
+      // The first hex on the way, and the settlement it starts from.
+      let first = found;
+      while (prev[prev[first]] !== -1) first = prev[first];
+      const source = prev[first];
+      const dir = world.neighbors.subarray(source * DIRECTION_COUNT, source * DIRECTION_COUNT + DIRECTION_COUNT).indexOf(first);
+      moveGroup(sim, source, first, civ.id, group);
+      addRoad(world, source, dir);
+      owner[first] = civ.id;
+      if (first === found) record(sim, `The ${civ.name} settled the ${GOOD_NAMES[BUILDINGS[WORKSHOP_OF[world.deposit[found]]].good].toLowerCase()} of the ${biomeName(world, found)}.`, found);
+    }
+    for (const c of touched) prev[c] = -2;
   }
 }
 
@@ -500,8 +644,10 @@ function refreshSnapshot(sim: Simulation): void {
   const faithSum = new Float64Array(world.cellCount);
   const believers = new Int32Array(sim.civSlots);
   const civFaithSum = new Float64Array(sim.civSlots);
+  sim.cellAdults.fill(0);
   for (let i = 0; i < pop.end; i++) {
     if (!pop.alive[i]) continue;
+    if (pop.age[i] >= ADULT_AGE) sim.cellAdults[pop.cell[i]]++;
     faithSum[pop.cell[i]] += pop.faith[i];
     civFaithSum[pop.civ[i]] += pop.faith[i];
     if (pop.faith[i] >= BELIEVER_FAITH) believers[pop.civ[i]]++;
@@ -528,6 +674,7 @@ function refreshSnapshot(sim: Simulation): void {
     if (sim.hasBuildings[c]) {
       world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);
       world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
+      world.harbors[c] = sim.trade.harbor[c];
     }
   }
 

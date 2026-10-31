@@ -42,6 +42,7 @@ test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=aged'), 'aged');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=cities'), 'cities');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=unrest'), 'unrest');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=trade'), 'trade');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });
 
@@ -78,4 +79,18 @@ test('the unrest scenario makes every settlement but the capitals break away', a
   const old = livingCivilizations(sim).filter((c) => c.origin !== 'revolution');
   assert.ok(held(rebels) > held(old), `rebels ${held(rebels)} hexes, others ${held(old)}`);
   assert.equal(SCENARIOS.unrest.unrest, true);
+});
+
+test('the trade scenario opens trade everywhere and merchants set out', async () => {
+  const { createSimulation, generateWorld, TICKS_PER_YEAR, stepSimulation } = await import('../sim');
+  const { openTrade } = await import('./openTrade');
+  const sim = createSimulation(generateWorld({ seed: 7 }));
+  for (let t = 0; t < 150 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  const before = sim.trade.trips;
+  openTrade(sim);
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (sim.cellPop[c] > 0) assert.ok(sim.trade.merchants[c] >= 2, `merchants of ${c}`);
+  }
+  assert.ok(sim.trade.trips > before, 'merchants set out');
+  assert.equal(SCENARIOS.trade.trade, true);
 });

@@ -103,6 +103,9 @@ Grundlage für den späteren Handel.
 
 \* gezählt in 8 erzeugten Welten mit je etwa 2.000 Landhexes.
 
+- Jahresbedarf: 1 Einheit je 100 Einwohner und Gut (anfangs 1 je 20; nach
+  dem Test im Spiel gesenkt, damit ein Abbaugebäude mehrere Städte
+  versorgt).
 - Teilwert: +5 je Gut, dessen Jahresbedarf aus dem Vorrat gedeckt ist,
   höchstens +15. Die Vielfalt zählt, nicht die Menge. Das macht den Handel
   später wertvoll.
@@ -256,3 +259,12 @@ Nach 100 und 200 Jahren gibt es noch keine Revolution; die ersten kommen,
 wenn Reiche groß genug für schlecht angebundene Ränder sind. Die Rechenzeit
 ist gesunken, weil die Expansion die überfüllten Felder jetzt einmal sucht
 statt einmal pro Volk.
+
+
+## Nachtrag: Regierungssitze und Ausbreitung (mit dem Handel)
+
+Die Regeln für Regierungssitze, den Ausbreitungsstopp bei Anbindung unter
+−15 und „Zufriedenheit zuerst“ (unter 5) sind im Requirement Handel,
+Abschnitt 12, beschrieben; sie ersetzen hier die alte Sitzplanung (drei
+schlechtest angebundene Siedlungen, Bezahlung nur aus dem eigenen Vorrat,
+Unterhalt nur aus der eigenen Ernte).
