@@ -366,8 +366,17 @@ export function measureDistances(sim: Simulation, owner: Uint8Array): void {
       dip.distance[pair(a, b)] = Infinity;
       dip.distance[pair(b, a)] = Infinity;
     }
+    // Any way to another people leaves our land through a settlement at its
+    // edge, which is at least as near: those are the sources, and our own
+    // land isn't entered again.
     for (let c = 0; c < n; c++) {
       if (owner[c] !== a || sim.cellPop[c] === 0) continue;
+      let edge = false;
+      for (let d = 0; d < DIRECTION_COUNT && !edge; d++) {
+        const nb = world.neighbors[c * DIRECTION_COUNT + d];
+        edge = nb >= 0 && owner[nb] !== a;
+      }
+      if (!edge) continue;
       reach[c] = 0;
       reachTouched.push(c);
       reachHeap.push(c, 0);
@@ -382,7 +391,7 @@ export function measureDistances(sim: Simulation, owner: Uint8Array): void {
       }
       for (let d = 0; d < DIRECTION_COUNT; d++) {
         const nb = world.neighbors[c * DIRECTION_COUNT + d];
-        if (nb < 0 || isWaterBiome(world.biome[nb])) continue;
+        if (nb < 0 || owner[nb] === a || isWaterBiome(world.biome[nb])) continue;
         const next = here + stepCost(world, c, d);
         if (next >= reach[nb] || next > CONTACT_REACH) continue;
         if (reach[nb] === Infinity) reachTouched.push(nb);
