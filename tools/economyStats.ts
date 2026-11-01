@@ -45,6 +45,10 @@ if (options.district === '1') GOV_TUNING.seatPerDistrict = true;
 // start: seats' worth of starting money per new people's government; loan=1: queued seats take materials from their site's settlement on credit.
 if (options.start) GOV_TUNING.startSeats = Number(options.start);
 if (options.loan === '1') GOV_TUNING.seatLoan = true;
+// alltraders=1: every free government trader sets out each round; reserve=1: project materials only from money above 2 years of upkeep; seatsfirst=1: no other projects while a seat is planned in the district.
+if (options.alltraders === '1') GOV_TUNING.allTraders = true;
+if (options.reserve === '1') GOV_TUNING.reserveUpkeep = true;
+if (options.seatsfirst === '1') GOV_TUNING.seatsFirst = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
