@@ -200,13 +200,43 @@ function harvestWith(sim: Simulation, cell: number, good: number, extraA: number
 function upkeepWith(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
   const { economy } = sim;
   let sum = 0;
-  const of = (t: number) => (material === Material.Wood ? BUILDINGS[t].upkeepWood : BUILDINGS[t].upkeepStone);
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
-    if (economy.state[s] === SlotState.Standing) sum += of(economy.type[s]);
+    if (economy.state[s] === SlotState.Standing) sum += upkeepOfType(economy.type[s], material);
   }
-  if (extraA >= 0) sum += of(extraA);
-  if (extraB >= 0) sum += of(extraB);
+  if (extraA >= 0) sum += upkeepOfType(extraA, material);
+  if (extraB >= 0) sum += upkeepOfType(extraB, material);
   return sum;
+}
+
+const upkeepOfType = (type: number, material: number) => (material === Material.Wood ? BUILDINGS[type].upkeepWood : BUILDINGS[type].upkeepStone);
+
+/**
+ * Wood and stone harvest and upkeep of `netCell` as it stands, from
+ * prepareNet: the building plans weigh many types, and most don't change the
+ * harvest, so netFast only adds their upkeep (the same result as netWith,
+ * without recounting the slots).
+ */
+const netBase = new Float64Array(4);
+let netCell = -1;
+
+function prepareNet(sim: Simulation, cell: number): void {
+  netBase[0] = harvestWith(sim, cell, Good.Wood, -1, -1);
+  netBase[1] = harvestWith(sim, cell, Good.Stone, -1, -1);
+  netBase[2] = upkeepWith(sim, cell, Material.Wood, -1, -1);
+  netBase[3] = upkeepWith(sim, cell, Material.Stone, -1, -1);
+  netCell = cell;
+}
+
+/** netWith for the cell of the last prepareNet. */
+function netFast(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
+  const good = material === Material.Wood ? Good.Wood : Good.Stone;
+  if (cell !== netCell || (extraA >= 0 && BUILDINGS[extraA].good === good) || (extraB >= 0 && BUILDINGS[extraB].good === good)) {
+    return netWith(sim, cell, material, extraA, extraB);
+  }
+  let upkeep = netBase[2 + material];
+  if (extraA >= 0) upkeep += upkeepOfType(extraA, material);
+  if (extraB >= 0) upkeep += upkeepOfType(extraB, material);
+  return netBase[material] - upkeep;
 }
 
 /** Yearly wood and stone left after upkeep, with up to two extra standing types. */
@@ -334,10 +364,11 @@ function planBuilding(sim: Simulation, cell: number): boolean {
   }
   const newAllowed = free > 0 && !canExpand(sim, cell);
   if (!newAllowed && ruins === 0) return false;
+  prepareNet(sim, cell);
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
   const stone = economy.stock[cell * MATERIAL_COUNT + Material.Stone];
-  const netWood = netWith(sim, cell, Material.Wood, -1, -1);
-  const netStone = netWith(sim, cell, Material.Stone, -1, -1);
+  const netWood = netFast(sim, cell, Material.Wood, -1, -1);
+  const netStone = netFast(sim, cell, Material.Stone, -1, -1);
 
   let bestGain = 0;
   let bestTime = Infinity;
@@ -367,7 +398,7 @@ function planBuilding(sim: Simulation, cell: number): boolean {
     const costStone = b.stone * share;
 
     // Directly, if the harvest keeps paying its upkeep.
-    if (netWith(sim, cell, Material.Wood, type, -1) >= 0 && netWith(sim, cell, Material.Stone, type, -1) >= 0) {
+    if (netFast(sim, cell, Material.Wood, type, -1) >= 0 && netFast(sim, cell, Material.Stone, type, -1) >= 0) {
       const wait = Math.max(yearsUntil(wood, costWood, netWood), yearsUntil(stone, costStone, netStone));
       if (wait <= SAVE_UP_YEARS && (gain > bestGain || wait < bestTime)) {
         bestGain = gain;
@@ -394,10 +425,10 @@ function planBuilding(sim: Simulation, cell: number): boolean {
       if (!isMaterial(p.good)) continue;
       const pshare = pslot >= 0 ? REPAIR_SHARE : 1;
       if (wood < p.wood * pshare || stone < p.stone * pshare) continue;
-      const netWood2 = netWith(sim, cell, Material.Wood, ptype, -1);
-      const netStone2 = netWith(sim, cell, Material.Stone, ptype, -1);
+      const netWood2 = netFast(sim, cell, Material.Wood, ptype, -1);
+      const netStone2 = netFast(sim, cell, Material.Stone, ptype, -1);
       if (netWood2 < 0 || netStone2 < 0) continue;
-      if (netWith(sim, cell, Material.Wood, ptype, type) < 0 || netWith(sim, cell, Material.Stone, ptype, type) < 0) continue;
+      if (netFast(sim, cell, Material.Wood, ptype, type) < 0 || netFast(sim, cell, Material.Stone, ptype, type) < 0) continue;
       const build = p.years * pshare;
       const wait =
         build +
@@ -537,12 +568,13 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
   const { economy } = sim;
   const people = sim.cellPop[cell];
   if (sim.satisfaction[cell] >= SATISFACTION_FIRST_BELOW || people > sim.cellCapacity[cell]) return false;
+  prepareNet(sim, cell);
   let free = 0;
   for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
   const stone = economy.stock[cell * MATERIAL_COUNT + Material.Stone];
-  const netWood = netWith(sim, cell, Material.Wood, -1, -1);
-  const netStone = netWith(sim, cell, Material.Stone, -1, -1);
+  const netWood = netFast(sim, cell, Material.Wood, -1, -1);
+  const netStone = netFast(sim, cell, Material.Stone, -1, -1);
   const served = comfortServed(economy, cell);
   const luxuryNow = luxuryValue(economy.luxuryCovered[cell]);
 
@@ -567,7 +599,7 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
     else if (isLuxury(b.good) && !hasGood(sim, cell, b.good)) gain = Math.min(LUXURY_EACH, LUXURY_MAX - luxuryNow);
     else continue;
     if (gain < bestGain || !buildingFits(sim, cell, type)) continue;
-    if (netWith(sim, cell, Material.Wood, type, -1) < 0 || netWith(sim, cell, Material.Stone, type, -1) < 0) continue;
+    if (netFast(sim, cell, Material.Wood, type, -1) < 0 || netFast(sim, cell, Material.Stone, type, -1) < 0) continue;
     const share = slot >= 0 ? REPAIR_SHARE : 1;
     const wait = Math.max(yearsUntil(wood, b.wood * share, netWood), yearsUntil(stone, b.stone * share, netStone));
     if (wait > SAVE_UP_YEARS || (gain === bestGain && wait >= bestTime)) continue;

@@ -95,6 +95,12 @@ export type Trade = {
   transitFor: Uint8Array;
   /** Goods sold abroad in transit so far (statistics). */
   transit: number;
+  /** Per people: bit per good it still owes under trade agreements (see owedGoods), valid for tick `owedTick`. */
+  owedMask: Uint16Array;
+  owedTick: number;
+  /** 1 for the export hubs of trade agreements (see isHub), valid for tick `hubTick`. */
+  hubMark: Uint8Array;
+  hubTick: number;
   /** Per cell and good: what the settlement holds for a partner in transit (its own people don't use it up). */
   transitKeep: Float32Array;
   /** Per cell and good: priority factor for bringing an export hub goods it still lacks for a trade agreement, 0 = none. */
@@ -153,6 +159,10 @@ export function createTrade(seed: number, cellCount: number): Trade {
     incoming: new Float32Array(cellCount * TRADE_GOODS),
     transitFor: new Uint8Array(cellCount * TRADE_GOODS),
     transit: 0,
+    owedMask: new Uint16Array(PAIRS),
+    owedTick: -1,
+    hubMark: new Uint8Array(cellCount),
+    hubTick: -1,
     transitKeep: new Float32Array(cellCount * TRADE_GOODS),
     hubFocus: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
@@ -303,14 +313,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // that stock is its surplus for the buyers. The further behind its
   // deliveries, the more its people hurry to bring it.
   trade.hubFocus.fill(0, t, t + TRADE_GOODS);
-  for (const a of sim.diplomacy.legs) {
-    if (a.hub !== cell) continue;
-    const owed = legOwed(a, sim.tick);
-    const stock = stockOf(economy, cell, a.good);
-    if (owed > stock) trade.hubFocus[t + a.good] = Math.max(trade.hubFocus[t + a.good], FOCUS_AGREEMENT * (1 + a.behind));
-    trade.want[t + a.good] += Math.max(0, owed - stock - trade.incoming[t + a.good]);
-    trade.surplus[t + a.good] = Math.max(trade.surplus[t + a.good], Math.min(stock, owed));
-  }
+  if (isHub(sim, cell)) hubWants(sim, cell, t);
   // Only goods the rest of its people, or its people's trade partners, ask
   // for or spare count (totals from the last refresh).
   const civ = sim.world.owner[cell];
@@ -320,24 +323,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // Zwischenhandel: the settlement that trades in transit for a partner asks
   // for what that partner lacks, up to a merchant's load of each good, and
   // spares that stock for it.
-  trade.transitFor.fill(0, t, t + TRADE_GOODS);
-  trade.transitKeep.fill(0, t, t + TRADE_GOODS);
-  if (partners && known) {
-    for (const p of partners) {
-      if (sim.diplomacy.transitHub[civ * PAIRS + p] !== cell || (p + 1) * TRADE_GOODS > trade.civWant.length) continue;
-      for (let g = 0; g < TRADE_GOODS; g++) {
-        if (g === TradeGood.Money) continue;
-        const lack = trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g];
-        if (lack <= 0) continue;
-        const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
-        const stock = stockOf(economy, cell, g);
-        trade.want[t + g] = Math.max(trade.want[t + g], keep - stock - trade.incoming[t + g]);
-        trade.transitKeep[t + g] = Math.max(trade.transitKeep[t + g], keep);
-        trade.surplus[t + g] = Math.max(trade.surplus[t + g], Math.min(stock, keep));
-        trade.transitFor[t + g] = 1;
-      }
-    }
-  }
+  transitWants(sim, cell, t, civ, known);
   let sell = 0;
   let buy = 0;
   for (let g = 0; g < TRADE_GOODS; g++) {
@@ -345,7 +331,8 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     let othersWant = trade.civWant[c + g] - trade.want[t + g];
     let othersSpare = trade.civSpare[c + g] - trade.surplus[t + g];
     if (partners) {
-      for (const p of partners) {
+      for (let i = 0; i < partners.length; i++) {
+        const p = partners[i];
         if (p * TRADE_GOODS + g >= trade.civWant.length) continue;
         othersWant += trade.civWant[p * TRADE_GOODS + g];
         othersSpare += trade.civSpare[p * TRADE_GOODS + g];
@@ -356,14 +343,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   }
   trade.interest[cell] = sell >= MIN_TRIP_VALUE || (buy >= MIN_TRIP_VALUE && economy.money[cell] >= MIN_TRIP_VALUE) ? 1 : 0;
   // Goods its people owe under a trade agreement go out whether the buyer asks or not.
-  if (!trade.interest[cell]) {
-    for (const a of sim.diplomacy.legs) {
-      if (a.supplier === civ && stockOf(economy, cell, a.good) > 0 && legOwed(a, sim.tick) > 0) {
-        trade.interest[cell] = 1;
-        break;
-      }
-    }
-  }
+  if (!trade.interest[cell] && owesFrom(sim, cell, civ)) trade.interest[cell] = 1;
   return changed;
 }
 
@@ -686,9 +666,84 @@ let dealPriority = 0;
 /** Whether the last planDeal carries goods a trade agreement still owes this year. */
 let dealOwed = false;
 
+/** An export hub's wants and surplus for what its trade agreements still owe (see updateTradeNeeds). */
+function hubWants(sim: Simulation, cell: number, t: number): void {
+  const { trade, economy } = sim;
+  const legs = sim.diplomacy.legs;
+  for (let i = 0; i < legs.length; i++) {
+    const a = legs[i];
+    if (a.hub !== cell) continue;
+    const owed = legOwed(a, sim.tick);
+    const stock = stockOf(economy, cell, a.good);
+    if (owed > stock) trade.hubFocus[t + a.good] = Math.max(trade.hubFocus[t + a.good], FOCUS_AGREEMENT * (1 + a.behind));
+    trade.want[t + a.good] += Math.max(0, owed - stock - trade.incoming[t + a.good]);
+    trade.surplus[t + a.good] = Math.max(trade.surplus[t + a.good], Math.min(stock, owed));
+  }
+}
+
+/** The transit wants and surplus of a settlement that trades for its people's partners (see updateTradeNeeds). */
+function transitWants(sim: Simulation, cell: number, t: number, civ: number, known: boolean): void {
+  const { trade, economy } = sim;
+  const partners = sim.diplomacy.partners[civ];
+  trade.transitFor.fill(0, t, t + TRADE_GOODS);
+  trade.transitKeep.fill(0, t, t + TRADE_GOODS);
+  if (partners && known) {
+    for (let i = 0; i < partners.length; i++) {
+      const p = partners[i];
+      if (sim.diplomacy.transitHub[civ * PAIRS + p] !== cell || (p + 1) * TRADE_GOODS > trade.civWant.length) continue;
+      for (let g = 0; g < TRADE_GOODS; g++) {
+        if (g === TradeGood.Money) continue;
+        const lack = trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g];
+        if (lack <= 0) continue;
+        const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
+        const stock = stockOf(economy, cell, g);
+        trade.want[t + g] = Math.max(trade.want[t + g], keep - stock - trade.incoming[t + g]);
+        trade.transitKeep[t + g] = Math.max(trade.transitKeep[t + g], keep);
+        trade.surplus[t + g] = Math.max(trade.surplus[t + g], Math.min(stock, keep));
+        trade.transitFor[t + g] = 1;
+      }
+    }
+  }
+}
+
+/** Whether the settlement holds goods its people still owe under a trade agreement. */
+function owesFrom(sim: Simulation, cell: number, civ: number): boolean {
+  const owed = owedGoods(sim, civ);
+  for (let g = 0; owed && g < TRADE_GOODS; g++) if (owed & (1 << g) && stockOf(sim.economy, cell, g) > 0) return true;
+  return false;
+}
+
+/** Whether a settlement is the export hub of a trade agreement (marked once per tick, so other settlements skip the agreements). */
+function isHub(sim: Simulation, cell: number): boolean {
+  const trade = sim.trade;
+  if (trade.hubTick !== sim.tick) {
+    trade.hubMark.fill(0);
+    const legs = sim.diplomacy.legs;
+    for (let i = 0; i < legs.length; i++) if (legs[i].hub >= 0) trade.hubMark[legs[i].hub] = 1;
+    trade.hubTick = sim.tick;
+  }
+  return trade.hubMark[cell] === 1;
+}
+
+/** Bits of the goods `civ` still owes under trade agreements this tick (computed once per tick for all peoples). */
+function owedGoods(sim: Simulation, civ: number): number {
+  const trade = sim.trade;
+  if (trade.owedTick !== sim.tick) {
+    trade.owedMask.fill(0);
+    const legs = sim.diplomacy.legs;
+    for (let i = 0; i < legs.length; i++) if (legOwed(legs[i], sim.tick) > 0) trade.owedMask[legs[i].supplier] |= 1 << legs[i].good;
+    trade.owedTick = sim.tick;
+  }
+  return trade.owedMask[civ];
+}
+
 /** Whether `supplier` still owes `buyer` deliveries in the running period. */
 function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean {
-  for (const a of sim.diplomacy.legs) if (a.supplier === supplier && a.buyer === buyer && legOwed(a, sim.tick) > 0) return true;
+  const legs = sim.diplomacy.legs;
+  for (let i = 0; i < legs.length; i++) {
+    const a = legs[i];
+    if (a.supplier === supplier && a.buyer === buyer && legOwed(a, sim.tick) > 0) return true;
+  }
   return false;
 }
 
@@ -800,7 +855,10 @@ export function sendMerchants(sim: Simulation, home: number): void {
         // A trade agreement counts what sets out (the way takes time).
         if (sim.world.owner[home] !== sim.world.owner[target]) {
           const leg = agreementFor(sim.diplomacy, sim.world.owner[home], sim.world.owner[target], g);
-          if (leg) leg.delivered += dealSell[g];
+          if (leg) {
+            leg.delivered += dealSell[g];
+            trade.owedTick = -1;
+          }
           if (trade.transitFor[home * TRADE_GOODS + g]) trade.transit += dealSell[g];
         }
         trade.incoming[target * TRADE_GOODS + g] += dealSell[g];

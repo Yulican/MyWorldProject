@@ -737,6 +737,9 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   }
   rebuildPartners(dip);
   refreshRelations(sim, living);
+  // Export hubs and what is owed changed: trade.ts marks them anew.
+  sim.trade.hubTick = -1;
+  sim.trade.owedTick = -1;
 }
 
 const agreementKey = (supplier: number, buyer: number, good: number) => (supplier * PAIRS + buyer) * 64 + good;
