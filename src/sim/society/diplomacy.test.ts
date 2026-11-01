@@ -14,12 +14,14 @@ import {
   TRUST_BASE,
   closeBorders,
   dangerTerms,
+  dangerValue,
   mayPass,
   nearness,
   noteEmigration,
   payToll,
   tollValue,
   trustTerms,
+  trustValue,
   updateDiplomacy,
 } from './diplomacy';
 import { DIRECTION_COUNT } from '../hex';
@@ -224,4 +226,20 @@ test('diplomacy keeps the history the same for the same seed', () => {
     return [Array.from(sim.diplomacy.trust.subarray(0, 8 * PAIRS)), sim.chronicle.map((e) => e.text)];
   };
   assert.deepEqual(run(), run());
+});
+
+test('the simulation uses the same trust and danger the diplomacy panel explains', () => {
+  const sim = createSimulation(generateWorld({ seed: 17 }));
+  runYears(sim, 160);
+  let pairs = 0;
+  for (const a of livingCivilizations(sim)) {
+    for (const b of livingCivilizations(sim)) {
+      if (a === b || !sim.diplomacy.known[pair(a.id, b.id)]) continue;
+      pairs++;
+      const explained = (terms: { value: number }[]) => Math.max(0, Math.min(100, sumTerms(terms)));
+      assert.ok(Math.abs(trustValue(sim, a.id, b.id) - explained(trustTerms(sim, a.id, b.id))) < 1e-4);
+      assert.ok(Math.abs(dangerValue(sim, a.id, b.id) - explained(dangerTerms(sim, a.id, b.id))) < 1e-4);
+    }
+  }
+  assert.ok(pairs > 0);
 });

@@ -131,12 +131,8 @@ function openEdges(world: World, c: number, owner: number): number {
   return mask;
 }
 
-/** Dashes along a border edge that is open (shares of the edge). */
-const DASHES = [
-  [0, 0.3],
-  [0.45, 0.55],
-  [0.7, 1],
-] as const;
+/** Dashes along a border edge that is open: start and end as shares of the edge, flat so drawing allocates nothing. */
+const DASHES = [0, 0.3, 0.45, 0.55, 0.7, 1];
 
 /** One territory detail tile as a transparent image; null where nobody lives. */
 export function renderTerritoryTile(
@@ -217,9 +213,9 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       const dx = (bx - ax) * r;
       const dy = (by - ay) * r;
       if (open & (1 << d)) {
-        for (const [from, to] of DASHES) {
-          border.moveTo(x0 + dx * from, y0 + dy * from);
-          border.lineTo(x0 + dx * to, y0 + dy * to);
+        for (let k = 0; k < DASHES.length; k += 2) {
+          border.moveTo(x0 + dx * DASHES[k], y0 + dy * DASHES[k]);
+          border.lineTo(x0 + dx * DASHES[k + 1], y0 + dy * DASHES[k + 1]);
         }
       } else {
         border.moveTo(x0, y0);

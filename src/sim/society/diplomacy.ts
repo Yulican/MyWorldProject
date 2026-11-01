@@ -575,7 +575,7 @@ export function closeBorders(sim: Simulation, a: number, b: number, record: Reco
   record(`The ${sim.civs[a]!.name} closed their borders to the ${sim.civs[b]!.name}.`, sim.civs[a]!.capital);
 }
 
-/** Trust and danger of every known pair from their terms. */
+/** Trust and danger of every known pair (the sums of their terms, computed without allocating). */
 function refreshRelations(sim: Simulation, living: number[]): void {
   const dip = sim.diplomacy;
   for (const a of living) {
@@ -583,10 +583,37 @@ function refreshRelations(sim: Simulation, living: number[]): void {
       if (a === b) continue;
       const k = pair(a, b);
       if (!dip.known[k]) continue;
-      dip.trust[k] = clamp100(sumTerms(trustTerms(sim, a, b)));
-      dip.danger[k] = clamp100(sumTerms(dangerTerms(sim, a, b)));
+      dip.trust[k] = trustValue(sim, a, b);
+      dip.danger[k] = dangerValue(sim, a, b);
     }
   }
+}
+
+/**
+ * a's trust in b: the sum of `trustTerms`, clamped to 0..100, from the same
+ * values without allocating (the yearly update runs it for every known
+ * pair; a test keeps both equal).
+ */
+export function trustValue(sim: Simulation, a: number, b: number): number {
+  const dip = sim.diplomacy;
+  const k = pair(a, b);
+  let sum = TRUST_BASE + dip.peace[k];
+  if (dip.open[pair(b, a)]) sum += AGREEMENT_TRUST;
+  if (dip.freeTrade[k]) sum += AGREEMENT_TRUST;
+  if (dip.migration[k]) sum += AGREEMENT_TRUST;
+  for (const t of dip.agreements) if ((t.supplier === a && t.buyer === b) || (t.supplier === b && t.buyer === a)) sum += AGREEMENT_TRUST;
+  const moods = dip.moods.get(k);
+  if (moods) for (const m of moods) sum += moodNow(m, sim.tick);
+  return clamp100(sum);
+}
+
+/** How dangerous b looks to a: the sum of `dangerTerms`, clamped to 0..100, without allocating. */
+export function dangerValue(sim: Simulation, a: number, b: number): number {
+  const civA = sim.civs[a];
+  const civB = sim.civs[b];
+  if (!civA || !civB) return 0;
+  const size = Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
+  return clamp100(size * nearness(sim.diplomacy.distance[pair(a, b)]));
 }
 
 /** Relations of one people to another for the diplomacy panel (allocates; UI only). */
