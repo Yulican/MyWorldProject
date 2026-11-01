@@ -17,7 +17,7 @@ const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 const open = options.open === '1';
-// Central government variants: gov=1 switches it on; goods=1 taxes goods too (variant B); mean=1 sets the rate by the district mean instead of the weakest settlement; margin, plus, minus, traders, capital tune it.
+// Central government variants (defaults: the baseline in taxes.ts): gov=1 switches it on; goods=1 taxes goods too (variant B); mean=1 sets the rate by the district mean instead of the weakest settlement; margin, plus, minus, traders, capital tune it.
 if (options.gov === '1') GOV_TUNING.on = true;
 if (options.goods === '1') GOV_TUNING.goodsTax = true;
 if (options.mean === '1') GOV_TUNING.weakest = false;
@@ -41,7 +41,7 @@ if (options.secure) GOV_TUNING.secureYears = Number(options.secure);
 // partners=1: government traders also buy from peoples whose merchants trade with theirs (free trade, trade agreements).
 if (options.partners === '1') GOV_TUNING.buyPartners = true;
 // district=1: one planned seat per government district instead of per people.
-if (options.district === '1') GOV_TUNING.seatPerDistrict = true;
+if (options.district) GOV_TUNING.seatPerDistrict = options.district === '1';
 // start: seats' worth of starting money per new people's government; loan=1: queued seats take materials from their site's settlement on credit.
 if (options.start) GOV_TUNING.startSeats = Number(options.start);
 if (options.loan === '1') GOV_TUNING.seatLoan = true;
@@ -52,11 +52,11 @@ if (options.seatsfirst === '1') GOV_TUNING.seatsFirst = true;
 // income: share of last year's taxes the yearly upkeep may take (income check, seats first in the budget; 0 = check the treasury instead).
 if (options.income) GOV_TUNING.incomeShare = Number(options.income);
 // goodsneed=1: the goods tax is its own rate, set by the district's need for wood and stone, with its own "Goods taxes" term (goodsplus at 0 %, 0 at 10 %, -goodsminus at 50 %).
-if (options.goodsneed === '1') GOV_TUNING.goodsByNeed = true;
+if (options.goodsneed) GOV_TUNING.goodsByNeed = options.goodsneed === '1';
 if (options.goodsplus) GOV_TUNING.goodsPlus = Number(options.goodsplus);
 if (options.goodsminus) GOV_TUNING.goodsMinus = Number(options.goodsminus);
 // potential=1: the income check compares upkeep with what the district could raise at its loyalty limit instead of last year's taxes.
-if (options.potential === '1') GOV_TUNING.potentialIncome = true;
+if (options.potential) GOV_TUNING.potentialIncome = options.potential === '1';
 // cash=1: a project also needs its construction and first reserve in hand (treasury and seat stock), besides the queue and 2 years of upkeep.
 if (options.cash === '1') GOV_TUNING.cashCheck = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
