@@ -55,6 +55,7 @@ Every push to a feature branch runs the map benchmark in CI (job `benchmark` in 
 Rules for every agent and every change:
 
 - Agents have no phone, and the APK is only built by a push, so pushing your own branch is how the test runs. After pushing, wait for both `benchmark` jobs.
+- **Never push to the remote without the user's approval** for that push. Commit locally and ask; an approval covers only the push it was given for.
 - Never push while a pipeline run for the branch is still in progress, unless the user explicitly approves that push. A new push cancels the running run and makes the feedback loop longer. Commit locally, wait for the run to finish, then push.
 - A task is not done, and its branch must not be merged into `main`, until the whole run passes (both `benchmark` jobs). If it fails, keep optimizing and push again; don't hand the task back as finished.
 - Never weaken the thresholds, skip swipes or worlds, or disable the job to get it green. Only the user changes the rules.
