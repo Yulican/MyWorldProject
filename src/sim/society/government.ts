@@ -22,7 +22,7 @@ const TRADER_LOAD = 40;
 /** Weeks per hex a government trader travels (roads and rivers aside). */
 const WEEKS_PER_HEX = 1;
 /** Years of upkeep a government building keeps in stock at its site. */
-const UPKEEP_RESERVE_YEARS = 2;
+const UPKEEP_RESERVE_YEARS = 3;
 const UPKEEP_GRACE_YEARS = 2;
 /** Years a project may wait for its materials before the government drops it. */
 const PROJECT_YEARS = 5;
@@ -315,7 +315,9 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       if (owner[site] !== owner[s] || sim.cellPop[site] === 0 || economy.state[slot] !== SlotState.Empty) continue; // lost or taken
       if (type === SEAT_TYPE && !sim.seatSite[site]) continue; // seat planning found a better site, or none is worth it
       // Its upkeep reserve stays (upkeep first).
-      if (gov.stock[w] - upkeepReserve(sim, site, 0) >= costOf(type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1) >= costOf(type, 1)) {
+      // Checked just after the year's upkeep was paid: one year of the reserve is spent.
+      const keep = UPKEEP_RESERVE_YEARS - 1;
+      if (gov.stock[w] - upkeepReserve(sim, site, 0, keep) >= costOf(type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1, keep) >= costOf(type, 1)) {
         gov.stock[w] -= costOf(type, 0);
         gov.stock[w + 1] -= costOf(type, 1);
         economy.type[slot] = type;
@@ -359,8 +361,8 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   }
 }
 
-/** Wood or stone the government keeps at `cell` for its buildings' upkeep (UPKEEP_RESERVE_YEARS of it). */
-function upkeepReserve(sim: Simulation, cell: number, m: number): number {
+/** Wood or stone the government keeps at `cell` for its buildings' upkeep (`years` of it, UPKEEP_RESERVE_YEARS by default). */
+function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_RESERVE_YEARS): number {
   const { economy } = sim;
   let sum = 0;
   for (let s = cell * SLOTS + GOV_SLOT, end = s + usableSlots(sim, cell); s < end; s++) {
@@ -368,7 +370,7 @@ function upkeepReserve(sim: Simulation, cell: number, m: number): number {
     if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
     sum += upkeepOf(economy.type[s], m);
   }
-  return sum * UPKEEP_RESERVE_YEARS;
+  return sum * years;
 }
 
 /** Whether a seat's queue holds a seat of government. */
