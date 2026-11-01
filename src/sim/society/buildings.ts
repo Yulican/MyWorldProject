@@ -1,5 +1,5 @@
 import type { Term } from '../terms';
-import { RESOURCE_COUNT, Resource } from '../world/biomes';
+import { Biome, RESOURCE_COUNT, Resource } from '../world/biomes';
 import { Deposit } from '../world/deposits';
 import type { World } from '../world/world';
 import { SUPPLY_KINDS, type SupplyModifier } from './supply';
@@ -68,6 +68,13 @@ export const isMaterial = (good: number) => good === Good.Wood || good === Good.
 export const Material = { Wood: 0, Stone: 1 } as const;
 export const MATERIAL_COUNT = 2;
 
+/** Biomes that harvest wood, and stone, beyond foraging (and allow its buildings). */
+export const WOOD_BIOMES: readonly number[] = [Biome.Forest, Biome.Jungle];
+export const STONE_BIOMES: readonly number[] = [Biome.Hills, Biome.Mountains];
+
+/** Simulation-phase tuning (Requirement Regionale Rohstoffe): regional harvest on or off. */
+export const MATERIAL_TUNING = { regional: true };
+
 export type BuildingType = {
   name: string;
   good: number;
@@ -90,6 +97,8 @@ export type BuildingType = {
   converts?: number;
   /** Only on a hex next to the sea or a lake. */
   coast?: boolean;
+  /** Only on a hex of one of these biomes (wood from woods, stone from hills and mountains). */
+  biomes?: readonly number[];
 };
 
 /**
@@ -104,10 +113,10 @@ export const BUILDINGS: readonly BuildingType[] = [
   { name: 'Irrigation', good: Good.Food, amount: 0, percent: 0.5, wood: 20, stone: 25, upkeepWood: 0, upkeepStone: 1, years: 2 },
   { name: 'Well', good: Good.Water, amount: 25, percent: 0, wood: 5, stone: 12, upkeepWood: 0, upkeepStone: 1, years: 1 },
   { name: 'Cistern', good: Good.Water, amount: 0, percent: 0.5, wood: 15, stone: 30, upkeepWood: 0, upkeepStone: 1, years: 2 },
-  { name: 'Lumber camp', good: Good.Wood, amount: 5, percent: 0, wood: 8, stone: 2, upkeepWood: 0, upkeepStone: 1, years: 1 },
-  { name: 'Sawmill', good: Good.Wood, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 0, upkeepStone: 1, years: 2 },
-  { name: 'Quarry', good: Good.Stone, amount: 5, percent: 0, wood: 10, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
-  { name: 'Stonemason', good: Good.Stone, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 1, upkeepStone: 0, years: 2 },
+  { name: 'Lumber camp', good: Good.Wood, amount: 5, percent: 0, wood: 8, stone: 2, upkeepWood: 0, upkeepStone: 1, years: 1, biomes: WOOD_BIOMES },
+  { name: 'Sawmill', good: Good.Wood, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 0, upkeepStone: 1, years: 2, biomes: WOOD_BIOMES },
+  { name: 'Quarry', good: Good.Stone, amount: 5, percent: 0, wood: 10, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, biomes: STONE_BIOMES },
+  { name: 'Stonemason', good: Good.Stone, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 1, upkeepStone: 0, years: 2, biomes: STONE_BIOMES },
   // Satisfaction (satisfaction.ts): comfort for this many people, a seat of
   // government, and the luxury goods of special deposits.
   { name: 'Meeting place', good: Good.Comfort, amount: 50, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
@@ -179,7 +188,13 @@ export function createEconomy(cellCount: number): Economy {
 
 /** Wood or stone a hex yields per year by foraging alone. */
 export function forageYield(world: World, cell: number, good: number): number {
+  if (MATERIAL_TUNING.regional && !harvestsHere(world, cell, good)) return FORAGE_BASE;
   return FORAGE_BASE + FORAGE_PER_RESOURCE * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
+}
+
+/** Whether the hex's biome yields its wood (woods) or stone (hills, mountains) beyond foraging. */
+export function harvestsHere(world: World, cell: number, good: number): boolean {
+  return (good === Good.Wood ? WOOD_BIOMES : STONE_BIOMES).includes(world.biome[cell]);
 }
 
 const resourceOf = (good: number) => (good === Good.Wood ? Resource.Wood : Resource.Stone);

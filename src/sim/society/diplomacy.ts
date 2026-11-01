@@ -5,7 +5,7 @@ import { isWaterBiome } from '../world/biomes';
 import { stepCost } from '../world/roads';
 import type { CivMood } from './satisfaction';
 import type { Simulation } from './simulation';
-import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub } from './trade';
+import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, hubReach, stockOf } from './trade';
 
 // Diplomacy, stage 1 (agreed requirement: "Design Documents/Requirement
 // Diplomatie.md"): every people rates every people it knows by trust and
@@ -84,8 +84,10 @@ export type TradeLeg = {
   yearStart: number;
   /** The supplier's settlement that ships the deliveries (trade.ts: exportHub), -1 = none. */
   hub: number;
-  /** Years in a row it delivered less than BREACH_SHARE. */
+  /** Years in a row it delivered less than BREACH_SHARE although the goods were ready at the hub. */
   shortYears: number;
+  /** Agreement years completed (the first one doesn't count for a breach). */
+  years: number;
 };
 
 /**
@@ -545,15 +547,26 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     const what = second
       ? `${lower(first.good)} and ${lower(second.good)} between the ${name(t.a)} and the ${name(t.b)}`
       : `${lower(first.good)} from the ${name(first.supplier)} to the ${name(first.buyer)}`;
-    // A full agreement year since it started: did enough arrive?
+    // A full agreement year since it started: did enough set out?
     let broken: TradeLeg | null = null;
+    let shrunk = false;
     for (const l of t.legs) {
       if (sim.tick - l.yearStart >= TICKS_PER_YEAR) {
         // Short only while the buyer still lacks the good (its need comes and
-        // goes); in a two-sided agreement while it asks for it anywhere.
+        // goes); in a two-sided agreement while it asks for it anywhere. The
+        // first year is for getting started.
         const k = l.buyer * goods + l.good;
         const lacks = second ? civWant[k] > 0 : civWant[k] - civSpare[k] > 0;
-        l.shortYears = lacks && l.delivered < BREACH_SHARE * l.amount ? l.shortYears + 1 : 0;
+        const short = lacks && l.years > 0 && l.delivered < BREACH_SHARE * l.amount;
+        // A breach only if the goods were ready at the hub and still not sent;
+        // otherwise the supplier couldn't do better and the amount is lowered.
+        const ready = short && sim.world.owner[l.hub] === l.supplier && stockOf(sim.economy, l.hub, l.good) >= BREACH_SHARE * l.amount - l.delivered;
+        l.shortYears = ready ? l.shortYears + 1 : 0;
+        if (short && !ready) {
+          l.amount = l.delivered;
+          shrunk = true;
+        }
+        l.years++;
         l.delivered = 0;
         l.yearStart = sim.tick;
       }
@@ -566,10 +579,27 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       pause(t);
       continue;
     }
+    if (shrunk && second) {
+      // Both legs keep the same value.
+      const value = Math.min(first.amount * PRICE[first.good], second.amount * PRICE[second.good]);
+      first.amount = value / PRICE[first.good];
+      second.amount = value / PRICE[second.good];
+    }
+    if (shrunk && t.legs.some((l) => l.amount < AGREEMENT_MIN_AMOUNT)) {
+      record(`The trade agreement for ${what} ended: too little could be delivered.`, capital(first.buyer));
+      pause(t);
+      continue;
+    }
     if (sim.tick - t.since >= AGREEMENT_YEARS * TICKS_PER_YEAR) {
+      // Renegotiated with what the hubs can reach now.
+      const reach: number[] = [];
+      for (const l of t.legs) {
+        l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
+        reach.push(l.hub >= 0 ? hubReach : 0);
+      }
       const amounts = second
-        ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good)
-        : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
+        ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, reach[0], reach[1])
+        : Math.min(agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good), reach[0]);
       const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
       if (!ok || !mutual(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
         record(`The trade agreement for ${what} ran out.`, capital(first.buyer));
@@ -600,6 +630,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     delivered: 0,
     yearStart: sim.tick,
     shortYears: 0,
+    years: 0,
     hub,
   });
   for (const a of living) {
@@ -608,10 +639,13 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
-        const amount = agreedAmount(civWant, civSpare, goods, b, a, g);
-        if (amount < AGREEMENT_MIN_AMOUNT) continue;
+        if (agreedAmount(civWant, civSpare, goods, b, a, g) < AGREEMENT_MIN_AMOUNT) continue;
         const hub = exportHub(sim, b, a, g);
         if (hub < 0) continue;
+        // No more than the buyer's settlements in reach of the hub ask for.
+        const reach = hubReach;
+        const amount = Math.min(agreedAmount(civWant, civSpare, goods, b, a, g), reach);
+        if (amount < AGREEMENT_MIN_AMOUNT) continue;
         // The counter goods worth the most, up to the value of this one; the
         // first of COUNTER_TRIES that a's merchants can bring to b.
         let best = -1;
@@ -624,7 +658,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           let amounts0: [number, number] | null = null;
           for (let h = 0; h < goods; h++) {
             if (h === g || triedGoods & (1 << h) || !free(a, b, h)) continue;
-            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h);
+            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h, reach);
             if (amounts && (!amounts0 || amounts[0] > amounts0[0])) {
               h0 = h;
               amounts0 = amounts;
@@ -634,9 +668,10 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           tried++;
           triedGoods |= 1 << h0;
           counterHub = exportHub(sim, a, b, h0);
-          if (counterHub >= 0) {
+          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, reach, hubReach) : null;
+          if (balanced) {
             best = h0;
-            bestAmounts = amounts0;
+            bestAmounts = balanced;
             break;
           }
         }
@@ -681,11 +716,20 @@ function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, su
  * of equal value at PRICE. Null if either leg would be below
  * AGREEMENT_MIN_AMOUNT.
  */
-export function exchangeAmounts(want: Float32Array, spare: Float32Array, supplier: number, buyer: number, good: number, counter: number): [number, number] | null {
-  const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good);
+export function exchangeAmounts(
+  want: Float32Array,
+  spare: Float32Array,
+  supplier: number,
+  buyer: number,
+  good: number,
+  counter: number,
+  capThere = Infinity,
+  capBack = Infinity,
+): [number, number] | null {
+  const there = Math.min(agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good), capThere);
   // The supplier needs only to ask for the counter good somewhere (most
   // peoples lack the same luxuries and spare the same wood and stone).
-  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter], AGREEMENT_MAX_AMOUNT);
+  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter], AGREEMENT_MAX_AMOUNT, capBack);
   if (there < AGREEMENT_MIN_AMOUNT || back < AGREEMENT_MIN_AMOUNT) return null;
   const value = Math.min(there * PRICE[good], back * PRICE[counter]);
   const a = value / PRICE[good];

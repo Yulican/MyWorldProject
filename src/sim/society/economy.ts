@@ -8,6 +8,7 @@ import {
   Good,
   LUXURY_COUNT,
   MATERIAL_COUNT,
+  MATERIAL_TUNING,
   Material,
   REPAIR_SHARE,
   SLOTS,
@@ -469,6 +470,7 @@ function buildingFits(sim: Simulation, cell: number, type: number): boolean {
   if (b.deposit !== undefined && sim.world.deposit[cell] !== b.deposit) return false;
   if (b.waterSurplus !== undefined && sim.cellSupply[cell * SUPPLY_KINDS + 1] - sim.cellPop[cell] < b.waterSurplus) return false;
   if (b.coast && !isCoast(sim.world, cell)) return false;
+  if (MATERIAL_TUNING.regional && b.biomes && !b.biomes.includes(sim.world.biome[cell])) return false;
   return true;
 }
 

@@ -91,6 +91,8 @@ export type Trade = {
   surplus: Float32Array;
   /** Ordered and on its way: cell * TRADE_GOODS + good. */
   incoming: Float32Array;
+  /** Per cell and good: what a trade agreement's export hub still lacks of the goods it owes (its people bring it first). */
+  hubOwed: Float32Array;
   /** Merchants per hex from its standing trade buildings, and how many are away. */
   merchants: Uint8Array;
   away: Uint8Array;
@@ -143,6 +145,7 @@ export function createTrade(seed: number, cellCount: number): Trade {
     want: new Float32Array(cellCount * TRADE_GOODS),
     surplus: new Float32Array(cellCount * TRADE_GOODS),
     incoming: new Float32Array(cellCount * TRADE_GOODS),
+    hubOwed: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     harbor: new Uint8Array(cellCount),
@@ -289,10 +292,12 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   }
   // An export hub asks its people for what its trade agreements still owe;
   // that stock is its surplus for the buyers.
+  trade.hubOwed.fill(0, t, t + TRADE_GOODS);
   for (const a of sim.diplomacy.legs) {
     if (a.hub !== cell) continue;
     const owed = Math.max(0, a.amount - a.delivered);
     const stock = stockOf(economy, cell, a.good);
+    trade.hubOwed[t + a.good] += Math.max(0, owed - stock);
     trade.want[t + a.good] += Math.max(0, owed - stock - trade.incoming[t + a.good]);
     trade.surplus[t + a.good] = Math.max(trade.surplus[t + a.good], Math.min(stock, owed));
   }
@@ -433,6 +438,9 @@ function isPartner(sim: Simulation, civ: number, other: number): boolean {
 let trialSupplier = -1;
 let trialBuyer = -1;
 
+/** What the buyer's settlements in reach of the last exportHub's hub ask for of its good (an agreement can't sell them more). */
+export let hubReach = 0;
+
 /**
  * The export hub for a trade agreement: the settlement of `supplier` with
  * merchants that reaches a settlement of `buyer` asking for `good` soonest on
@@ -451,14 +459,21 @@ export function exportHub(sim: Simulation, supplier: number, buyer: number, good
   const homes: number[] = [];
   for (let home = 0; home < world.cellCount; home++) if (owner[home] === supplier && trade.merchants[home]) homes.push(home);
   if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
+  hubReach = 0;
   for (const home of homes.slice(0, HUB_CANDIDATES)) {
+    let reach = 0;
+    let nearest = Infinity;
     for (const t of searchWays(sim, owner, home, MAX_TRIP_COST, -1)) {
-      if (owner[t] === buyer && sim.cellPop[t] > 0 && trade.want[t * TRADE_GOODS + good] > 0 && wayCost[t] < hubCost) {
-        hubCost = wayCost[t];
-        hub = home;
-      }
+      if (owner[t] !== buyer || sim.cellPop[t] === 0 || trade.want[t * TRADE_GOODS + good] <= 0) continue;
+      reach += trade.want[t * TRADE_GOODS + good];
+      nearest = Math.min(nearest, wayCost[t]);
     }
     resetWays();
+    if (nearest < hubCost) {
+      hubCost = nearest;
+      hub = home;
+      hubReach = reach;
+    }
   }
   trialSupplier = -1;
   trialBuyer = -1;
@@ -607,7 +622,9 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     worth += amount * PRICE[g];
     const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
     if (agreement && agreement.delivered < agreement.amount) dealOwed = true;
-    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (agreement ? FOCUS_AGREEMENT : 1);
+    // Agreement deliveries, and goods that the export hub still needs for them, go first.
+    const owedFirst = agreement || (!abroad && trade.hubOwed[target * TRADE_GOODS + g] > 0);
+    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (owedFirst ? FOCUS_AGREEMENT : 1);
   }
   let money = eco.money[home];
   let backLoad = MERCHANT_LOAD;
@@ -740,6 +757,11 @@ export function sendMerchants(sim: Simulation, home: number): void {
       trade.tripCargo[trip * TRADE_GOODS + g] = dealSell[g];
       if (dealSell[g] > 0) {
         addStock(economy, home, g, -dealSell[g]);
+        // A trade agreement counts what sets out (the way takes time).
+        if (sim.world.owner[home] !== sim.world.owner[target]) {
+          const leg = agreementFor(sim.diplomacy, sim.world.owner[home], sim.world.owner[target], g);
+          if (leg) leg.delivered += dealSell[g];
+        }
         trade.incoming[target * TRADE_GOODS + g] += dealSell[g];
         trade.want[target * TRADE_GOODS + g] = Math.max(0, trade.want[target * TRADE_GOODS + g] - dealSell[g]);
         trade.surplus[home * TRADE_GOODS + g] -= dealSell[g];
@@ -864,8 +886,6 @@ export function advanceTrips(sim: Simulation): void {
         trade.delivered[g] += arrived;
         addStock(economy, target, g, arrived);
         if (deal) {
-          const agreement = agreementFor(sim.diplomacy, owner[home], owner[target], g);
-          if (agreement) agreement.delivered += arrived;
           trade.abroad[g] += arrived;
         }
         owed += arrived * PRICE[g];
