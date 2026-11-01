@@ -347,10 +347,14 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       economy.goal[stock + Material.Stone] = 0;
       // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
       const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
+      // A planned seat of government comes first (simulation phase): only repairs until it stands.
+      const seatFirst = UPKEEP_TUNING.seatFirst && sim.seatSite[c] > 0;
       const started =
         !busy &&
-        (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
-      if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
+        (seatFirst
+          ? planBuilding(sim, c, true)
+          : planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
+      if (started || (!busy && !seatFirst && yearEnd && planTrade(sim, c))) supplyChanged = true;
       if (sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
@@ -384,7 +388,7 @@ function canExpand(sim: Simulation, cell: number): boolean {
  *   and when nothing is in reach, people move out once the hex is full.
  * Returns whether construction started.
  */
-function planBuilding(sim: Simulation, cell: number): boolean {
+function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boolean {
   const { economy } = sim;
   const capacity = sim.cellCapacity[cell];
   if (sim.cellPop[cell] < BUILD_FROM_CROWDING * capacity) return false;
@@ -394,7 +398,7 @@ function planBuilding(sim: Simulation, cell: number): boolean {
     if (economy.state[s] === SlotState.Empty) free++;
     else if (economy.state[s] === SlotState.Ruin) ruins++;
   }
-  const newAllowed = free > 0 && !canExpand(sim, cell);
+  const newAllowed = !repairsOnly && free > 0 && !canExpand(sim, cell);
   if (!newAllowed && ruins === 0) return false;
   prepareNet(sim, cell);
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];

@@ -1,7 +1,7 @@
 // Settlement growth, trade, diplomacy and uprisings over many worlds, to
 // calibrate the economy (see "Design Documents/Requirement Regionale
 // Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0] [slots=fixed|people|cost] [perPeople=50] [costStep=1.5] [tradeUpkeep=0] [bulk=0] [tradePost=0] [seatsUseHeld=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0] [slots=fixed|people|cost] [perPeople=50] [costStep=1.5] [tradeUpkeep=0] [bulk=0] [tradePost=0] [seatsUseHeld=0] [seatFirst=0] [seatUpkeepFirst=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
@@ -25,11 +25,13 @@ if (slotTuning) {
   if (options.costStep) slotTuning.costStep = Number(options.costStep);
   slotTuning.tradeUpkeep = options.tradeUpkeep === '1';
 }
-const upkeepTuning = (tradeModule as unknown as { UPKEEP_TUNING?: { bulk: boolean; tradePost: boolean; seatsUseHeld: boolean } }).UPKEEP_TUNING;
+const upkeepTuning = (tradeModule as unknown as { UPKEEP_TUNING?: { bulk: boolean; tradePost: boolean; seatsUseHeld: boolean; seatFirst: boolean; seatUpkeepFirst: boolean } }).UPKEEP_TUNING;
 if (upkeepTuning) {
   upkeepTuning.bulk = options.bulk === '1';
   upkeepTuning.tradePost = options.tradePost === '1';
   upkeepTuning.seatsUseHeld = options.seatsUseHeld === '1';
+  upkeepTuning.seatFirst = options.seatFirst === '1';
+  upkeepTuning.seatUpkeepFirst = options.seatUpkeepFirst === '1';
 }
 
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.

@@ -6,7 +6,7 @@ import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../worl
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
 import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
-import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
+import { LUXURY_PER_PERSON, hasSeat, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
@@ -65,9 +65,12 @@ const RESERVE_YEARS = 2;
  * falls below half of that, at least half a merchant's load, first;
  * `tradePost` = such a settlement without merchants builds a trade center;
  * `seatsUseHeld` = a planned seat of government counts those held reserves
- * as spare (seats come first).
+ * as spare (seats come first); `seatFirst` = a planned seat site builds
+ * nothing new until the seat stands (economy.ts); `seatUpkeepFirst` = a
+ * settlement with a seat keeps BULK_YEARS of its missing upkeep, orders
+ * before it runs low, and those trips come first of all.
  */
-export const UPKEEP_TUNING = { bulk: false, tradePost: false, seatsUseHeld: false };
+export const UPKEEP_TUNING = { bulk: false, tradePost: false, seatsUseHeld: false, seatFirst: false, seatUpkeepFirst: false };
 const BULK_YEARS = 10;
 const RESERVE_MIN = 10;
 /** Luxury goods a settlement keeps (and asks for): this many years of its need. */
@@ -297,15 +300,16 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
     const yearly = Math.max(0, upkeep - harvest);
-    if (UPKEEP_TUNING.bulk && yearly > 0) {
+    const seatHere = UPKEEP_TUNING.seatUpkeepFirst && yearly > 0 && hasSeat(economy, cell);
+    if ((UPKEEP_TUNING.bulk || seatHere) && yearly > 0) {
       // Upkeep by trade: keep BULK_YEARS of it, order in worthwhile lots, first.
       const keep = yearly * BULK_YEARS;
       const have = stock - goal + trade.incoming[t + m];
-      const order = have < keep / 2 ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
+      const order = have < (seatHere ? keep : keep / 2) ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
       trade.want[t + m] = Math.max(0, goal - stock - trade.incoming[t + m]) + order;
       trade.surplus[t + m] = Math.max(0, stock - goal - Math.max(reserve, keep));
       trade.held[cell * MATERIAL_COUNT + m] = Math.max(0, Math.min(stock - goal - reserve, keep - reserve));
-      if (order > 0) upkeepFocus |= 1 << m;
+      if (order > 0) upkeepFocus |= (seatHere ? 4 : 1) << m;
       continue;
     }
     trade.held[cell * MATERIAL_COUNT + m] = 0;
@@ -342,7 +346,10 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // that stock is its surplus for the buyers. The further behind its
   // deliveries, the more its people hurry to bring it.
   trade.hubFocus.fill(0, t, t + TRADE_GOODS);
-  for (let m = 0; m < MATERIAL_COUNT; m++) if (upkeepFocus & (1 << m)) trade.hubFocus[t + m] = FOCUS_AGREEMENT;
+  for (let m = 0; m < MATERIAL_COUNT; m++) {
+    if (upkeepFocus & (4 << m)) trade.hubFocus[t + m] = FOCUS_AGREEMENT * 3;
+    else if (upkeepFocus & (1 << m)) trade.hubFocus[t + m] = FOCUS_AGREEMENT;
+  }
   if (isHub(sim, cell)) hubWants(sim, cell, t);
   // Only goods the rest of its people, or its people's trade partners, ask
   // for or spare count (totals from the last refresh).
