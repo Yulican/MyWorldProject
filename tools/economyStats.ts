@@ -1,6 +1,6 @@
 // Settlement growth, trade and diplomacy over many worlds, to calibrate the
 // economy (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [capMode=spoil|stop] [merchants=4] [load=20] [forage=10] [open=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [capMode=spoil|stop] [merchants=4] [load=20] [forage=10] [base=2] [luxury=0] [plainsSlots=4] [open=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
@@ -10,6 +10,7 @@ import { openDiplomacy } from '../src/bench/openDiplomacy';
 import * as buildings from '../src/sim/society/buildings';
 import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
 import * as trade from '../src/sim/society/trade';
+import * as economy from '../src/sim/society/economy';
 import * as diplomacy from '../src/sim/society/diplomacy';
 
 const worlds = Number(process.argv[2] ?? 12);
@@ -33,8 +34,15 @@ if (options.merchants) {
 // A merchant's load, and the factor on a hex's wood or stone (woods, hills, mountains).
 const load = (trade as unknown as { LOAD_TUNING?: { load: number } }).LOAD_TUNING;
 if (load && options.load) load.load = Number(options.load);
-const harvest = (buildings as unknown as { HARVEST_TUNING?: { perResource: number } }).HARVEST_TUNING;
+const harvest = (buildings as unknown as { HARVEST_TUNING?: { perResource: number; base: number } }).HARVEST_TUNING;
 if (harvest && options.forage) harvest.perResource = Number(options.forage);
+if (harvest && options.base) harvest.base = Number(options.base);
+// Luxury deposits mined for trade, and building slots on plains.
+const econ = (economy as unknown as { ECONOMY_TUNING?: { luxuryForTrade: boolean; plainsSlots: number } }).ECONOMY_TUNING;
+if (econ) {
+  econ.luxuryForTrade = options.luxury === '1';
+  if (options.plainsSlots) econ.plainsSlots = Number(options.plainsSlots);
+}
 
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
@@ -79,13 +87,25 @@ for (let seed = 1; seed <= worlds; seed++) {
     let cities = 0;
     let standing = 0;
     let ruins = 0;
+    let crowded = 0;
+    let woodStock = 0;
+    let stoneStock = 0;
+    let luxuryShops = 0;
+    let luxuryCovered = 0;
     for (let c = 0; c < sim.world.cellCount; c++) {
       const pop = sim.cellPop[c];
-      if (pop > 0) settlements++;
+      if (pop > 0) {
+        settlements++;
+        if (pop > sim.cellCapacity[c]) crowded++;
+        woodStock += sim.economy.stock[c * 2];
+        stoneStock += sim.economy.stock[c * 2 + 1];
+        if (sim.economy.luxuryCovered[c]) luxuryCovered++;
+      }
       if (pop >= 50) towns++;
       if (pop >= 150) cities++;
       for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) {
         if (sim.economy.state[s] === SlotState.Standing) standing++;
+        if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].deposit !== undefined) luxuryShops++;
         if (sim.economy.state[s] === SlotState.Ruin) ruins++;
       }
     }
@@ -102,6 +122,11 @@ for (let seed = 1; seed <= worlds; seed++) {
       'cities (150+)': cities,
       buildings: standing,
       ruins,
+      'crowded %': (100 * crowded) / Math.max(1, settlements),
+      'wood stock/settlement': woodStock / Math.max(1, settlements),
+      'stone stock/settlement': stoneStock / Math.max(1, settlements),
+      luxuryWorkshops: luxuryShops,
+      'luxury covered %': (100 * luxuryCovered) / Math.max(1, settlements),
       woodTraded: sim.trade.delivered[0],
       stoneTraded: sim.trade.delivered[1],
       allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0),

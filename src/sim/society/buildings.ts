@@ -141,7 +141,7 @@ export const BUILDINGS: readonly BuildingType[] = [
 ];
 
 /** Building slots per hex (later changed by modifiers). */
-export const SLOTS = 4;
+export const SLOTS = 6;
 /** Repairing a ruin costs this share of the building's cost and time. */
 export const REPAIR_SHARE = 0.5;
 /** Years a building survives unpaid upkeep before it becomes a ruin. */
@@ -150,7 +150,7 @@ export const UPKEEP_GRACE_YEARS = 2;
 const FORAGE_BASE = 2;
 const FORAGE_PER_RESOURCE = 10;
 /** Simulation phase (Requirement Regionale Rohstoffe): the factor on the hex's wood or stone, 10 = FORAGE_PER_RESOURCE. */
-export const HARVEST_TUNING = { perResource: FORAGE_PER_RESOURCE };
+export const HARVEST_TUNING = { perResource: FORAGE_PER_RESOURCE, base: FORAGE_BASE };
 
 export const SlotState = { Empty: 0, Construction: 1, Standing: 2, Ruin: 3, Repair: 4 } as const;
 
@@ -194,8 +194,8 @@ export function createEconomy(cellCount: number): Economy {
 
 /** Wood or stone a hex yields per year by foraging alone. */
 export function forageYield(world: World, cell: number, good: number): number {
-  if (!harvestsHere(world, cell, good)) return FORAGE_BASE;
-  return FORAGE_BASE + HARVEST_TUNING.perResource * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
+  if (!harvestsHere(world, cell, good)) return HARVEST_TUNING.base;
+  return HARVEST_TUNING.base + HARVEST_TUNING.perResource * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
 }
 
 /** Whether the hex's biome yields its wood (woods) or stone (hills, mountains) beyond foraging. */
@@ -252,7 +252,7 @@ export function buildingSupplyModifiers(eco: Economy, cell: number): SupplyModif
 /** How the hex's yearly wood or stone harvest comes about (Good.Wood or Good.Stone). */
 export function harvestTerms(world: World, eco: Economy, cell: number, good: number, factor = 1): Term[] {
   const resource = world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
-  const terms: Term[] = [{ label: 'Foraging', value: FORAGE_BASE }];
+  const terms: Term[] = [{ label: 'Foraging', value: HARVEST_TUNING.base }];
   if (harvestsHere(world, cell, good)) {
     terms.push({ label: `${GOOD_NAMES[good]} ${resource.toFixed(2)} × ${HARVEST_TUNING.perResource}`, value: HARVEST_TUNING.perResource * resource });
   }
