@@ -5,7 +5,7 @@ import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
-import { agreementFor, hasFreeTrade, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
+import { agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
@@ -91,8 +91,8 @@ export type Trade = {
   surplus: Float32Array;
   /** Ordered and on its way: cell * TRADE_GOODS + good. */
   incoming: Float32Array;
-  /** Per cell and good: what a trade agreement's export hub still lacks of the goods it owes (its people bring it first). */
-  hubOwed: Float32Array;
+  /** Per cell and good: priority factor for bringing an export hub goods it still lacks for a trade agreement, 0 = none. */
+  hubFocus: Float32Array;
   /** Merchants per hex from its standing trade buildings, and how many are away. */
   merchants: Uint8Array;
   away: Uint8Array;
@@ -145,7 +145,7 @@ export function createTrade(seed: number, cellCount: number): Trade {
     want: new Float32Array(cellCount * TRADE_GOODS),
     surplus: new Float32Array(cellCount * TRADE_GOODS),
     incoming: new Float32Array(cellCount * TRADE_GOODS),
-    hubOwed: new Float32Array(cellCount * TRADE_GOODS),
+    hubFocus: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     harbor: new Uint8Array(cellCount),
@@ -292,12 +292,13 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   }
   // An export hub asks its people for what its trade agreements still owe;
   // that stock is its surplus for the buyers.
-  trade.hubOwed.fill(0, t, t + TRADE_GOODS);
+  // The further behind its deliveries, the more its people hurry.
+  trade.hubFocus.fill(0, t, t + TRADE_GOODS);
   for (const a of sim.diplomacy.legs) {
     if (a.hub !== cell) continue;
-    const owed = Math.max(0, a.amount - a.delivered);
+    const owed = legOwed(a, sim.tick);
     const stock = stockOf(economy, cell, a.good);
-    trade.hubOwed[t + a.good] += Math.max(0, owed - stock);
+    if (owed > stock) trade.hubFocus[t + a.good] = Math.max(trade.hubFocus[t + a.good], FOCUS_AGREEMENT * (1 + a.behind));
     trade.want[t + a.good] += Math.max(0, owed - stock - trade.incoming[t + a.good]);
     trade.surplus[t + a.good] = Math.max(trade.surplus[t + a.good], Math.min(stock, owed));
   }
@@ -438,41 +439,39 @@ function isPartner(sim: Simulation, civ: number, other: number): boolean {
 let trialSupplier = -1;
 let trialBuyer = -1;
 
-/** What the buyer's settlements in reach of the last exportHub's hub ask for of its good (an agreement can't sell them more). */
-export let hubReach = 0;
-
 /**
  * The export hub for a trade agreement: the settlement of `supplier` with
- * merchants that reaches a settlement of `buyer` asking for `good` soonest on
- * ways (as under the agreement); -1 if none does. The people's internal
- * trade brings the goods there (it asks for what the agreement still owes).
+ * merchants that reaches a settlement of `buyer` soonest on ways (as under
+ * the agreement); -1 if none does. The people's internal trade brings the
+ * goods there (it asks for what the agreement still owes). With `stocked`,
+ * only settlements that have at least that much of the good in stock are
+ * candidates (another settlement takes over a delivery the hub couldn't make).
  */
-export function exportHub(sim: Simulation, supplier: number, buyer: number, good: number): number {
-  const { trade, world } = sim;
+export function exportHub(sim: Simulation, supplier: number, buyer: number, good: number, stocked = 0): number {
+  const { trade, world, economy } = sim;
   const owner = world.owner;
   trialSupplier = supplier;
   trialBuyer = buyer;
   let hub = -1;
   let hubCost = Infinity;
-  // Only the HUB_CANDIDATES settlements with merchants nearest the buyer's capital are searched from.
+  // Only HUB_CANDIDATES settlements with merchants are searched from: the
+  // nearest to the buyer's capital, or those with the most in stock.
   const capital = sim.civs[buyer]?.capital ?? -1;
   const homes: number[] = [];
-  for (let home = 0; home < world.cellCount; home++) if (owner[home] === supplier && trade.merchants[home]) homes.push(home);
-  if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
-  hubReach = 0;
+  for (let home = 0; home < world.cellCount; home++) {
+    if (owner[home] === supplier && trade.merchants[home] && (stocked <= 0 || stockOf(economy, home, good) >= stocked)) homes.push(home);
+  }
+  if (stocked > 0) homes.sort((a, b) => stockOf(economy, b, good) - stockOf(economy, a, good) || a - b);
+  else if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
   for (const home of homes.slice(0, HUB_CANDIDATES)) {
-    let reach = 0;
     let nearest = Infinity;
     for (const t of searchWays(sim, owner, home, MAX_TRIP_COST, -1)) {
-      if (owner[t] !== buyer || sim.cellPop[t] === 0 || trade.want[t * TRADE_GOODS + good] <= 0) continue;
-      reach += trade.want[t * TRADE_GOODS + good];
-      nearest = Math.min(nearest, wayCost[t]);
+      if (owner[t] === buyer && sim.cellPop[t] > 0) nearest = Math.min(nearest, wayCost[t]);
     }
     resetWays();
     if (nearest < hubCost) {
       hubCost = nearest;
       hub = home;
-      hubReach = reach;
     }
   }
   trialSupplier = -1;
@@ -615,16 +614,18 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   const order = abroad ? agreementFirst(sim, homeCiv, targetCiv) : BY_VALUE;
   for (const g of order) {
     if (g === TradeGood.Money || load <= 0) continue;
-    const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], trade.want[target * TRADE_GOODS + g], load / WEIGHT[g]);
+    const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
+    // The buyer takes what the agreement still owes, asked for or not.
+    const owed = agreement ? legOwed(agreement, sim.tick) : 0;
+    const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g]);
     if (amount <= 0) continue;
     dealSell[g] = amount;
     load -= amount * WEIGHT[g];
     worth += amount * PRICE[g];
-    const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
-    if (agreement && agreement.delivered < agreement.amount) dealOwed = true;
+    if (owed > 0) dealOwed = true;
     // Agreement deliveries, and goods that the export hub still needs for them, go first.
-    const owedFirst = agreement || (!abroad && trade.hubOwed[target * TRADE_GOODS + g] > 0);
-    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (owedFirst ? FOCUS_AGREEMENT : 1);
+    const focus = agreement ? FOCUS_AGREEMENT : abroad ? 0 : trade.hubFocus[target * TRADE_GOODS + g];
+    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
   }
   let money = eco.money[home];
   let backLoad = MERCHANT_LOAD;
@@ -648,7 +649,7 @@ let dealOwed = false;
 
 /** Whether `supplier` still owes `buyer` deliveries this agreement year. */
 function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean {
-  for (const a of sim.diplomacy.legs) if (a.supplier === supplier && a.buyer === buyer && a.delivered < a.amount) return true;
+  for (const a of sim.diplomacy.legs) if (a.supplier === supplier && a.buyer === buyer && legOwed(a, sim.tick) > 0) return true;
   return false;
 }
 

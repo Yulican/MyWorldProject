@@ -257,6 +257,7 @@ const leg = (supplier: number, buyer: number, good: number, amount: number, tick
   yearStart: tick,
   shortYears: 0,
   years: 1,
+  behind: 0,
   hub: -1,
 });
 
