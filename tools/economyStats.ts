@@ -38,6 +38,8 @@ if (options.seatcost) GOV_TUNING.seatCost = Number(options.seatcost);
 if (options.seatupkeep) GOV_TUNING.seatUpkeep = Number(options.seatupkeep);
 // secure: years of upkeep the treasury must cover before the government takes on a project (0 = no check).
 if (options.secure) GOV_TUNING.secureYears = Number(options.secure);
+// partners=1: government traders also buy from peoples whose merchants trade with theirs (free trade, trade agreements).
+if (options.partners === '1') GOV_TUNING.buyPartners = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;

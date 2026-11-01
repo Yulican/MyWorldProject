@@ -645,14 +645,17 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
   const n = world.cellCount;
   const busy = new Uint8Array(sim.civSlots);
   const candidates: number[][] = [];
+  const again = new Int32Array(sim.civSlots).fill(-1);
   const year = Math.floor(sim.tick / (STEPS_PER_YEAR * 13));
   for (let c = 0; c < n; c++) {
     const id = owner[c];
     if (sim.seatSite[c] && (id === 0 || sim.cellPop[c] === 0)) sim.seatSite[c] = 0; // lost
     if (sim.seatSite[c] && year + 1 - sim.seatSite[c] > SAVE_UP_YEARS) {
-      // Not built in time: try elsewhere, and this site again only later.
       sim.seatSite[c] = 0;
-      sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
+      // Queued by the government: it competes again with the other sites (below).
+      if (GOV_TUNING.on && sim.government.seatQueued[c] && id) again[id] = c;
+      // Not built in time: try elsewhere, and this site again only later.
+      else sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
     }
     if (id === 0) continue;
     if (sim.seatSite[c]) busy[id] = 1;
@@ -669,13 +672,17 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
   const field = scratchField(n);
   for (let id = 1; id < sim.civSlots; id++) {
     const list = candidates[id];
+    // A queued site keeps its plan while another seat is being built.
+    if (again[id] >= 0 && busy[id]) sim.seatSite[again[id]] = year + 1;
     if (!sim.civs[id] || busy[id] || !list) continue;
     // Held back by the expansion stop first, then the worst connected.
     const held = (c: number) => (sim.frontierBlocked[c] && year + 1 - sim.frontierBlocked[c] <= 1 ? 1 : 0);
     list.sort((a, b) => held(b) - held(a) || sim.seatCost[b] - sim.seatCost[a] || a - b);
     let best = -1;
     let bestBenefit = SEAT_MIN_BENEFIT;
-    for (const c of list.slice(0, SEAT_CANDIDATES)) {
+    const evaluate = list.slice(0, SEAT_CANDIDATES);
+    if (again[id] >= 0 && list.includes(again[id]) && !evaluate.includes(again[id])) evaluate.push(again[id]);
+    for (const c of evaluate) {
       const reached = seatField(sim, owner, id, [c], field);
       let benefit = 0;
       for (const k of reached) {
@@ -693,6 +700,7 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
       }
     }
     if (best >= 0) sim.seatSite[best] = year + 1;
+    if (again[id] >= 0 && best !== again[id]) sim.seatRetry[again[id]] = year + SEAT_RETRY_YEARS + 1;
   }
 }
 

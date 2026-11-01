@@ -51,6 +51,8 @@ export type Government = {
   projectType: Int16Array;
   projectYear: Int32Array;
   projectCount: Uint8Array;
+  /** Per cell: 1 if a seat of government is queued there (seat planning re-evaluates it, economy.ts). */
+  seatQueued: Uint8Array;
   /** Per seat cell: its traders and how many are away. */
   traders: Uint8Array;
   away: Uint8Array;
@@ -88,6 +90,7 @@ export function createGovernment(cellCount: number): Government {
     projectType: new Int16Array(cellCount * QUEUE_MAX).fill(-1),
     projectYear: new Int32Array(cellCount * QUEUE_MAX),
     projectCount: new Uint8Array(cellCount),
+    seatQueued: new Uint8Array(cellCount),
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     incoming: new Float32Array(cellCount * MATERIAL_COUNT),
@@ -269,6 +272,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       const b = BUILDINGS[type];
       const w = site * MATERIAL_COUNT;
       if (owner[site] !== owner[s] || sim.cellPop[site] === 0 || economy.state[slot] !== SlotState.Empty) continue; // lost or taken
+      if (type === SEAT_TYPE && !sim.seatSite[site]) continue; // seat planning found a better site, or none is worth it
       // Its upkeep reserve stays (upkeep first).
       if (gov.stock[w] - upkeepReserve(sim, site, 0) >= costOf(type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1) >= costOf(type, 1)) {
         gov.stock[w] -= costOf(type, 0);
@@ -307,6 +311,10 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       const i = q + gov.projectCount[s]++;
       [gov.projectSite[i], gov.projectSlot[i], gov.projectType[i], gov.projectYear[i]] = [pickSite, pickSlot, pickType, year];
     }
+  }
+  gov.seatQueued.fill(0);
+  for (let s = 0; s < n; s++) {
+    for (let i = s * QUEUE_MAX, end = i + gov.projectCount[s]; i < end; i++) if (gov.projectType[i] === SEAT_TYPE) gov.seatQueued[gov.projectSite[i]] = 1;
   }
 }
 
@@ -457,8 +465,11 @@ export function advanceGovernment(sim: Simulation): void {
     let price = 0;
     if (source < 0) {
       let best = 0;
+      // Its own people's settlements, and with buyPartners those of peoples whose merchants trade with it.
+      const partnersOf = sim.diplomacy.partners;
       for (let c = 0; c < n; c++) {
-        if (owner[c] !== civ || sim.cellPop[c] === 0) continue;
+        const o = owner[c];
+        if (sim.cellPop[c] === 0 || (o !== civ && !(GOV_TUNING.buyPartners && partnersOf[o]?.includes(civ)))) continue;
         const spare = trade.surplus[c * TRADE_GOODS + needM];
         if (spare >= GOV_TUNING.minLoad && spare > best) {
           best = spare;
