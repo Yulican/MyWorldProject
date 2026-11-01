@@ -3,7 +3,7 @@ import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState } from './b
 import { buildingFits, capacityWith, usableSlots } from './economy';
 import { satisfactionTarget, seatsOf } from './satisfaction';
 import type { Simulation } from './simulation';
-import { ECON_TUNING, GOV_TUNING, TAX_MAX, TAX_NEUTRAL, taxValue } from './taxes';
+import { ECON_TUNING, GOV_TUNING, TAX_MAX, TAX_NEUTRAL, goodsRateFor, goodsTaxValue, taxValue } from './taxes';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, upkeepOf as settlementUpkeep } from './trade';
 
 export { GOV_TUNING, taxValue };
@@ -43,6 +43,8 @@ export type Government = {
   goodsRate: Float32Array;
   /** Per cell: the money tax rate it pays (for its satisfaction). */
   cellRate: Float32Array;
+  /** Per cell: the goods tax rate it pays (for its satisfaction). */
+  cellGoodsRate: Float32Array;
   /** Per seat cell: money in its treasury. */
   treasury: Float32Array;
   /** Per cell and material: wood and stone the government keeps there (seat stock, building sites). */
@@ -96,6 +98,7 @@ export function createGovernment(cellCount: number): Government {
     rate: new Float32Array(cellCount),
     goodsRate: new Float32Array(cellCount),
     cellRate: new Float32Array(cellCount),
+    cellGoodsRate: new Float32Array(cellCount),
     treasury: new Float32Array(cellCount),
     stock: new Float32Array(cellCount * MATERIAL_COUNT),
     projectSite: new Int32Array(cellCount * QUEUE_MAX).fill(-1),
@@ -249,10 +252,34 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     const s = gov.district[c];
     if (s < 0) continue;
     // Satisfaction without its taxes.
-    const base = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - taxValue(gov.cellRate[c]);
+    const base = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - taxValue(gov.cellRate[c]) - goodsTaxValue(gov.cellGoodsRate[c]);
     low[s] = Math.min(low[s], base);
     sum[s] += base;
     count[s]++;
+  }
+  // goodsByNeed: what each district needs in wood and stone this year (its buildings' upkeep, its queued
+  // projects' missing materials, less what its seat holds) and what its settlements spare.
+  const goodsNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
+  const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
+  if (GOV_TUNING.goodsByNeed) {
+    for (let c = 0; c < n; c++) {
+      const s = gov.district[c];
+      if (s < 0) continue;
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
+        if (sim.hasBuildings[c]) goodsNeed[s * MATERIAL_COUNT + m] += upkeepReserve(sim, c, m, 1);
+      }
+    }
+    for (let s = 0; s < n; s++) {
+      if (!isSeat[s]) continue;
+      for (let i = s * QUEUE_MAX, end = i + gov.projectCount[s]; i < end; i++) {
+        const site = gov.projectSite[i];
+        for (let m = 0; m < MATERIAL_COUNT; m++) {
+          goodsNeed[s * MATERIAL_COUNT + m] += Math.max(0, costOf(gov.projectType[i], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m]);
+        }
+      }
+      for (let m = 0; m < MATERIAL_COUNT; m++) goodsNeed[s * MATERIAL_COUNT + m] = Math.max(0, goodsNeed[s * MATERIAL_COUNT + m] - gov.stock[s * MATERIAL_COUNT + m]);
+    }
   }
   for (let s = 0; s < n; s++) {
     if (!isSeat[s]) {
@@ -265,18 +292,30 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     const base = GOV_TUNING.weakest ? low[s] : sum[s] / count[s];
     // While a seat is to be paid for, its district (seatTax 1) or its whole people (2) taxes without the safety margin.
     const financing = (GOV_TUNING.seatTax === 1 && seatQueued(gov, s)) || (GOV_TUNING.seatTax === 2 && civFinancing[owner[s]] === 1);
-    const rate = rateFor((financing ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - base);
+    const room = (financing ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - base;
+    let goodsRate = GOV_TUNING.goodsTax ? -1 : 0;
+    if (GOV_TUNING.goodsByNeed) {
+      // As much as the district needs, as far as the money tax at 0 % still keeps it loyal; the money tax takes the rest.
+      goodsRate = 0;
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        const spare = goodsSpare[s * MATERIAL_COUNT + m];
+        if (spare > 0) goodsRate = Math.max(goodsRate, goodsNeed[s * MATERIAL_COUNT + m] / spare);
+      }
+      goodsRate = Math.min(goodsRate, TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
+    }
+    const rate = rateFor(room - goodsTaxValue(Math.max(0, goodsRate)));
     if (Math.abs(rate - gov.rate[s]) >= 0.1) {
       record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s);
     }
     gov.rate[s] = rate;
-    gov.goodsRate[s] = GOV_TUNING.goodsTax ? rate : 0;
+    gov.goodsRate[s] = goodsRate < 0 ? rate : goodsRate;
   }
   // Taxes.
   gov.income.fill(0);
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
     gov.cellRate[c] = s >= 0 ? gov.rate[s] : 0;
+    gov.cellGoodsRate[c] = s >= 0 ? gov.goodsRate[s] : 0;
     if (s < 0) continue;
     const tax = Math.min(economy.money[c], gov.rate[s] * sim.cellAdults[c] * MONEY_PER_ADULT * ECON_TUNING.money);
     economy.money[c] -= tax;

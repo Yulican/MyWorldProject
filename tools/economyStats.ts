@@ -51,6 +51,10 @@ if (options.reserve === '1') GOV_TUNING.reserveUpkeep = true;
 if (options.seatsfirst === '1') GOV_TUNING.seatsFirst = true;
 // income: share of last year's taxes the yearly upkeep may take (income check, seats first in the budget; 0 = check the treasury instead).
 if (options.income) GOV_TUNING.incomeShare = Number(options.income);
+// goodsneed=1: the goods tax is its own rate, set by the district's need for wood and stone, with its own "Goods taxes" term (goodsplus at 0 %, 0 at 10 %, -goodsminus at 50 %).
+if (options.goodsneed === '1') GOV_TUNING.goodsByNeed = true;
+if (options.goodsplus) GOV_TUNING.goodsPlus = Number(options.goodsplus);
+if (options.goodsminus) GOV_TUNING.goodsMinus = Number(options.goodsminus);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -105,6 +109,7 @@ for (let seed = 1; seed <= worlds; seed++) {
     let govRuins = 0;
     let govSeats = 0;
     let rateSum = 0;
+    let goodsRateSum = 0;
     for (let c = 0; c < sim.world.cellCount; c++) {
       const pop = sim.cellPop[c];
       if (pop > 0) {
@@ -116,6 +121,7 @@ for (let seed = 1; seed <= worlds; seed++) {
         travel += Math.min(sim.seatCost[c], 5);
         if (!(sim.seatCost[c] <= 2)) farFromSeat++;
         rateSum += sim.government.cellRate[c];
+        goodsRateSum += sim.government.cellGoodsRate[c];
       }
       if (pop >= 50) towns++;
       if (pop >= 150) cities++;
@@ -170,6 +176,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       ranOut: text('ran out.'),
       uprisings: text('rose up'),
       'tax rate % (mean)': (100 * rateSum) / Math.max(1, settlements),
+      'goods tax % (mean)': (100 * goodsRateSum) / Math.max(1, settlements),
       'taxes collected': sim.government.collected,
       'goods taxed': sim.government.collectedGoods,
       'gov spent': sim.government.spent,
