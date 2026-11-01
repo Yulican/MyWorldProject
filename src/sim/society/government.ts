@@ -202,12 +202,14 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       gov.traders[s] = civObj && civObj.capital === s ? GOV_TUNING.capitalTraders : GOV_TUNING.traders;
     }
   }
-  // Starting money: a new people's government gets GOV_TUNING.startSeats seats' worth.
+  // Starting money: a newly founded people's government gets GOV_TUNING.startSeats seats' worth;
+  // breakaways keep the settlements that rose up and get none.
   if (GOV_TUNING.startSeats > 0) {
     const money = GOV_TUNING.startSeats * (costOf(SEAT_TYPE, 0) * PRICE[0] + costOf(SEAT_TYPE, 1) * PRICE[1]);
     for (const civObj of sim.civs) {
       if (!civObj || gov.funded.has(civObj) || civObj.capital < 0) continue;
       gov.funded.add(civObj);
+      if (civObj.origin !== 'start' && civObj.origin !== 'tribe') continue;
       gov.treasury[civObj.capital] += money;
       gov.startMoney += money;
     }
