@@ -1,12 +1,20 @@
 // Settlement growth, trade and diplomacy over many worlds, to calibrate the
 // economy (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [margin=0.5] [agreementMargin=1]
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
 import { SLOTS, SlotState } from '../src/sim/society/buildings';
+import * as trade from '../src/sim/society/trade';
 
 const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
+// Simulation phase of step 2: margin=0.5 agreementMargin=1
+const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
+const tuning = (trade as unknown as { MARGIN_TUNING?: { margin: number; agreements: boolean } }).MARGIN_TUNING;
+if (tuning) {
+  tuning.margin = Number(options.margin ?? tuning.margin);
+  tuning.agreements = (options.agreementMargin ?? (tuning.agreements ? '1' : '0')) === '1';
+}
 
 type Row = Record<string, number>;
 const rows = new Map<number, Row[]>();
@@ -35,6 +43,8 @@ for (let seed = 1; seed <= worlds; seed++) {
     }
     const text = (s: string) => sim.chronicle.filter((e) => e.text.includes(s)).length;
     let abroad = 0;
+    let tripsAbroad = 0;
+    for (let i = 0; i < sim.trade.tripLeg.length; i++) if (sim.trade.tripLeg[i] && sim.world.owner[sim.trade.tripHome[i]] !== sim.world.owner[sim.trade.tripTarget[i]]) tripsAbroad++;
     for (const v of sim.trade.abroad) abroad += v;
     let money = 0;
     for (const v of sim.economy.money) money += v;
@@ -50,6 +60,8 @@ for (let seed = 1; seed <= worlds; seed++) {
       stoneTraded: sim.trade.delivered[1],
       allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0),
       deliveredAbroad: abroad,
+      marginPaid: (sim.trade as { marginPaid?: number }).marginPaid ?? 0,
+      tripsAbroad: tripsAbroad,
       money,
       known: sim.chronicle.filter((e) => e.text.endsWith(' met.')).length,
       openBorders: text('opened their borders'),
@@ -67,7 +79,7 @@ for (let seed = 1; seed <= worlds; seed++) {
   }
 }
 
-console.log(`${worlds} worlds`);
+console.log(`${worlds} worlds`, process.argv.slice(4).join(' '));
 for (const [year, list] of rows) {
   const keys = Object.keys(list[0]);
   const mean = (k: string) => list.reduce((s, r) => s + r[k], 0) / list.length;

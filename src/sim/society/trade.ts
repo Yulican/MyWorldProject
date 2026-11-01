@@ -5,7 +5,7 @@ import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
-import { agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
+import { agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue, type TradeLeg } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
@@ -29,6 +29,23 @@ export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Sa
 const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
 export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
+/**
+ * Simulation-phase tuning (Requirement Regionale Rohstoffe, Schritt 2): a
+ * sale to another people costs PRICE × (1 + margin); `agreements`: also
+ * deliveries of one-sided trade agreements.
+ */
+export const MARGIN_TUNING = { margin: 0.5, agreements: true };
+
+/**
+ * What one unit of `good` costs its buyer: the fixed price, plus the margin
+ * when it crosses to another people; a two-sided trade agreement swaps goods
+ * at the fixed price, a one-sided one pays the margin (its counter value).
+ */
+function saleprice(sim: Simulation, good: number, abroad: boolean, leg: TradeLeg | null): number {
+  if (!abroad) return PRICE[good];
+  if (leg && (twoSided(sim, leg) || !MARGIN_TUNING.agreements)) return PRICE[good];
+  return PRICE[good] * (1 + MARGIN_TUNING.margin);
+}
 export const MERCHANT_LOAD = 20;
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
@@ -133,6 +150,8 @@ export type Trade = {
   delivered: Float64Array;
   /** Of that, delivered to another people's settlements. */
   abroad: Float64Array;
+  /** Money paid above the fixed price between peoples so far (statistics). */
+  marginPaid: number;
   lost: Float64Array;
   trips: number;
   roads: number;
@@ -172,6 +191,7 @@ export function createTrade(seed: number, cellCount: number): Trade {
     tripEnd: 0,
     delivered: new Float64Array(TRADE_GOODS),
     abroad: new Float64Array(TRADE_GOODS),
+    marginPaid: 0,
     lost: new Float64Array(TRADE_GOODS),
     trips: 0,
     roads: 0,
@@ -621,32 +641,38 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   const abroad = homeCiv !== targetCiv;
   // Goods a trade agreement owes go first.
   const order = abroad ? agreementFirst(sim, homeCiv, targetCiv) : BY_VALUE;
+  // A foreign settlement only gets what it can pay for (agreement deliveries it takes anyway).
+  let budget = abroad ? eco.money[target] : Infinity;
   for (const g of order) {
     if (g === TradeGood.Money || load <= 0) continue;
     const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
     // The buyer takes what the agreement still owes, asked for or not.
     const owed = agreement ? legOwed(agreement, sim.tick) : 0;
-    const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g]);
+    const price = saleprice(sim, g, abroad, agreement);
+    const affordable = agreement ? Infinity : Math.max(0, budget) / price;
+    const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g], affordable);
     if (amount <= 0) continue;
     dealSell[g] = amount;
     load -= amount * WEIGHT[g];
-    worth += amount * PRICE[g];
+    budget -= amount * price;
+    worth += amount * price;
     if (owed > 0) dealOwed = true;
     // Agreement deliveries, and goods that the export hub still needs for them, go first.
     const focus = agreement ? FOCUS_AGREEMENT : abroad ? 0 : trade.hubFocus[target * TRADE_GOODS + g];
-    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
+    dealPriority += amount * price * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
   }
   let money = eco.money[home];
   let backLoad = MERCHANT_LOAD;
   for (const g of BY_VALUE) {
     if (g === TradeGood.Money || backLoad <= 0 || money <= 0) continue;
-    const amount = Math.min(trade.want[home * TRADE_GOODS + g], trade.surplus[target * TRADE_GOODS + g], backLoad / WEIGHT[g], money / PRICE[g]);
+    const price = saleprice(sim, g, abroad, null);
+    const amount = Math.min(trade.want[home * TRADE_GOODS + g], trade.surplus[target * TRADE_GOODS + g], backLoad / WEIGHT[g], money / price);
     if (amount <= 0) continue;
     dealBuy[g] = amount;
     backLoad -= amount * WEIGHT[g];
-    money -= amount * PRICE[g];
-    worth += amount * PRICE[g];
-    dealPriority += amount * PRICE[g] * unhappyHome * lacking(eco, home, g);
+    money -= amount * price;
+    worth += amount * price;
+    dealPriority += amount * price * unhappyHome * lacking(eco, home, g);
   }
   return worth;
 }
@@ -655,6 +681,12 @@ function planDeal(sim: Simulation, home: number, target: number): number {
 let dealPriority = 0;
 /** Whether the last planDeal carries goods a trade agreement still owes this year. */
 let dealOwed = false;
+
+/** Whether the agreement a leg belongs to has a second leg (goods for goods, no margin). */
+function twoSided(sim: Simulation, leg: TradeLeg): boolean {
+  for (const t of sim.diplomacy.agreements) if (t.legs.includes(leg)) return t.legs.length === 2;
+  return false;
+}
 
 /** Whether `supplier` still owes `buyer` deliveries in the running period. */
 function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean {
@@ -898,7 +930,10 @@ export function advanceTrips(sim: Simulation): void {
         if (deal) {
           trade.abroad[g] += arrived;
         }
-        owed += arrived * PRICE[g];
+        const leg = deal ? agreementFor(sim.diplomacy, owner[home], owner[target], g) : null;
+        const price = saleprice(sim, g, deal, leg);
+        owed += arrived * price;
+        trade.marginPaid += arrived * (price - PRICE[g]);
         trade.tripCargo[cargo + g] = 0;
         if (g === TradeGood.Grain || g === TradeGood.Water) provisions = true;
       }
@@ -917,13 +952,15 @@ export function advanceTrips(sim: Simulation): void {
           if (g === TradeGood.Money || load <= 0) continue;
           const asked = Math.max(trade.tripBuy[cargo + g], owed > 0 ? trade.want[home * TRADE_GOODS + g] : 0);
           const credit = money + owed;
-          const amount = Math.min(asked, trade.surplus[target * TRADE_GOODS + g], stockOf(economy, target, g), load / WEIGHT[g], credit / PRICE[g]);
+          const price = saleprice(sim, g, owner[home] !== owner[target], null);
+          const amount = Math.min(asked, trade.surplus[target * TRADE_GOODS + g], stockOf(economy, target, g), load / WEIGHT[g], credit / price);
           if (amount <= 0) continue;
           addStock(economy, target, g, -amount);
           trade.surplus[target * TRADE_GOODS + g] -= amount;
           trade.tripCargo[cargo + g] += amount;
           load -= amount * WEIGHT[g];
-          let cost = amount * PRICE[g];
+          trade.marginPaid += amount * (price - PRICE[g]);
+          let cost = amount * price;
           const fromOwed = Math.min(owed, cost);
           owed -= fromOwed;
           cost -= fromOwed;
