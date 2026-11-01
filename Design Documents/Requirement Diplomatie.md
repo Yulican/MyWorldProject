@@ -145,10 +145,13 @@ Wege und Verluste.
   Siedlungen mit dem größten Überschuss zu denen mit dem größten Bedarf.
   Diese Fahrten haben Vorrang vor freien Fahrten.
 - **Laufzeit:** 10 Jahre. Danach wird neu verhandelt.
-- **Bruch:** Liefert eine Seite 2 Jahre in Folge weniger als die Hälfte,
-  endet das ganze Abkommen. Nur die Seite, die zu wenig bekam, verliert
-  Vertrauen in die andere (wie beim Schließen der Grenze, −20, klingt in
-  10 Jahren ab).
+- **Bruch:** Liefert eine Seite weniger als die Hälfte, obwohl die Ware
+  bereitlag, endet nach 2 solchen Zeiträumen das ganze Abkommen. Nur die
+  Seite, die zu wenig bekam, verliert Vertrauen in die andere (wie beim
+  Schließen der Grenze, −20, klingt in 10 Jahren ab). Konnte die Seite
+  nicht liefern, wird nachverhandelt statt gebrochen. Einzelheiten
+  (Annahmepflicht, Bewertung alle 2 Jahre, anderer Ausfuhrort, Halbieren):
+  `Requirement Regionale Rohstoffe.md`, Abschnitt 4.
 - Ein Volkspaar hat höchstens ein Handelsabkommen pro Ware.
 
 **Vertrauen**
@@ -242,15 +245,15 @@ Umgesetzt mit den Startwerten. Bei der Umsetzung entschieden bzw. ergänzt:
   - Der Ausfuhrort verlangt die noch geschuldete Menge im eigenen Volk, so
     bringt der interne Handel die Ware dorthin.
   - Geschuldete Lieferungen haben Vorrang vor allen anderen Fahrten.
-  - Als Bruch zählt ein Jahr nur, wenn der Abnehmer die Ware noch braucht.
-    Sein Bedarf schwankt; ohne Bedarf kann nichts geliefert werden.
+  - Bruch und Nachverhandeln: siehe `Requirement Regionale Rohstoffe.md`,
+    Abschnitt 4 (ersetzt die frühere Regel, nach der ein Jahr nur zählte,
+    solange der Abnehmer die Ware noch brauchte).
   - Nach Bruch oder Ablauf ruht dieselbe Ware 10 Jahre.
   - Bezahlt wird wie im internen Handel zu festen Preisen.
   - **Gegenware:** Fast alle Völker haben Holz und Stein übrig und es fehlen
     ihnen dieselben Luxusgüter. Würde A die Gegenware in Summe fehlen
     müssen, gäbe es so gut wie nie eine. Deshalb reicht es, dass
-    Siedlungen von A sie verlangen. Ein Bruch zählt dann, solange A sie
-    noch irgendwo verlangt.
+    Siedlungen von A sie verlangen.
   - Probiert werden die 2 wertvollsten Gegenwaren. Erreichen Händler von B
     für keine einen Abnehmer, wird das Abkommen einseitig.
   - Nach Ablauf werden beide Mengen neu verhandelt. Fehlt eine Seite, endet

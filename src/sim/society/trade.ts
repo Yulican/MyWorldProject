@@ -291,8 +291,8 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     trade.surplus[t + g] = Math.max(0, stock - keep);
   }
   // An export hub asks its people for what its trade agreements still owe;
-  // that stock is its surplus for the buyers.
-  // The further behind its deliveries, the more its people hurry.
+  // that stock is its surplus for the buyers. The further behind its
+  // deliveries, the more its people hurry to bring it.
   trade.hubFocus.fill(0, t, t + TRADE_GOODS);
   for (const a of sim.diplomacy.legs) {
     if (a.hub !== cell) continue;
@@ -656,7 +656,7 @@ let dealPriority = 0;
 /** Whether the last planDeal carries goods a trade agreement still owes this year. */
 let dealOwed = false;
 
-/** Whether `supplier` still owes `buyer` deliveries this agreement year. */
+/** Whether `supplier` still owes `buyer` deliveries in the running period. */
 function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean {
   for (const a of sim.diplomacy.legs) if (a.supplier === supplier && a.buyer === buyer && legOwed(a, sim.tick) > 0) return true;
   return false;

@@ -31,7 +31,7 @@ import {
 import { DIRECTION_COUNT } from '../hex';
 import { hasRoad } from '../world/roads';
 import { TICKS_PER_YEAR, createSimulation, livingCivilizations, splitCutOffLand, stepSimulation, type Simulation } from './simulation';
-import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TradeGood, addStock, stockOf } from './trade';
+import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TradeGood, addStock, exportHub, plannedTrip, stockOf, updateTradeNeeds } from './trade';
 
 function runYears(sim: Simulation, years: number): void {
   for (let t = 0; t < years * TICKS_PER_YEAR; t++) stepSimulation(sim);
@@ -254,9 +254,9 @@ const leg = (supplier: number, buyer: number, good: number, amount: number, tick
   good,
   amount,
   delivered: 0,
-  yearStart: tick,
-  shortYears: 0,
-  years: 1,
+  periodStart: tick,
+  shortPeriods: 0,
+  periods: 1,
   behind: 0,
   hub: -1,
 });
@@ -296,17 +296,21 @@ test('two-sided trade agreements: legs of equal value, limited by lack and spare
   assert.equal(exchangeAmounts(want, spare, 2, 1, TradeGood.Grain, salt), null);
 });
 
-test('a two-sided agreement breaks when one leg delivers too little; only its receiver holds it against the other', () => {
+const PERIOD = 2 * TICKS_PER_YEAR;
+
+test('a two-sided agreement breaks when one leg leaves ready goods at home; only its receiver holds it against the other', () => {
   const { sim, a, b } = metWorld();
   const dip = sim.diplomacy;
-  // Trust high enough to keep it; b still asks for water.
   dip.peace[pair(a, b)] = dip.peace[pair(b, a)] = 40;
-  sim.trade.civWant[b * TRADE_GOODS + TradeGood.Water] = 10;
-  const short = leg(a, b, TradeGood.Water, 10, sim.tick - TICKS_PER_YEAR);
-  short.shortYears = 1;
-  const full = leg(b, a, TradeGood.Grain, 10, sim.tick - TICKS_PER_YEAR);
-  full.delivered = 10;
-  dip.agreements = [{ a, b, since: sim.tick - TICKS_PER_YEAR, legs: [full, short] }];
+  // a's hub had the water ready and sent too little, for the second period in a row.
+  const hub = sim.civs[a]!.capital;
+  addStock(sim.economy, hub, TradeGood.Water, 30);
+  const short = leg(a, b, TradeGood.Water, 10, sim.tick - PERIOD);
+  short.hub = hub;
+  short.shortPeriods = 1;
+  const full = leg(b, a, TradeGood.Grain, 10, sim.tick - PERIOD);
+  full.delivered = 20;
+  dip.agreements = [{ a, b, since: sim.tick - PERIOD, legs: [full, short] }];
   const entries: string[] = [];
   updateDiplomacy(sim, sim.world.owner, (text) => entries.push(text));
   assert.ok(entries.some((e) => e.includes('broke: too little water arrived')), entries.join(' | '));
@@ -314,4 +318,55 @@ test('a two-sided agreement breaks when one leg delivers too little; only its re
   const broke = (x: number, y: number) => trustTerms(sim, x, y).some((t) => t.label === 'Broke a trade agreement with us');
   assert.ok(broke(b, a), 'b got too little water from a');
   assert.ok(!broke(a, b), 'a got its grain');
+});
+
+test('a supplier that could not deliver is not punished: the amount halves after two short periods, then the agreement ends quietly', () => {
+  const { sim, a, b } = metWorld();
+  const dip = sim.diplomacy;
+  dip.peace[pair(a, b)] = dip.peace[pair(b, a)] = 40;
+  // Nothing at the hub, and no other settlement of a has the goods.
+  const gold = TradeGood.Luxury + 3;
+  const l = leg(a, b, gold, 8, sim.tick - PERIOD);
+  dip.agreements = [{ a, b, since: sim.tick - PERIOD, legs: [l] }];
+  const entries: string[] = [];
+  const period = () => {
+    updateDiplomacy(sim, sim.world.owner, (text) => entries.push(text));
+    l.periodStart = sim.tick - PERIOD;
+  };
+  period();
+  assert.equal(l.amount, 8, 'the first short period only makes a hurry');
+  assert.equal(l.behind, 1);
+  period();
+  assert.equal(l.amount, 4, 'halved after the second');
+  period();
+  assert.equal(l.amount, 2);
+  period();
+  assert.ok(!dip.agreements.some((t) => t.legs.includes(l)), 'below the minimum it ends');
+  assert.ok(entries.some((e) => e.includes('ended: too little could be delivered')), entries.join(' | '));
+  assert.ok(!trustTerms(sim, b, a).some((t) => t.label === 'Broke a trade agreement with us'), 'no hard feelings');
+});
+
+test('the buyer takes what a trade agreement owes even if it asks for nothing now', () => {
+  // World 1 after 300 years: settlements of the first people reach the sixth.
+  const sim = createSimulation(generateWorld({ seed: 1 }));
+  runYears(sim, 300);
+  const [a, b] = [1, 6];
+  const dip = sim.diplomacy;
+  dip.known[pair(a, b)] = dip.known[pair(b, a)] = 1;
+  dip.open[pair(a, b)] = dip.open[pair(b, a)] = 1;
+  const gold = TradeGood.Luxury + 3;
+  const hub = exportHub(sim, a, b, gold);
+  assert.ok(hub >= 0, 'a reaches b');
+  const l = leg(a, b, gold, 10, sim.tick);
+  l.hub = hub;
+  dip.agreements.push({ a, b, since: sim.tick, legs: [l] });
+  dip.legs.push(l);
+  (dip.partners[a] ??= []).push(b);
+  addStock(sim.economy, hub, gold, 20);
+  updateTradeNeeds(sim, hub, sim.cellAdults[hub], false, 4);
+  for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === b) sim.trade.want[c * TRADE_GOODS + gold] = 0;
+  assert.equal(sim.trade.interest[hub], 1, 'the hub sends merchants for what it owes');
+  const trip = plannedTrip(sim, hub);
+  assert.equal(sim.world.owner[trip.target], b, 'to the buyer');
+  assert.ok(trip.sell[gold] > 0, 'with the gold, though nobody there asks for it');
 });

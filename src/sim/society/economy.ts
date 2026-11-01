@@ -8,7 +8,6 @@ import {
   Good,
   LUXURY_COUNT,
   MATERIAL_COUNT,
-  MATERIAL_TUNING,
   Material,
   REPAIR_SHARE,
   SLOTS,
@@ -464,13 +463,13 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
   economy.luxuryCovered[cell] = covered;
 }
 
-/** Whether a hex can have a building of this type at all (deposit, water). */
-function buildingFits(sim: Simulation, cell: number, type: number): boolean {
+/** Whether a hex can have a building of this type at all (deposit, water, coast, biome). */
+export function buildingFits(sim: Simulation, cell: number, type: number): boolean {
   const b = BUILDINGS[type];
   if (b.deposit !== undefined && sim.world.deposit[cell] !== b.deposit) return false;
   if (b.waterSurplus !== undefined && sim.cellSupply[cell * SUPPLY_KINDS + 1] - sim.cellPop[cell] < b.waterSurplus) return false;
   if (b.coast && !isCoast(sim.world, cell)) return false;
-  if (MATERIAL_TUNING.regional && b.biomes && !b.biomes.includes(sim.world.biome[cell])) return false;
+  if (b.biomes && !b.biomes.includes(sim.world.biome[cell])) return false;
   return true;
 }
 

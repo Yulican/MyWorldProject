@@ -55,12 +55,21 @@ export const TRADE_AGREEMENT_TRUST = 45;
 export const EXCHANGE_AGREEMENT_TRUST = 40;
 export const MIGRATION_TRUST = 60;
 const MIGRATION_END_TRUST = 40;
-/** A trade agreement runs this long, delivers at most this much per year, and breaks after BREACH_YEARS below BREACH_SHARE. */
+/** A trade agreement runs this long and delivers at most this much per year, at least AGREEMENT_MIN_AMOUNT. */
 export const AGREEMENT_YEARS = 10;
 const AGREEMENT_MAX_AMOUNT = 20;
 const AGREEMENT_MIN_AMOUNT = 2;
+/**
+ * Deliveries are judged every PERIOD_YEARS (long ways don't count against an
+ * agreement): below BREACH_SHARE although the goods were ready at the hub is
+ * a breach, BREACH_PERIODS in a row break it. If the supplier couldn't, a
+ * settlement with the goods in stock takes over the deliveries, or after
+ * HALVE_PERIODS in a row the amount is halved.
+ */
+const PERIOD_YEARS = 2;
 const BREACH_SHARE = 0.5;
-const BREACH_YEARS = 2;
+const BREACH_PERIODS = 2;
+const HALVE_PERIODS = 2;
 /** Counter goods tried for a two-sided trade agreement before it becomes one-sided. */
 const COUNTER_TRIES = 2;
 /** Land cut off by a closed border gets this long to be connected again before it breaks away. */
@@ -78,31 +87,23 @@ export type TradeLeg = {
   buyer: number;
   good: number;
   amount: number;
-  /** Delivered in the running agreement year (it starts with the agreement). */
+  /** Set out in the running period (PERIOD_YEARS, the first starts with the agreement). */
   delivered: number;
-  /** Tick the running agreement year started. */
-  yearStart: number;
+  /** Tick the running period started. */
+  periodStart: number;
   /** The supplier's settlement that ships the deliveries (trade.ts: exportHub), -1 = none. */
   hub: number;
-  /** Years in a row it delivered less than BREACH_SHARE although the goods were ready at the hub. */
-  shortYears: number;
-  /** Agreement periods completed (the first one doesn't count). */
-  years: number;
+  /** Periods in a row it delivered less than BREACH_SHARE although the goods were ready at the hub. */
+  shortPeriods: number;
+  /** Periods completed (the first one doesn't count). */
+  periods: number;
   /** Periods in a row the supplier couldn't deliver enough (its people hurry more). */
   behind: number;
 };
 
-/**
- * Simulation-phase tuning (Requirement Regionale Rohstoffe): `otherHub` lets
- * another settlement with the goods take over a delivery the hub couldn't
- * make; deliveries are judged over `periodYears` years; the amount is
- * halved after `halveAfter` short periods in a row.
- */
-export const AGREEMENT_TUNING = { otherHub: false, periodYears: 1, halveAfter: 1 };
-
 /** What a leg still owes in its running period: the agreed amount for every year begun, less what set out. */
 export function legOwed(l: TradeLeg, tick: number): number {
-  const begun = Math.min(AGREEMENT_TUNING.periodYears, Math.floor((tick - l.yearStart) / TICKS_PER_YEAR) + 1);
+  const begun = Math.min(PERIOD_YEARS, Math.floor((tick - l.periodStart) / TICKS_PER_YEAR) + 1);
   return Math.max(0, l.amount * begun - l.delivered);
 }
 
@@ -471,8 +472,8 @@ export type Record = (text: string, cell: number) => void;
 /**
  * Yearly: who meets whom, peaceful neighborhood, trust and danger; then
  * every people decides on its borders and agreements, in id order. Trade
- * agreements that ran out are renewed or end; one that delivered too little
- * for BREACH_YEARS breaks. `trade` holds what each people asks for and
+ * agreements that ran out are renewed or end; deliveries are judged every
+ * PERIOD_YEARS (see there). `trade` holds what each people asks for and
  * spares in total (civ * goods + good).
  */
 export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Record): void {
@@ -565,32 +566,35 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       : `${lower(first.good)} from the ${name(first.supplier)} to the ${name(first.buyer)}`;
     // A full period since it started: did enough set out? The buyer agreed
     // and takes everything; the first period is for getting started.
-    const period = AGREEMENT_TUNING.periodYears;
+    const period = PERIOD_YEARS;
     let broken: TradeLeg | null = null;
     let shrunk = false;
+    let tookOver = false;
     for (const l of t.legs) {
-      if (sim.tick - l.yearStart >= period * TICKS_PER_YEAR) {
-        const short = l.years > 0 && l.delivered < BREACH_SHARE * l.amount * period;
+      if (sim.tick - l.periodStart >= period * TICKS_PER_YEAR) {
+        const short = l.periods > 0 && l.delivered < BREACH_SHARE * l.amount * period;
         const missing = BREACH_SHARE * l.amount * period - l.delivered;
         // A breach only if the goods were ready at the hub and still not sent.
         const ready = short && sim.world.owner[l.hub] === l.supplier && stockOf(sim.economy, l.hub, l.good) >= missing;
-        l.shortYears = ready ? l.shortYears + 1 : 0;
+        l.shortPeriods = ready ? l.shortPeriods + 1 : 0;
         if (short && !ready) {
           // The supplier couldn't: another settlement with the goods takes
           // over, or the amount is halved (no hard feelings).
           l.behind++;
-          const other = AGREEMENT_TUNING.otherHub ? exportHub(sim, l.supplier, l.buyer, l.good, l.amount) : -1;
-          if (other >= 0) l.hub = other;
-          else if (l.behind >= AGREEMENT_TUNING.halveAfter) {
+          const other = exportHub(sim, l.supplier, l.buyer, l.good, l.amount);
+          if (other >= 0) {
+            l.hub = other;
+            tookOver = true;
+          } else if (l.behind >= HALVE_PERIODS) {
             l.amount *= 0.5;
             shrunk = true;
           }
         } else if (!short) l.behind = 0;
-        l.years++;
+        l.periods++;
         l.delivered = 0;
-        l.yearStart = sim.tick;
+        l.periodStart = sim.tick;
       }
-      if (l.shortYears >= BREACH_YEARS && !broken) broken = l;
+      if (l.shortPeriods >= BREACH_PERIODS && !broken) broken = l;
     }
     if (broken) {
       // Only the side that got too little holds it against the other.
@@ -611,7 +615,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       continue;
     }
     if (sim.tick - t.since >= AGREEMENT_YEARS * TICKS_PER_YEAR) {
-      // Renegotiated with what the hubs can reach now.
+      // Renegotiated, from the hubs that suit best now.
       for (const l of t.legs) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
       const amounts = second
         ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good)
@@ -628,9 +632,10 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       } else first.amount = amounts as number;
       t.since = sim.tick;
     }
-    // The hub may be gone or a better one may exist by now.
+    // The hub may be gone or a better one may exist by now (unless another
+    // settlement just took over the deliveries).
     for (const l of t.legs) {
-      if (sim.world.owner[l.hub] !== l.supplier || sim.tick - l.yearStart === 0) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
+      if (sim.world.owner[l.hub] !== l.supplier || (sim.tick - l.periodStart === 0 && !tookOver)) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
     }
     kept.push(t);
   }
@@ -644,9 +649,9 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     good,
     amount,
     delivered: 0,
-    yearStart: sim.tick,
-    shortYears: 0,
-    years: 0,
+    periodStart: sim.tick,
+    shortPeriods: 0,
+    periods: 0,
     behind: 0,
     hub,
   });
@@ -656,10 +661,10 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
-        if (agreedAmount(civWant, civSpare, goods, b, a, g) < AGREEMENT_MIN_AMOUNT) continue;
+        const amount = agreedAmount(civWant, civSpare, goods, b, a, g);
+        if (amount < AGREEMENT_MIN_AMOUNT) continue;
         const hub = exportHub(sim, b, a, g);
         if (hub < 0) continue;
-        const amount = agreedAmount(civWant, civSpare, goods, b, a, g);
         // The counter goods worth the most, up to the value of this one; the
         // first of COUNTER_TRIES that a's merchants can bring to b.
         let best = -1;
@@ -730,20 +735,11 @@ function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, su
  * of equal value at PRICE. Null if either leg would be below
  * AGREEMENT_MIN_AMOUNT.
  */
-export function exchangeAmounts(
-  want: Float32Array,
-  spare: Float32Array,
-  supplier: number,
-  buyer: number,
-  good: number,
-  counter: number,
-  capThere = Infinity,
-  capBack = Infinity,
-): [number, number] | null {
-  const there = Math.min(agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good), capThere);
+export function exchangeAmounts(want: Float32Array, spare: Float32Array, supplier: number, buyer: number, good: number, counter: number): [number, number] | null {
+  const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good);
   // The supplier needs only to ask for the counter good somewhere (most
   // peoples lack the same luxuries and spare the same wood and stone).
-  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter], AGREEMENT_MAX_AMOUNT, capBack);
+  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter], AGREEMENT_MAX_AMOUNT);
   if (there < AGREEMENT_MIN_AMOUNT || back < AGREEMENT_MIN_AMOUNT) return null;
   const value = Math.min(there * PRICE[good], back * PRICE[counter]);
   const a = value / PRICE[good];

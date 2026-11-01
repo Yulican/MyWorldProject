@@ -68,12 +68,13 @@ export const isMaterial = (good: number) => good === Good.Wood || good === Good.
 export const Material = { Wood: 0, Stone: 1 } as const;
 export const MATERIAL_COUNT = 2;
 
-/** Biomes that harvest wood, and stone, beyond foraging (and allow its buildings). */
+/**
+ * Biomes that harvest wood, and stone, beyond foraging (and allow its
+ * buildings): elsewhere settlements get them by trade (Requirement Regionale
+ * Rohstoffe).
+ */
 export const WOOD_BIOMES: readonly number[] = [Biome.Forest, Biome.Jungle];
 export const STONE_BIOMES: readonly number[] = [Biome.Hills, Biome.Mountains];
-
-/** Simulation-phase tuning (Requirement Regionale Rohstoffe): regional harvest on or off. */
-export const MATERIAL_TUNING = { regional: true, base: 1 };
 
 export type BuildingType = {
   name: string;
@@ -104,30 +105,33 @@ export type BuildingType = {
 /**
  * The catalog. Ids are stored per slot in an Int8Array, so the order is part
  * of the save format: append, never reorder. Percentage buildings cost more
- * and pay off on rich land; absolute ones help poor land most.
+ * and pay off on rich land; absolute ones help poor land most. The basic
+ * buildings a new settlement needs (huts, fields, well, lumber camp, quarry,
+ * meeting place, trade buildings) are cheap; the rest cost 1.5 times as much
+ * wood and stone, so woods and mountains export.
  */
 export const BUILDINGS: readonly BuildingType[] = [
   { name: 'Hut', good: Good.Space, amount: 25, percent: 0, wood: 12, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
-  { name: 'Stone houses', good: Good.Space, amount: 0, percent: 0.5, wood: 20, stone: 30, upkeepWood: 0, upkeepStone: 1, years: 2 },
+  { name: 'Stone houses', good: Good.Space, amount: 0, percent: 0.5, wood: 30, stone: 45, upkeepWood: 0, upkeepStone: 1.5, years: 2 },
   { name: 'Fields', good: Good.Food, amount: 25, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
-  { name: 'Irrigation', good: Good.Food, amount: 0, percent: 0.5, wood: 20, stone: 25, upkeepWood: 0, upkeepStone: 1, years: 2 },
+  { name: 'Irrigation', good: Good.Food, amount: 0, percent: 0.5, wood: 30, stone: 37.5, upkeepWood: 0, upkeepStone: 1.5, years: 2 },
   { name: 'Well', good: Good.Water, amount: 25, percent: 0, wood: 5, stone: 12, upkeepWood: 0, upkeepStone: 1, years: 1 },
-  { name: 'Cistern', good: Good.Water, amount: 0, percent: 0.5, wood: 15, stone: 30, upkeepWood: 0, upkeepStone: 1, years: 2 },
+  { name: 'Cistern', good: Good.Water, amount: 0, percent: 0.5, wood: 22.5, stone: 45, upkeepWood: 0, upkeepStone: 1.5, years: 2 },
   { name: 'Lumber camp', good: Good.Wood, amount: 5, percent: 0, wood: 8, stone: 2, upkeepWood: 0, upkeepStone: 1, years: 1, biomes: WOOD_BIOMES },
-  { name: 'Sawmill', good: Good.Wood, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 0, upkeepStone: 1, years: 2, biomes: WOOD_BIOMES },
+  { name: 'Sawmill', good: Good.Wood, amount: 0, percent: 1, wood: 30, stone: 30, upkeepWood: 0, upkeepStone: 1.5, years: 2, biomes: WOOD_BIOMES },
   { name: 'Quarry', good: Good.Stone, amount: 5, percent: 0, wood: 10, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, biomes: STONE_BIOMES },
-  { name: 'Stonemason', good: Good.Stone, amount: 0, percent: 1, wood: 20, stone: 20, upkeepWood: 1, upkeepStone: 0, years: 2, biomes: STONE_BIOMES },
+  { name: 'Stonemason', good: Good.Stone, amount: 0, percent: 1, wood: 30, stone: 30, upkeepWood: 1.5, upkeepStone: 0, years: 2, biomes: STONE_BIOMES },
   // Satisfaction (satisfaction.ts): comfort for this many people, a seat of
   // government, and the luxury goods of special deposits.
   { name: 'Meeting place', good: Good.Comfort, amount: 50, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1 },
-  { name: 'Bathhouse', good: Good.Comfort, amount: 100, percent: 0, wood: 10, stone: 30, upkeepWood: 0, upkeepStone: 1, years: 2, waterSurplus: 25 },
-  { name: 'Seat of government', good: Good.Seat, amount: 0, percent: 0, wood: 40, stone: 60, upkeepWood: 2, upkeepStone: 2, years: 3 },
-  { name: 'Salt works', good: Good.Salt, amount: 25, percent: 0, wood: 15, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Salt },
-  { name: 'Spice garden', good: Good.Spices, amount: 25, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Spices },
-  { name: 'Gem mine', good: Good.Gems, amount: 25, percent: 0, wood: 15, stone: 10, upkeepWood: 1, upkeepStone: 0, years: 2, deposit: Deposit.Gems },
-  { name: 'Gold mine', good: Good.Gold, amount: 25, percent: 0, wood: 15, stone: 10, upkeepWood: 1, upkeepStone: 0, years: 2, deposit: Deposit.Gold },
-  { name: 'Marble quarry', good: Good.Marble, amount: 25, percent: 0, wood: 15, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.Marble },
-  { name: 'Horse ranch', good: Good.Horses, amount: 25, percent: 0, wood: 20, stone: 0, upkeepWood: 1, upkeepStone: 0, years: 1, deposit: Deposit.WildHorses },
+  { name: 'Bathhouse', good: Good.Comfort, amount: 100, percent: 0, wood: 15, stone: 45, upkeepWood: 0, upkeepStone: 1.5, years: 2, waterSurplus: 25 },
+  { name: 'Seat of government', good: Good.Seat, amount: 0, percent: 0, wood: 60, stone: 90, upkeepWood: 3, upkeepStone: 3, years: 3 },
+  { name: 'Salt works', good: Good.Salt, amount: 25, percent: 0, wood: 22.5, stone: 7.5, upkeepWood: 1.5, upkeepStone: 0, years: 1, deposit: Deposit.Salt },
+  { name: 'Spice garden', good: Good.Spices, amount: 25, percent: 0, wood: 22.5, stone: 0, upkeepWood: 1.5, upkeepStone: 0, years: 1, deposit: Deposit.Spices },
+  { name: 'Gem mine', good: Good.Gems, amount: 25, percent: 0, wood: 22.5, stone: 15, upkeepWood: 1.5, upkeepStone: 0, years: 2, deposit: Deposit.Gems },
+  { name: 'Gold mine', good: Good.Gold, amount: 25, percent: 0, wood: 22.5, stone: 15, upkeepWood: 1.5, upkeepStone: 0, years: 2, deposit: Deposit.Gold },
+  { name: 'Marble quarry', good: Good.Marble, amount: 25, percent: 0, wood: 22.5, stone: 0, upkeepWood: 1.5, upkeepStone: 0, years: 1, deposit: Deposit.Marble },
+  { name: 'Horse ranch', good: Good.Horses, amount: 25, percent: 0, wood: 30, stone: 0, upkeepWood: 1.5, upkeepStone: 0, years: 1, deposit: Deposit.WildHorses },
   // Trade (trade.ts): merchants, a harbor with merchants of its own, and
   // food or water the hex can spare turned into goods.
   { name: 'Trade center', good: Good.Merchants, amount: 4, percent: 0, wood: 25, stone: 15, upkeepWood: 1, upkeepStone: 1, years: 2 },
@@ -142,8 +146,8 @@ export const SLOTS = 4;
 export const REPAIR_SHARE = 0.5;
 /** Years a building survives unpaid upkeep before it becomes a ruin. */
 export const UPKEEP_GRACE_YEARS = 2;
-/** Harvest without buildings ("foraging") per year: a base plus the hex's wood or stone (0..1) times this. */
-const FORAGE_BASE = 1;
+/** Harvest without buildings ("foraging") per year: a base, in woods (wood) and hills and mountains (stone) plus the hex's wood or stone (0..1) times this. */
+const FORAGE_BASE = 2;
 const FORAGE_PER_RESOURCE = 10;
 
 export const SlotState = { Empty: 0, Construction: 1, Standing: 2, Ruin: 3, Repair: 4 } as const;
@@ -188,8 +192,8 @@ export function createEconomy(cellCount: number): Economy {
 
 /** Wood or stone a hex yields per year by foraging alone. */
 export function forageYield(world: World, cell: number, good: number): number {
-  if (MATERIAL_TUNING.regional && !harvestsHere(world, cell, good)) return MATERIAL_TUNING.base;
-  return MATERIAL_TUNING.base + FORAGE_PER_RESOURCE * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
+  if (!harvestsHere(world, cell, good)) return FORAGE_BASE;
+  return FORAGE_BASE + FORAGE_PER_RESOURCE * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
 }
 
 /** Whether the hex's biome yields its wood (woods) or stone (hills, mountains) beyond foraging. */
@@ -246,10 +250,10 @@ export function buildingSupplyModifiers(eco: Economy, cell: number): SupplyModif
 /** How the hex's yearly wood or stone harvest comes about (Good.Wood or Good.Stone). */
 export function harvestTerms(world: World, eco: Economy, cell: number, good: number, factor = 1): Term[] {
   const resource = world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
-  const terms: Term[] = [
-    { label: 'Foraging', value: FORAGE_BASE },
-    { label: `${GOOD_NAMES[good]} ${resource.toFixed(2)} × ${FORAGE_PER_RESOURCE}`, value: FORAGE_PER_RESOURCE * resource },
-  ];
+  const terms: Term[] = [{ label: 'Foraging', value: FORAGE_BASE }];
+  if (harvestsHere(world, cell, good)) {
+    terms.push({ label: `${GOOD_NAMES[good]} ${resource.toFixed(2)} × ${FORAGE_PER_RESOURCE}`, value: FORAGE_PER_RESOURCE * resource });
+  }
   let total = forageYield(world, cell, good);
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     const b = BUILDINGS[eco.type[s]];

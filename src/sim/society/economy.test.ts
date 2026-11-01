@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sumTerms } from '../terms';
 import { yieldFactor } from './satisfaction';
-import { isWaterBiome } from '../world/biomes';
+import { Biome, isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import {
   BUILDINGS,
@@ -16,7 +16,7 @@ import {
   harvestTerms,
   withBuildings,
 } from './buildings';
-import { EXPANSION_GROUP, capacityAfterRepair, isSettlementTarget, runEconomy, updateCellSupply } from './economy';
+import { EXPANSION_GROUP, buildingFits, capacityAfterRepair, isSettlementTarget, runEconomy, updateCellSupply } from './economy';
 import { TICKS_PER_YEAR, createSimulation, hexSupplyTerms, stepSimulation, type Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, supplyTerms } from './supply';
 
@@ -196,4 +196,33 @@ test('buildings and stock are the same for the same seed', () => {
     return [Array.from(sim.economy.type), Array.from(sim.economy.state), Array.from(sim.economy.stock)];
   };
   assert.deepEqual(run(), run());
+});
+
+test('wood grows in woods and stone in hills and mountains; elsewhere only foraging, and no lumber camp or quarry', () => {
+  const sim = createSimulation(generateWorld({ seed: 3 }));
+  const first = (biome: number) => {
+    for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.biome[c] === biome) return c;
+    throw new Error(`no biome ${biome}`);
+  };
+  const plains = first(Biome.Plains);
+  const forest = first(Biome.Forest);
+  const mountains = first(Biome.Mountains);
+  const base = forageYield(sim.world, plains, Good.Wood);
+  assert.equal(forageYield(sim.world, plains, Good.Stone), base, 'plains forage the same of both');
+  assert.ok(forageYield(sim.world, forest, Good.Wood) > base * 3, 'woods give far more wood');
+  assert.equal(forageYield(sim.world, forest, Good.Stone), base);
+  assert.ok(forageYield(sim.world, mountains, Good.Stone) > base * 3, 'mountains give far more stone');
+  assert.deepEqual(
+    harvestTerms(sim.world, sim.economy, plains, Good.Wood).map((t) => t.label),
+    ['Foraging'],
+  );
+  assert.ok(Math.abs(sumTerms(harvestTerms(sim.world, sim.economy, forest, Good.Wood)) - forageYield(sim.world, forest, Good.Wood)) < 1e-4);
+  for (const name of ['Lumber camp', 'Sawmill']) {
+    assert.equal(buildingFits(sim, plains, typeOf(name)), false, `${name} on plains`);
+    assert.equal(buildingFits(sim, forest, typeOf(name)), true, `${name} in woods`);
+  }
+  for (const name of ['Quarry', 'Stonemason']) {
+    assert.equal(buildingFits(sim, plains, typeOf(name)), false, `${name} on plains`);
+    assert.equal(buildingFits(sim, mountains, typeOf(name)), true, `${name} in mountains`);
+  }
 });
