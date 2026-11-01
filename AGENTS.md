@@ -65,6 +65,7 @@ Rules for every agent and every change:
 ## Rules
 
 - Discuss every change to game logic (simulation rules, balancing, what the player sees happen) with the user before implementing it: describe the planned rule and its open details, and wait for the user's go. Pure bug fixes that restore agreed behavior, performance work and tooling don't need this.
+- Before starting new measures to change observed behavior (in simulations, prototypes or code), align them with the user: say what you observed, which measures you propose and with which numbers, and wait for the go. This also holds mid-task, e.g. when a simulation shows a problem.
 - Game logic changes go **design → simulation → implementation**:
   1. Design: agree on the rule with the user and write it into the requirement in `Design Documents/`.
   2. Simulation: try it with its numbers as parameters over many worlds (`tools/*Stats.ts`, 12 worlds at least) and show the user how it affects settlement growth, trade and diplomacy, compared with before, so the numbers can be tuned together.
