@@ -10,7 +10,9 @@
  * `taxMinus` = the "Taxes" term at 0 % and at TAX_MAX; traders per seat and
  * at the capital.
  */
-export const GOV_TUNING = { on: false, goodsTax: false, weakest: true, margin: 5, taxPlus: 5, taxMinus: 10, traders: 2, capitalTraders: 4 };
+export const GOV_TUNING = { on: false, goodsTax: false, weakest: true, margin: 5, taxPlus: 5, taxMinus: 10, traders: 2, capitalTraders: 4, queue: 1, minLoad: 5 };
+/** Economy variants for the simulation: money earned per adult, as a factor (1 = today). */
+export const ECON_TUNING = { money: 1 };
 
 /** The tax rate the people accept without complaint, and the highest there is. */
 export const TAX_NEUTRAL = 0.1;

@@ -34,7 +34,7 @@ import {
   seatField,
   yieldFactor,
 } from './satisfaction';
-import { GOV_TUNING } from './taxes';
+import { ECON_TUNING, GOV_TUNING } from './taxes';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
 import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
@@ -282,8 +282,10 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       if (st === SlotState.Construction || st === SlotState.Repair) {
         // Only people build; an empty hex's construction site waits.
         if (people > 0) economy.work[s] -= 1 / STEPS_PER_YEAR;
-        if (economy.work[s] > 1e-4 && s < c * SLOTS + GOV_SLOT) busy = true;
-        else {
+        if (economy.work[s] > 1e-4) {
+          // Government construction doesn't hold up the settlement's own.
+          if (s < c * SLOTS + GOV_SLOT) busy = true;
+        } else {
           economy.state[s] = SlotState.Standing;
           economy.work[s] = 0;
           economy.unpaid[s] = 0;
@@ -893,7 +895,7 @@ function hexTrade(sim: Simulation, cell: number): HexTrade {
   }
   return {
     money: economy.money[cell],
-    income: sim.cellAdults[cell] * MONEY_PER_ADULT,
+    income: sim.cellAdults[cell] * MONEY_PER_ADULT * ECON_TUNING.money,
     grain: economy.provisions[cell * 2],
     barrels: economy.provisions[cell * 2 + 1],
     merchants: trade.merchants[cell],

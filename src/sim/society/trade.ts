@@ -1,3 +1,4 @@
+import { ECON_TUNING } from './taxes';
 import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
@@ -252,7 +253,7 @@ export function updateTradeBuildings(sim: Simulation, cell: number): void {
 export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, yearEnd: boolean, stepsPerYear: number): boolean {
   const { economy, trade } = sim;
   const people = sim.cellPop[cell];
-  economy.money[cell] += (adults * MONEY_PER_ADULT) / stepsPerYear;
+  economy.money[cell] += (adults * MONEY_PER_ADULT * ECON_TUNING.money) / stepsPerYear;
   let changed = false;
   const base = cell * SUPPLY_KINDS;
   if (yearEnd) {

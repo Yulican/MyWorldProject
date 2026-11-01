@@ -7,7 +7,8 @@ import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
 import { BUILDINGS, GOV_SLOT, SLOTS, SlotState } from '../src/sim/society/buildings';
-import { GOV_TUNING } from '../src/sim/society/taxes';
+import { ECON_TUNING, GOV_TUNING } from '../src/sim/society/taxes';
+import { PRICE } from '../src/sim/society/trade';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
@@ -25,6 +26,11 @@ if (options.plus) GOV_TUNING.taxPlus = Number(options.plus);
 if (options.minus) GOV_TUNING.taxMinus = Number(options.minus);
 if (options.traders) GOV_TUNING.traders = Number(options.traders);
 if (options.capital) GOV_TUNING.capitalTraders = Number(options.capital);
+// queue: projects a seat can queue; minload: smallest load of a government trader; price: factor on all market prices; money: factor on the money adults earn.
+if (options.queue) GOV_TUNING.queue = Number(options.queue);
+if (options.minload) GOV_TUNING.minLoad = Number(options.minload);
+if (options.price) for (let g = 0; g < PRICE.length; g++) PRICE[g] *= Number(options.price);
+if (options.money) ECON_TUNING.money = Number(options.money);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -154,6 +160,10 @@ for (let seed = 1; seed <= worlds; seed++) {
       treasuries: sim.government.treasury.reduce((a, v) => a + v, 0),
       'gov trips running': sim.government.trips.length,
       'tax changes': text('the taxes'),
+      'gov trips sent': sim.government.sent,
+      'trader home: no need': sim.government.stayNoNeed,
+      'trader home: no seller': sim.government.stayNoSource,
+      'trader home: no money': sim.government.stayNoMoney,
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);
@@ -167,7 +177,7 @@ for (const [year, list] of rows) {
   const mean = (k: string) => list.reduce((s, r) => s + r[k], 0) / list.length;
   const range = (k: string) => `${Math.min(...list.map((r) => r[k])).toFixed(0)}..${Math.max(...list.map((r) => r[k])).toFixed(0)}`;
   console.log(`\nYear ${year}: mean [min..max]`);
-  for (const k of keys) console.log(`  ${k.padEnd(20)} ${mean(k).toFixed(1).padStart(9)}  [${range(k)}]`);
+  for (const k of keys) console.log(`  ${k.padEnd(26)} ${mean(k).toFixed(1).padStart(9)}  [${range(k)}]`);
 }
 
 if (rebels > 0) {
