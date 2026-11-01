@@ -71,26 +71,11 @@ Völker setzen viel daran, ihre Abkommen zu halten.
 
 ## 5. Handelsspanne (Schritt 2)
 
-Freigegeben: Spanne nur zwischen Völkern, die empfangende Siedlung zahlt,
-Geld über dem Marktpreis zählt bei Handelsabkommen als Gegenware.
-
-- **Spanne:** Wer an ein anderes Volk verkauft, bekommt den festen Preis
-  plus Spanne ? (Simulation: 0, 25 %, 50 %, 100 %). Im eigenen Volk bleibt
-  der feste Preis.
-- **Beide Richtungen** (Vorschlag): Bringt ein Händler Ware ins Ausland,
-  zahlt die Zielsiedlung die Spanne. Kauft er dort ein, zahlt seine
-  Heimatsiedlung die Spanne an die fremde Siedlung.
-- **Zahlung:** Die empfangende Siedlung zahlt. Ein Händler lädt für eine
-  fremde Siedlung nur, was sie bezahlen kann.
-- **Handelsabkommen:** Einseitige Abkommen werden mit Spanne bezahlt: Das
-  Geld über dem Marktpreis ist die Gegenleistung. Zweiseitige tauschen
-  Ware gegen Ware ohne Geld. Abkommens-Lieferungen gehen auch, wenn der
-  Abnehmer gerade nicht zahlen kann (Annahmepflicht); er schuldet den Rest
-  nicht weiter (Simulation: mit und ohne Spanne bei Abkommen).
-- **Vertrauen:** Der Bonus „Delivers goods we lack“ bleibt für einseitige
-  Abkommen (Vorschlag).
-- **Kennzahlen:** Händlerfahrten ins Ausland, gezahlte Spanne, Geld der
-  Völker, Abkommen, Wachstum.
+- Zwischen Völkern (nicht im eigenen Volk) verkaufen Händler über dem
+  festen Preis: Spanne ? (Vorschlag +50 %).
+- Die empfangende Siedlung zahlt. Kann sie nicht zahlen, wird nur
+  geliefert, was sie bezahlen kann.
+- Geld über dem Marktpreis zählt bei Handelsabkommen als Gegenware.
 
 ## 6. Zwischenhandel (Schritt 3)
 
