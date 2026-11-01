@@ -95,9 +95,10 @@ export type TradeLeg = {
 /**
  * Simulation-phase tuning (Requirement Regionale Rohstoffe): `otherHub` lets
  * another settlement with the goods take over a delivery the hub couldn't
- * make; deliveries are judged over `periodYears` years.
+ * make; deliveries are judged over `periodYears` years; the amount is
+ * halved after `halveAfter` short periods in a row.
  */
-export const AGREEMENT_TUNING = { otherHub: false, periodYears: 1 };
+export const AGREEMENT_TUNING = { otherHub: false, periodYears: 1, halveAfter: 1 };
 
 /** What a leg still owes in its running period: the agreed amount for every year begun, less what set out. */
 export function legOwed(l: TradeLeg, tick: number): number {
@@ -577,13 +578,13 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         if (short && !ready) {
           // The supplier couldn't: another settlement with the goods takes
           // over, or the amount is halved (no hard feelings).
+          l.behind++;
           const other = AGREEMENT_TUNING.otherHub ? exportHub(sim, l.supplier, l.buyer, l.good, l.amount) : -1;
           if (other >= 0) l.hub = other;
-          else {
+          else if (l.behind >= AGREEMENT_TUNING.halveAfter) {
             l.amount *= 0.5;
             shrunk = true;
           }
-          l.behind++;
         } else if (!short) l.behind = 0;
         l.years++;
         l.delivered = 0;
