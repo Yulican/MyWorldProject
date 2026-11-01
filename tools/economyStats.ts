@@ -36,6 +36,8 @@ if (options.seattax) GOV_TUNING.seatTax = Number(options.seattax);
 if (options.seatmargin) GOV_TUNING.seatMargin = Number(options.seatmargin);
 if (options.seatcost) GOV_TUNING.seatCost = Number(options.seatcost);
 if (options.seatupkeep) GOV_TUNING.seatUpkeep = Number(options.seatupkeep);
+// secure: years of upkeep the treasury must cover before the government takes on a project (0 = no check).
+if (options.secure) GOV_TUNING.secureYears = Number(options.secure);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;

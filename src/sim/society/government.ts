@@ -125,6 +125,25 @@ function upkeepOf(type: number, m: number): number {
   return (m === 0 ? b.upkeepWood : b.upkeepStone) * (type === SEAT_TYPE ? GOV_TUNING.seatUpkeep : 1);
 }
 
+/** Yearly upkeep of a government building in money (at market prices). */
+const upkeepGold = (type: number) => upkeepOf(type, 0) * PRICE[0] + upkeepOf(type, 1) * PRICE[1];
+
+/** Yearly upkeep in money of a seat's government buildings and queued projects. */
+function districtUpkeep(sim: Simulation, seat: number): number {
+  const { economy } = sim;
+  const gov = sim.government;
+  let sum = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
+    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+      const st = economy.state[s];
+      if (st === SlotState.Standing || st === SlotState.Construction) sum += upkeepGold(economy.type[s]);
+    }
+  }
+  for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) sum += upkeepGold(gov.projectType[i]);
+  return sum;
+}
+
 const goldCost = (type: number) => BUILDINGS[type].wood * PRICE[0] + BUILDINGS[type].stone * PRICE[1];
 
 /** A chronicle entry at a hex (simulation.ts: record). */
@@ -333,12 +352,15 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   let bestSlot = -1;
   let bestType = -1;
   let bestScore = 0;
+  // Only what the treasury can keep up for GOV_TUNING.secureYears (upkeep secured).
+  const upkeep = districtUpkeep(sim, seat);
+  const secured = (t: number) => gov.treasury[seat] >= GOV_TUNING.secureYears * (upkeep + upkeepGold(t));
   for (let c = 0; c < n; c++) {
     if (gov.district[c] !== seat || queued(gov, seat, c)) continue;
     const slot = freeGovSlot(sim, c);
     if (slot < 0) continue;
     // 1. A planned seat of government.
-    if (sim.seatSite[c] && buildingFits(sim, c, SEAT_TYPE)) {
+    if (sim.seatSite[c] && buildingFits(sim, c, SEAT_TYPE) && secured(SEAT_TYPE)) {
       const score = 1000;
       if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, SEAT_TYPE, score];
       continue;
@@ -348,7 +370,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
     // 2. Comfort where a settlement threatens to break away.
     if (sim.satisfaction[c] < GOV_TUNING.margin) {
       for (const t of COMFORT_TYPES) {
-        if (!buildingFits(sim, c, t)) continue;
+        if (!buildingFits(sim, c, t) || !secured(t)) continue;
         const score = 100 + (GOV_TUNING.margin - sim.satisfaction[c]) * people * 0.01;
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
         break;
@@ -357,7 +379,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
     // 3. Growth where it is crowded (more people pay more taxes).
     if (people >= 0.8 * sim.cellCapacity[c]) {
       for (const t of GROWTH_TYPES) {
-        if (!buildingFits(sim, c, t)) continue;
+        if (!buildingFits(sim, c, t) || !secured(t)) continue;
         const gain = capacityWith(sim, c, t, -1) - sim.cellCapacity[c];
         if (gain < 1) continue;
         const score = gain / Math.max(1, goldCost(t)) * 10;
