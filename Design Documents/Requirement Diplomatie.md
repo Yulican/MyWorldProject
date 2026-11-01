@@ -129,24 +129,34 @@ Wege und Verluste.
 - **Anlass:** Ein Volk verlangt in Summe eine Ware, die es selbst nicht
   genug hat, und ein bekanntes Volk hat sie in Summe übrig. Beide Summen
   gibt es schon pro Volk (Handelsliste).
-- **Inhalt:** A liefert jährlich X Einheiten der Ware an B, B liefert dafür
-  Waren, die A verlangt und B übrig hat, zum gleichen Wert in festen
-  Preisen. Fehlt so eine Ware, zahlt B in Geld.
-- **Bedingungen:** Vertrauen beider Seiten ≥ 45 (Startwert). Offene
-  Grenzen sind nicht nötig: Die Lieferungen dürfen durch das Land des
-  Partners, gegen den halben Zoll.
+- **Inhalt:** A liefert jährlich X Einheiten der Ware an B. Zuerst wird
+  eine Gegenware gesucht, die B übrig hat und A verlangt:
+  - **Zweiseitig:** Gibt es eine, liefert B sie jährlich an A. Beide
+    Lieferungen haben den gleichen Wert in festen Preisen und sind durch
+    Bedarf und Überschuss beider Seiten begrenzt. Jede Richtung hat ihren
+    eigenen Ausfuhrort.
+  - **Einseitig:** Sonst liefert nur A. B bezahlt die Lieferungen wie im
+    internen Handel in Geld.
+- **Bedingungen:** Vertrauen beider Seiten ≥ 40 für ein zweiseitiges, ≥ 45
+  für ein einseitiges Abkommen (Startwerte). Offene Grenzen sind nicht
+  nötig: Die Lieferungen dürfen durch das Land des Partners, gegen den
+  halben Zoll.
 - **Lieferung:** Händler der liefernden Seite bringen die Waren von den
   Siedlungen mit dem größten Überschuss zu denen mit dem größten Bedarf.
   Diese Fahrten haben Vorrang vor freien Fahrten.
 - **Laufzeit:** 10 Jahre. Danach wird neu verhandelt.
 - **Bruch:** Liefert eine Seite 2 Jahre in Folge weniger als die Hälfte,
-  endet das Abkommen. Die andere Seite verliert Vertrauen (wie beim
-  Schließen der Grenze, −20, klingt in 10 Jahren ab).
+  endet das ganze Abkommen. Nur die Seite, die zu wenig bekam, verliert
+  Vertrauen in die andere (wie beim Schließen der Grenze, −20, klingt in
+  10 Jahren ab).
 - Ein Volkspaar hat höchstens ein Handelsabkommen pro Ware.
 
 **Vertrauen**
 - Jedes Abkommen gibt beim Abschluss einmalig +10 (klingt in 10 Jahren ab)
   und +5, solange es besteht (siehe 1).
+- Bei einem einseitigen Handelsabkommen vertraut der Empfänger dem Geber
+  zusätzlich +5, solange es besteht („Delivers goods we lack“). Ein
+  zweiseitiges gibt keinen Zusatz.
 - Grenzen schließen bricht alle Abkommen mit diesem Volk ab: Freihandel,
   Handelsabkommen und Migrationsabkommen.
 
@@ -236,6 +246,15 @@ Umgesetzt mit den Startwerten. Bei der Umsetzung entschieden bzw. ergänzt:
     Sein Bedarf schwankt; ohne Bedarf kann nichts geliefert werden.
   - Nach Bruch oder Ablauf ruht dieselbe Ware 10 Jahre.
   - Bezahlt wird wie im internen Handel zu festen Preisen.
+  - **Gegenware:** Fast alle Völker haben Holz und Stein übrig und es fehlen
+    ihnen dieselben Luxusgüter. Würde A die Gegenware in Summe fehlen
+    müssen, gäbe es so gut wie nie eine. Deshalb reicht es, dass
+    Siedlungen von A sie verlangen. Ein Bruch zählt dann, solange A sie
+    noch irgendwo verlangt.
+  - Probiert werden die 2 wertvollsten Gegenwaren. Erreichen Händler von B
+    für keine einen Abnehmer, wird das Abkommen einseitig.
+  - Nach Ablauf werden beide Mengen neu verhandelt. Fehlt eine Seite, endet
+    das Abkommen.
 - **Migrationsabkommen:** endet, wenn das Vertrauen einer Seite unter 40
   fällt (vorher nicht festgelegt).
 - **Händler und Zoll:** Händler zahlen den Zoll für Hin- und Rückweg beim
@@ -258,11 +277,18 @@ Kennzahlen aus 12 Testwelten (`npx tsx tools/diplomacyStats.ts`), nach
 | Volkspaare, die sich kennen | 17 % |
 | Offene Grenzen / geschlossene | 1,0 / 0,3 |
 | Freihandel / Migrationsabkommen | 0,1 / 0,9 |
-| Handelsabkommen laufend (geschlossen, gebrochen) | 0,4 (1,8; 0,2) |
-| Vertrauen / Gefahr im Mittel | 40 / 23 |
-| Ins Ausland geliefert / Zoll | 112 Einheiten / 24 Geld |
+| Handelsabkommen laufend (geschlossen einseitig / zweiseitig, gebrochen) | 0,4 (1,8 / 0,1; 0,4) |
+| Vertrauen / Gefahr im Mittel | 38 / 23 |
+| Ins Ausland geliefert / Zoll | 97 Einheiten / 45 Geld |
 | Diplomatische Chronik-Einträge | 0,03 pro Spieljahr |
 | Rechenzeit unter Node | 4,3 ms pro Jahr (ohne Diplomatie 3,4 ms, also 1,27-fach) |
+
+Zweiseitige Handelsabkommen sind selten, weil die Völker meist nur Holz und
+Stein übrig haben, die niemand braucht. Nach 500 Jahren (mehr Kontakte):
+34 einseitige und 7 zweiseitige Abkommen je Welt geschlossen, 29 gebrochen,
+10 ausgelaufen. Ohne Gegenware waren es 60 geschlossen und 46 gebrochen.
+Auch wenn sich alle Völker kennen (Szenario `diplomacy`), findet sich bei
+54 von 59 Versuchen keine Gegenware.
 
 Geprüft und verworfen (der Nutzer bleibt nach dem Test bei 10): Mit 20 statt
 10 Reisekosten Sichtweite gibt es etwa doppelt so viel Diplomatie:

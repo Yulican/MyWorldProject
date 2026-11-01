@@ -289,7 +289,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   }
   // An export hub asks its people for what its trade agreements still owe;
   // that stock is its surplus for the buyers.
-  for (const a of sim.diplomacy.agreements) {
+  for (const a of sim.diplomacy.legs) {
     if (a.hub !== cell) continue;
     const owed = Math.max(0, a.amount - a.delivered);
     const stock = stockOf(economy, cell, a.good);
@@ -631,7 +631,7 @@ let dealOwed = false;
 
 /** Whether `supplier` still owes `buyer` deliveries this agreement year. */
 function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean {
-  for (const a of sim.diplomacy.agreements) if (a.supplier === supplier && a.buyer === buyer && a.delivered < a.amount) return true;
+  for (const a of sim.diplomacy.legs) if (a.supplier === supplier && a.buyer === buyer && a.delivered < a.amount) return true;
   return false;
 }
 

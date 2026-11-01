@@ -4,8 +4,10 @@ import { generateWorld } from '../world/generate';
 import {
   CLOSED_TRUST,
   SIGHT_RANGE,
+  AGREEMENT_TRUST,
   EVENT_TRUST,
   GRACE_YEARS,
+  LACK_TRUST,
   MIGRATION_LOSS,
   OPEN_TRUST,
   PAIRS,
@@ -15,7 +17,9 @@ import {
   closeBorders,
   dangerTerms,
   dangerValue,
+  exchangeAmounts,
   mayPass,
+  type TradeLeg,
   nearness,
   noteEmigration,
   payToll,
@@ -242,4 +246,70 @@ test('the simulation uses the same trust and danger the diplomacy panel explains
     }
   }
   assert.ok(pairs > 0);
+});
+
+const leg = (supplier: number, buyer: number, good: number, amount: number, tick: number): TradeLeg => ({
+  supplier,
+  buyer,
+  good,
+  amount,
+  delivered: 0,
+  yearStart: tick,
+  shortYears: 0,
+  hub: -1,
+});
+
+test('a one-sided trade agreement makes the receiver trust the giver more; a two-sided one both the same', () => {
+  const { sim, a, b } = metWorld();
+  const dip = sim.diplomacy;
+  const label = (x: number, y: number, l: string) => trustTerms(sim, x, y).find((t) => t.label.startsWith(l))?.value ?? 0;
+  dip.agreements = [{ a, b, since: sim.tick, legs: [leg(b, a, TradeGood.Grain, 10, sim.tick)] }];
+  assert.equal(label(a, b, 'Trade agreements'), AGREEMENT_TRUST);
+  assert.equal(label(b, a, 'Trade agreements'), AGREEMENT_TRUST);
+  assert.equal(label(a, b, 'Delivers goods we lack'), LACK_TRUST, 'the receiver');
+  assert.equal(label(b, a, 'Delivers goods we lack'), 0, 'not the giver');
+  assert.ok(Math.abs(trustValue(sim, a, b) - Math.min(100, sumTerms(trustTerms(sim, a, b)))) < 1e-4);
+
+  dip.agreements = [{ a, b, since: sim.tick, legs: [leg(b, a, TradeGood.Grain, 10, sim.tick), leg(a, b, TradeGood.Water, 10, sim.tick)] }];
+  assert.equal(label(a, b, 'Delivers goods we lack'), 0);
+  assert.equal(label(b, a, 'Delivers goods we lack'), 0);
+  assert.equal(label(a, b, 'Trade agreements'), AGREEMENT_TRUST);
+});
+
+test('two-sided trade agreements: legs of equal value, limited by lack and spare', () => {
+  const goods = TRADE_GOODS;
+  const want = new Float32Array(3 * goods);
+  const spare = new Float32Array(3 * goods);
+  const salt = TradeGood.Luxury;
+  // 1 lacks 30 grain, 2 spares 40; 2 asks for 3 salt, 1 spares 6.
+  want[1 * goods + TradeGood.Grain] = 30;
+  spare[2 * goods + TradeGood.Grain] = 40;
+  want[2 * goods + salt] = 3;
+  spare[1 * goods + salt] = 6;
+  const [grain, back] = exchangeAmounts(want, spare, 2, 1, TradeGood.Grain, salt)!;
+  assert.equal(back, 3, 'as much salt as 2 asks for');
+  assert.equal(grain * PRICE[TradeGood.Grain], back * PRICE[salt], 'equal value');
+  // Too little of the counter good for a worthwhile leg.
+  want[2 * goods + salt] = 1;
+  assert.equal(exchangeAmounts(want, spare, 2, 1, TradeGood.Grain, salt), null);
+});
+
+test('a two-sided agreement breaks when one leg delivers too little; only its receiver holds it against the other', () => {
+  const { sim, a, b } = metWorld();
+  const dip = sim.diplomacy;
+  // Trust high enough to keep it; b still asks for water.
+  dip.peace[pair(a, b)] = dip.peace[pair(b, a)] = 40;
+  sim.trade.civWant[b * TRADE_GOODS + TradeGood.Water] = 10;
+  const short = leg(a, b, TradeGood.Water, 10, sim.tick - TICKS_PER_YEAR);
+  short.shortYears = 1;
+  const full = leg(b, a, TradeGood.Grain, 10, sim.tick - TICKS_PER_YEAR);
+  full.delivered = 10;
+  dip.agreements = [{ a, b, since: sim.tick - TICKS_PER_YEAR, legs: [full, short] }];
+  const entries: string[] = [];
+  updateDiplomacy(sim, sim.world.owner, (text) => entries.push(text));
+  assert.ok(entries.some((e) => e.includes('broke: too little water arrived')), entries.join(' | '));
+  assert.ok(!dip.agreements.some((t) => t.legs.includes(short)));
+  const broke = (x: number, y: number) => trustTerms(sim, x, y).some((t) => t.label === 'Broke a trade agreement with us');
+  assert.ok(broke(b, a), 'b got too little water from a');
+  assert.ok(!broke(a, b), 'a got its grain');
 });

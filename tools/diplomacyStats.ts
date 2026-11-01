@@ -45,7 +45,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       }
     }
     const text = (s: string) => sim.chronicle.filter((e) => e.text.includes(s)).length;
-    const diplomatic = ['met.', 'opened their borders', 'closed their borders', 'free trade', 'settle with each other', 'migration agreement', 'agreed to deliver', 'trade agreement for'];
+    const diplomatic = ['met.', 'opened their borders', 'closed their borders', 'free trade', 'settle with each other', 'migration agreement', 'agreed to deliver', 'agreed to trade', 'trade agreement for'];
     const entries = sim.chronicle.filter((e) => diplomatic.some((s) => e.text.includes(s))).length;
     let abroad = 0;
     for (const v of sim.trade.abroad) abroad += v;
@@ -60,8 +60,11 @@ for (let seed = 1; seed <= worlds; seed++) {
       freeTrade,
       migration,
       tradeAgreements: dip.agreements.length,
-      agreementsMade: text('agreed to deliver'),
+      twoSidedNow: dip.agreements.filter((t) => t.legs.length === 2).length,
+      oneSidedMade: text('agreed to deliver'),
+      twoSidedMade: text('agreed to trade'),
       agreementsBroken: text('broke: too little'),
+      agreementsRanOut: text('ran out.'),
       meanTrust: known ? trust / known : 0,
       meanDanger: known ? danger / known : 0,
       deliveredAbroad: abroad,
