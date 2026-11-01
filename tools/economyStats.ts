@@ -1,7 +1,7 @@
 // Settlement growth, trade, diplomacy and uprisings over many worlds, to
 // calibrate the economy (see "Design Documents/Requirement Regionale
 // Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0] [slots=fixed|people|cost] [perPeople=50] [costStep=1.5] [tradeUpkeep=0] [bulk=0] [tradePost=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0] [slots=fixed|people|cost] [perPeople=50] [costStep=1.5] [tradeUpkeep=0] [bulk=0] [tradePost=0] [seatsUseHeld=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
@@ -25,10 +25,11 @@ if (slotTuning) {
   if (options.costStep) slotTuning.costStep = Number(options.costStep);
   slotTuning.tradeUpkeep = options.tradeUpkeep === '1';
 }
-const upkeepTuning = (tradeModule as unknown as { UPKEEP_TUNING?: { bulk: boolean; tradePost: boolean } }).UPKEEP_TUNING;
+const upkeepTuning = (tradeModule as unknown as { UPKEEP_TUNING?: { bulk: boolean; tradePost: boolean; seatsUseHeld: boolean } }).UPKEEP_TUNING;
 if (upkeepTuning) {
   upkeepTuning.bulk = options.bulk === '1';
   upkeepTuning.tradePost = options.tradePost === '1';
+  upkeepTuning.seatsUseHeld = options.seatsUseHeld === '1';
 }
 
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
@@ -78,6 +79,9 @@ for (let seed = 1; seed <= worlds; seed++) {
     let stoneStock = 0;
     let luxuryShops = 0;
     let luxuryCovered = 0;
+    let seats = 0;
+    let travel = 0;
+    let farFromSeat = 0;
     for (let c = 0; c < sim.world.cellCount; c++) {
       const pop = sim.cellPop[c];
       if (pop > 0) {
@@ -86,6 +90,8 @@ for (let seed = 1; seed <= worlds; seed++) {
         woodStock += sim.economy.stock[c * 2];
         stoneStock += sim.economy.stock[c * 2 + 1];
         if (sim.economy.luxuryCovered[c]) luxuryCovered++;
+        travel += Math.min(sim.seatCost[c], 5);
+        if (!(sim.seatCost[c] <= 2)) farFromSeat++;
       }
       if (pop >= 50) towns++;
       if (pop >= 150) cities++;
@@ -93,6 +99,7 @@ for (let seed = 1; seed <= worlds; seed++) {
         if (sim.economy.state[s] === SlotState.Standing) standing++;
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].deposit !== undefined) luxuryShops++;
         if (sim.economy.state[s] === SlotState.Ruin) ruins++;
+        if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') seats++;
       }
     }
     const text = (s: string) => sim.chronicle.filter((e) => e.text.includes(s)).length;
@@ -113,6 +120,10 @@ for (let seed = 1; seed <= worlds; seed++) {
       'stone stock/settlement': stoneStock / Math.max(1, settlements),
       luxuryWorkshops: luxuryShops,
       'luxury covered %': (100 * luxuryCovered) / Math.max(1, settlements),
+      seats,
+      'settlements/seat': settlements / Math.max(1, seats + sim.civs.filter(Boolean).length),
+      'mean travel to seat': travel / Math.max(1, settlements),
+      'far from seat (>2) %': (100 * farFromSeat) / Math.max(1, settlements),
       woodTraded: sim.trade.delivered[0],
       stoneTraded: sim.trade.delivered[1],
       allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0),

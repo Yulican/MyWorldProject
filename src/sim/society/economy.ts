@@ -34,7 +34,7 @@ import {
 } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
-import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, UPKEEP_TUNING, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -781,7 +781,11 @@ function seatUpkeepCovered(sim: Simulation, cell: number): boolean {
   const spare = sim.trade.civSpare;
   const i = civ * TRADE_GOODS;
   if (i + TRADE_GOODS > spare.length) return false;
-  return spare[i] >= -ownWood * SEAT_REALM_YEARS && spare[i + 1] >= -ownStone * SEAT_REALM_YEARS;
+  // Seats come first: reserves held for other upkeep count (simulation phase).
+  const held = UPKEEP_TUNING.seatsUseHeld ? sim.trade.civHeld : null;
+  const heldWood = held ? held[civ * MATERIAL_COUNT] : 0;
+  const heldStone = held ? held[civ * MATERIAL_COUNT + 1] : 0;
+  return spare[i] + heldWood >= -ownWood * SEAT_REALM_YEARS && spare[i + 1] + heldStone >= -ownStone * SEAT_REALM_YEARS;
 }
 
 /** Years of a seat's missing upkeep its people must spare before the realm takes it on. */

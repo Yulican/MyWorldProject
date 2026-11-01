@@ -63,9 +63,11 @@ const RESERVE_YEARS = 2;
  * Simulation phase (uprisings): `bulk` = a settlement whose upkeep its own
  * harvest doesn't cover keeps BULK_YEARS of the shortfall and orders when it
  * falls below half of that, at least half a merchant's load, first;
- * `tradePost` = such a settlement without merchants builds a trade center.
+ * `tradePost` = such a settlement without merchants builds a trade center;
+ * `seatsUseHeld` = a planned seat of government counts those held reserves
+ * as spare (seats come first).
  */
-export const UPKEEP_TUNING = { bulk: false, tradePost: false };
+export const UPKEEP_TUNING = { bulk: false, tradePost: false, seatsUseHeld: false };
 const BULK_YEARS = 10;
 const RESERVE_MIN = 10;
 /** Luxury goods a settlement keeps (and asks for): this many years of its need. */
@@ -103,6 +105,9 @@ export type Trade = {
   transitFor: Uint8Array;
   /** Goods sold abroad in transit so far (statistics). */
   transit: number;
+  /** Per cell and material: wood and stone held as an upkeep reserve (bulk), not counted as spare. Per people: their total (civHeld). */
+  held: Float32Array;
+  civHeld: Float32Array;
   /** Per people: bit per good it still owes under trade agreements (see owedGoods), valid for tick `owedTick`. */
   owedMask: Uint16Array;
   owedTick: number;
@@ -167,6 +172,8 @@ export function createTrade(seed: number, cellCount: number): Trade {
     incoming: new Float32Array(cellCount * TRADE_GOODS),
     transitFor: new Uint8Array(cellCount * TRADE_GOODS),
     transit: 0,
+    held: new Float32Array(cellCount * MATERIAL_COUNT),
+    civHeld: new Float32Array(0),
     owedMask: new Uint16Array(PAIRS),
     owedTick: -1,
     hubMark: new Uint8Array(cellCount),
@@ -297,9 +304,11 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
       const order = have < keep / 2 ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
       trade.want[t + m] = Math.max(0, goal - stock - trade.incoming[t + m]) + order;
       trade.surplus[t + m] = Math.max(0, stock - goal - Math.max(reserve, keep));
+      trade.held[cell * MATERIAL_COUNT + m] = Math.max(0, Math.min(stock - goal - reserve, keep - reserve));
       if (order > 0) upkeepFocus |= 1 << m;
       continue;
     }
+    trade.held[cell * MATERIAL_COUNT + m] = 0;
     const shortfall = yearly * RESERVE_YEARS;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
@@ -390,10 +399,12 @@ export function sumCivWants(sim: Simulation, owner: Uint8Array): void {
     trade.civWant = new Float32Array(size);
     trade.civSpare = new Float32Array(size);
     trade.civMake = new Float32Array(sim.civSlots * 2);
+    trade.civHeld = new Float32Array(sim.civSlots * MATERIAL_COUNT);
   } else {
     trade.civWant.fill(0);
     trade.civSpare.fill(0);
     trade.civMake.fill(0);
+    trade.civHeld.fill(0);
   }
   for (let c = 0; c < owner.length; c++) {
     const id = owner[c];
@@ -402,6 +413,7 @@ export function sumCivWants(sim: Simulation, owner: Uint8Array): void {
       trade.civWant[id * TRADE_GOODS + g] += trade.want[c * TRADE_GOODS + g];
       trade.civSpare[id * TRADE_GOODS + g] += trade.surplus[c * TRADE_GOODS + g];
     }
+    for (let m = 0; m < MATERIAL_COUNT; m++) trade.civHeld[id * MATERIAL_COUNT + m] += trade.held[c * MATERIAL_COUNT + m];
     if (!sim.hasBuildings[c]) continue;
     for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
       const st = economy.state[s];
