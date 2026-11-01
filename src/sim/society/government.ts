@@ -1,7 +1,7 @@
 import { hexDistance } from '../hex';
-import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState } from './buildings';
+import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, usableSlots } from './economy';
-import { satisfactionTarget, seatsOf } from './satisfaction';
+import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { ECON_TUNING, GOV_TUNING, TAX_MAX, TAX_NEUTRAL, goodsRateFor, goodsTaxValue, taxValue } from './taxes';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, upkeepOf as settlementUpkeep } from './trade';
@@ -273,11 +273,18 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   const goodsNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
   const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed || GOV_TUNING.potentialIncome ? n * MATERIAL_COUNT : 0);
   const moneyBase = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
+  // The district's yearly wood and stone to spare in money: harvest less the settlements' own upkeep (not their stock).
+  const goodsFlow = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
   if (GOV_TUNING.potentialIncome) {
     for (let c = 0; c < n; c++) {
       const s = gov.district[c];
       if (s < 0) continue;
       moneyBase[s] += sim.cellAdults[c] * MONEY_PER_ADULT * ECON_TUNING.money; // the money tax base at 100 %
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        const good = m === 0 ? Good.Wood : Good.Stone;
+        const harvest = withBuildings(economy, c, good, forageYield(world, c, good)) * yieldFactor(sim.satisfaction[c]);
+        goodsFlow[s] += Math.max(0, harvest - settlementUpkeep(economy, c, m)) * PRICE[m];
+      }
       for (let m = 0; m < MATERIAL_COUNT; m++) goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
     }
   }
@@ -329,7 +336,8 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       const moneyOnly = rateFor(room - goodsTaxValue(0)) * moneyBase[s];
       let goodsValue = 0;
       for (let m = 0; m < MATERIAL_COUNT; m++) goodsValue += goodsSpare[s * MATERIAL_COUNT + m] * PRICE[m];
-      const goodsOnly = (GOV_TUNING.goodsByNeed ? Math.min(TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus)) : 0) * goodsValue;
+      // No more than the yearly flow: taxing the stockpile is no lasting income.
+      const goodsOnly = Math.min(goodsFlow[s], (GOV_TUNING.goodsByNeed ? Math.min(TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus)) : 0) * goodsValue);
       gov.potential[s] = Math.max(moneyOnly, goodsOnly);
     }
     if (Math.abs(rate - gov.rate[s]) >= 0.1) {
