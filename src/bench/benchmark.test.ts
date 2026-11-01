@@ -94,3 +94,16 @@ test('the trade scenario opens trade everywhere and merchants set out', async ()
   assert.ok(sim.trade.trips > before, 'merchants set out');
   assert.equal(SCENARIOS.trade.trade, true);
 });
+
+test('the diplomacy scenario opens every border and merchants travel abroad', async () => {
+  const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { openDiplomacy } = await import('./openDiplomacy');
+  const { PAIRS } = await import('../sim/society/diplomacy');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  openDiplomacy(sim);
+  const ids = livingCivilizations(sim).map((c) => c.id);
+  assert.ok(ids.length > 1);
+  for (const a of ids) for (const b of ids) if (a !== b) assert.equal(sim.world.openBorders[a * PAIRS + b], 1);
+  assert.equal(SCENARIOS.diplomacy.diplomacy, true);
+});

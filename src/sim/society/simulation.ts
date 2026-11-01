@@ -44,7 +44,18 @@ import {
   seatsOf,
   updateSatisfaction,
 } from './satisfaction';
-import { WORKSHOP_OF, buildSupplyRoad, advanceTrips, createTrade, sumCivWants, type Trade } from './trade';
+import { WORKSHOP_OF, buildSupplyRoad, advanceTrips, createTrade, sumCivWants, type Trade, PRICE, stockOf, addStock } from './trade';
+import {
+  GRACE_YEARS,
+  createDiplomacy,
+  mayPass,
+  noteEmigration,
+  payToll,
+  resetCivRelations,
+  tollValue,
+  updateDiplomacy,
+  type Diplomacy,
+} from './diplomacy';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
@@ -63,6 +74,9 @@ const REFRESH_TICKS = 13;
 const SEATS_WEEK = 6;
 const CAPTURE_WEEK = 19;
 const SUPPLY_ROADS_WEEK = 32;
+const DIPLOMACY_WEEK = 45;
+/** Settlers cross at most this many hexes of land opened to them to reach free land beyond it. */
+const CROSSING_REACH = 4;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
 export const BELIEVER_FAITH = 0.5;
 const START_TRIBE_SIZE = 20;
@@ -156,6 +170,10 @@ export type Simulation = {
   frontierBlocked: Uint16Array;
   /** Merchants on their way and what settlements ask for and spare (see trade.ts). */
   trade: Trade;
+  /** Relations between the peoples: trust, danger, borders, agreements (see diplomacy.ts). */
+  diplomacy: Diplomacy;
+  /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
+  bordersSeen: number;
   /** Inhabitants of 16 and older per hex, counted at every refresh (they earn money). */
   cellAdults: Int32Array;
   /** Notable events, oldest first. */
@@ -199,6 +217,8 @@ export function createSimulation(world: World): Simulation {
     seatRetry: new Uint16Array(n),
     frontierBlocked: new Uint16Array(n),
     trade: createTrade(world.seed, n),
+    diplomacy: createDiplomacy(n),
+    bordersSeen: 0,
     cellAdults: new Int32Array(n),
     chronicle: [],
     migrations: { groups: 0, abroad: 0 },
@@ -255,6 +275,7 @@ export function stepSimulation(sim: Simulation): void {
   if (weekOfYear === SEATS_WEEK) planSeats(sim, sim.world.owner);
   else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, sim.world.owner);
   else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
+  else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
   if (yearEnd) closeYear(sim);
 }
 
@@ -453,12 +474,102 @@ function expandSettlements(sim: Simulation): void {
       if (best < 0) {
         // Held back by the stop: its people first extend their reach (seat, roads).
         if (held) sim.frontierBlocked[source] = Math.floor(sim.tick / TICKS_PER_YEAR) + 1;
+        else settleBeyond(sim, source, civ);
         continue;
       }
       moveGroup(sim, source, world.neighbors[source * DIRECTION_COUNT + best], civ.id, EXPANSION_GROUP);
       addRoad(world, source, best);
     }
   }
+}
+
+/** Breadth-first predecessors for settleBeyond, all -2 between calls. */
+let crossPrev = new Int32Array(0);
+
+/**
+ * A settlement without free land next door sends its settlers across land
+ * whose people opened their borders to them (at most CROSSING_REACH hexes,
+ * no other people's land) to the best free hex beyond it, paying toll to
+ * every foreign settlement on the way (goods it asks for first, then money
+ * of the source). A road is built along the way. Returns whether they went.
+ */
+function settleBeyond(sim: Simulation, source: number, civ: Civilization): boolean {
+  const { world } = sim;
+  const dip = sim.diplomacy;
+  const owner = world.owner;
+  const n = world.cellCount;
+  if (crossPrev.length !== n) crossPrev = new Int32Array(n).fill(-2);
+  const prev = crossPrev;
+  const touched = [source];
+  prev[source] = -1;
+  let frontier = [source];
+  let best = -1;
+  let bestScore = -Infinity;
+  for (let step = 1; step <= CROSSING_REACH && frontier.length > 0; step++) {
+    const next: number[] = [];
+    for (const c of frontier) {
+      for (let d = 0; d < DIRECTION_COUNT; d++) {
+        const nb = world.neighbors[c * DIRECTION_COUNT + d];
+        if (nb < 0 || prev[nb] !== -2 || isWaterBiome(world.biome[nb])) continue;
+        const o = owner[nb];
+        if (o === 0 && sim.cellPop[nb] === 0) {
+          // Free land: only beyond foreign land (free land next door is the normal expansion).
+          if (c === source || !isSettlementTarget(sim, nb)) continue;
+          prev[nb] = c;
+          touched.push(nb);
+          const score = capacityAfterRepair(sim, nb) / GOOD_LAND_PEOPLE + terrainAppeal(world, civ.culture, nb) - TRAVEL_EFFORT * step;
+          if (score > bestScore) {
+            bestScore = score;
+            best = nb;
+          }
+          continue;
+        }
+        if (o === civ.id || o === 0 || !mayPass(dip, civ.id, o)) continue;
+        prev[nb] = c;
+        touched.push(nb);
+        next.push(nb);
+      }
+    }
+    frontier = next;
+  }
+  let went = false;
+  if (best >= 0) {
+    // Toll to every foreign settlement on the way, from the source's stock and money.
+    const way: number[] = [];
+    for (let c = prev[best]; c !== source; c = prev[c]) way.push(c);
+    let total = 0;
+    const tolls = way.map((c) => {
+      const v = sim.cellPop[c] > 0 && owner[c] !== civ.id ? tollValue(sim, c, owner[c], civ.id, false) : 0;
+      total += v;
+      return v;
+    });
+    if (canAfford(sim, source, way, tolls, total)) {
+      way.forEach((c, i) =>
+        payToll(sim, c, tolls[i], (g) => stockOf(sim.economy, source, g), (g, u) => addStock(sim.economy, source, g, -u), PRICE, source),
+      );
+      moveGroup(sim, source, best, civ.id, EXPANSION_GROUP);
+      for (let c = best; c !== source; c = prev[c]) {
+        const from = prev[c];
+        const dir = neighborDirection(world, from, c);
+        if (dir >= 0) addRoad(world, from, dir);
+      }
+      went = true;
+    }
+  }
+  for (const c of touched) prev[c] = -2;
+  return went;
+}
+
+/** Whether the source's goods (asked for along the way) and money cover all tolls. */
+function canAfford(sim: Simulation, source: number, way: number[], tolls: number[], total: number): boolean {
+  if (total <= sim.economy.money[source]) return true;
+  let goods = 0;
+  way.forEach((c, i) => {
+    let v = 0;
+    for (let g = 0; g < PRICE.length; g++) v += Math.min(sim.trade.want[c * PRICE.length + g], stockOf(sim.economy, source, g)) * PRICE[g];
+    goods += Math.min(v, tolls[i]);
+  });
+  return goods + sim.economy.money[source] >= total;
 }
 
 /** Breadth-first predecessors for captureDeposits, all -2 between calls. */
@@ -552,41 +663,78 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
  * soft cap MAX_CIVS (only new tribes respect it). Its people keep 60 % of their faith and no
  * longer worship the player (design doc, section 5).
  */
-function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
+export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
   const { world, pop } = sim;
   const n = world.cellCount;
   // Land is only cut off after a hex changed hands since the last snapshot
   // (`world.owner`); otherwise skip the search.
-  let changed = false;
-  for (let c = 0; c < n && !changed; c++) changed = owner[c] !== world.owner[c] && world.owner[c] !== 0;
+  const dip = sim.diplomacy;
+  let changed = sim.bordersSeen !== dip.bordersVersion;
+  for (let c = 0; c < n && !changed; c++) changed = (owner[c] !== world.owner[c] && world.owner[c] !== 0) || dip.cutOffSince[c] >= 0;
   if (!changed) return;
+  sim.bordersSeen = dip.bordersVersion;
   for (const parent of livingCivilizations(sim)) {
     if (owner[parent.capital] !== parent.id) {
       const capital = mostPopulousCell(sim, parent.id, null);
       if (capital < 0 || owner[capital] !== parent.id) continue;
       parent.capital = capital;
     }
+    // Roads through its own land and land opened to it connect; foreign
+    // land crossed this way doesn't join the group.
     const group = new Int32Array(n).fill(-1);
-    const connect = (start: number, id: number): number[] => {
+    const connect = (start: number, id: number, through: (o: number) => boolean): number[] => {
       const cells = [start];
+      const queue = [start];
       group[start] = id;
-      for (let k = 0; k < cells.length; k++) {
-        const c = cells[k];
+      for (let k = 0; k < queue.length; k++) {
+        const c = queue[k];
         for (let d = 0; d < DIRECTION_COUNT; d++) {
           if (!hasRoad(world, c, d)) continue;
           const nb = world.neighbors[c * DIRECTION_COUNT + d];
-          if (nb >= 0 && group[nb] < 0 && owner[nb] === parent.id) {
+          if (nb < 0 || group[nb] >= 0) continue;
+          if (owner[nb] === parent.id) {
             group[nb] = id;
             cells.push(nb);
+            queue.push(nb);
+          } else if (owner[nb] !== 0 && through(owner[nb]) && group[nb] !== id) {
+            group[nb] = id;
+            queue.push(nb);
           }
         }
       }
+      for (const c of queue) if (owner[c] !== parent.id) group[c] = -1;
       return cells;
     };
-    connect(parent.capital, 0);
+    connect(parent.capital, 0, (o) => mayPass(dip, parent.id, o));
+    for (let c = 0; c < n; c++) if (owner[c] === parent.id && group[c] === 0) dip.cutOffSince[c] = -1;
     const cutOff: number[][] = [];
     for (let c = 0; c < n; c++) {
-      if (owner[c] === parent.id && group[c] < 0) cutOff.push(connect(c, cutOff.length + 1));
+      if (owner[c] !== parent.id || group[c] >= 0) continue;
+      const cells = connect(c, cutOff.length + 1, () => false);
+      // Cut off only by a closed border (connected through any foreign
+      // land): GRACE_YEARS to open it again before it breaks away.
+      const marks = new Int32Array(n).fill(-1);
+      let viaForeign = false;
+      const queue = [parent.capital];
+      marks[parent.capital] = 1;
+      for (let k = 0; k < queue.length && !viaForeign; k++) {
+        const q = queue[k];
+        for (let d = 0; d < DIRECTION_COUNT; d++) {
+          if (!hasRoad(world, q, d)) continue;
+          const nb = world.neighbors[q * DIRECTION_COUNT + d];
+          if (nb < 0 || marks[nb] === 1 || owner[nb] === 0) continue;
+          if (group[nb] === cutOff.length + 1) viaForeign = true;
+          marks[nb] = 1;
+          queue.push(nb);
+        }
+      }
+      let since = sim.tick;
+      for (const x of cells) {
+        if (dip.cutOffSince[x] < 0) dip.cutOffSince[x] = sim.tick;
+        since = Math.min(since, dip.cutOffSince[x]);
+      }
+      if (viaForeign && sim.tick - since < GRACE_YEARS * TICKS_PER_YEAR) continue;
+      cutOff.push(cells);
     }
     // Largest groups first, while civilization slots last.
     const people = (cells: number[]) => cells.reduce((sum, c) => sum + sim.cellCivPop[c * sim.civSlots + parent.id], 0);
@@ -595,6 +743,7 @@ function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
       const inGroup = new Uint8Array(n);
       for (const c of cells) inGroup[c] = 1;
       const capital = mostPopulousCell(sim, parent.id, inGroup);
+      if (capital < 0) continue; // nobody of the people lives there
       const civ = foundCivilization(sim, 'secession', capital, parent);
       if (!civ) break; // all civilization ids in use; try again next quarter
       for (let i = 0; i < pop.end; i++) {
@@ -603,7 +752,10 @@ function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
         changeCiv(sim, i, civ.id);
         pop.faith[i] *= 0.6;
       }
-      for (const c of cells) owner[c] = civ.id;
+      for (const c of cells) {
+        owner[c] = civ.id;
+        dip.cutOffSince[c] = -1;
+      }
       record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital);
     }
   }
@@ -695,6 +847,8 @@ function refreshSnapshot(sim: Simulation): void {
     if (sim.cellCivPop[civ.capital * sim.civSlots + id] === 0) civ.capital = mostPopulousCell(sim, id, null);
   }
 
+  world.openBorders.set(sim.diplomacy.open);
+
   if (sim.believers === 0) {
     sim.gameOver = true;
     record(sim, 'Nobody prays to you anymore.', -1);
@@ -770,7 +924,10 @@ function emigrate(sim: Simulation, owner: Uint8Array): void {
     if (sim.cellPop[target] === 0 && dir >= 0) addRoad(world, c, dir);
     moveGroup(sim, c, target, civId, EXPANSION_GROUP, owner[target] || civId);
     sim.migrations.groups++;
-    if (owner[target] && owner[target] !== civId) sim.migrations.abroad++;
+    if (owner[target] && owner[target] !== civId) {
+      sim.migrations.abroad++;
+      noteEmigration(sim, civId, owner[target]);
+    }
   }
 }
 
@@ -974,6 +1131,7 @@ function foundCivilization(
   }
   if (parent) civ.parentName = parent.name;
   addMood(civ, 'A new people', MOOD_NEW_PEOPLE, sim.tick);
+  resetCivRelations(sim.diplomacy, id);
   sim.civs[id] = civ;
   return civ;
 }

@@ -590,9 +590,12 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
       const reached = seatField(sim, owner, id, [c], field);
       let benefit = 0;
       for (const k of reached) {
-        benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
-        // A settlement held back whose next step would pass the stop with this seat.
-        if (held(k) && connectionValue(field[k] + 1) >= EXPAND_MIN_CONNECTION) benefit += FRONTIER_BONUS;
+        // Only its own settlements count (the way may cross land opened to it).
+        if (owner[k] === id) {
+          benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
+          // A settlement held back whose next step would pass the stop with this seat.
+          if (held(k) && connectionValue(field[k] + 1) >= EXPAND_MIN_CONNECTION) benefit += FRONTIER_BONUS;
+        }
         field[k] = Infinity;
       }
       if (benefit > bestBenefit) {
