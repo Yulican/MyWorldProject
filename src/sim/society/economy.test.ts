@@ -296,3 +296,31 @@ test('a settlement trading in transit asks for what its partner lacks, up to a l
   runEconomy(sim, true, cell, sim.world.cellCount);
   assert.ok(sim.economy.luxury[cell * 6] >= keep - 1e-3, `held for the partner: ${sim.economy.luxury[cell * 6]}`);
 });
+
+test('a planned seat of government comes first: its site starts nothing else', () => {
+  const { sim, cell } = settledHex(3);
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 1000;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 1000;
+  sim.satisfaction[cell] = -5; // would build comfort first otherwise
+  sim.seatSite[cell] = 1;
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  const started: string[] = [];
+  for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) {
+    if (sim.economy.state[s] === SlotState.Construction) started.push(BUILDINGS[sim.economy.type[s]].name);
+  }
+  assert.ok(started.every((name) => name === 'Seat of government'), started.join(', '));
+});
+
+test('a seat of government whose harvest lacks its upkeep orders ten years of it, before all other trips', () => {
+  const { sim, cell } = settledHex(3);
+  place(sim, cell, typeOf('Seat of government'));
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 0;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 0;
+  updateTradeNeeds(sim, cell, sim.cellAdults[cell], false, 4);
+  const seat = BUILDINGS[typeOf('Seat of government')];
+  for (const m of [Material.Wood, Material.Stone]) {
+    const g = m === Material.Wood ? TradeGood.Wood : TradeGood.Stone;
+    assert.ok(sim.trade.want[cell * TRADE_GOODS + g] >= 10 * (m === Material.Wood ? seat.upkeepWood - 2 : seat.upkeepStone - 2) - 1e-3, `asks for ${m}`);
+    assert.ok(sim.trade.hubFocus[cell * TRADE_GOODS + g] > 3, 'those trips come first');
+  }
+});

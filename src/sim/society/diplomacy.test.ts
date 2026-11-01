@@ -352,23 +352,26 @@ test('a supplier that could not deliver is not punished: the amount halves after
 });
 
 test('the buyer takes what a trade agreement owes even if it asks for nothing now', () => {
-  // World 1 after 300 years, borders open: the first pair of peoples whose merchants reach each other.
-  const sim = createSimulation(generateWorld({ seed: 1 }));
-  runYears(sim, 300);
-  const dip = sim.diplomacy;
-  const ids = livingCivilizations(sim).map((c) => c.id);
-  for (const x of ids) for (const y of ids) if (x !== y) dip.known[pair(x, y)] = dip.open[pair(x, y)] = 1;
+  // The first world whose peoples' merchants reach each other after 300 years, borders open.
   const gold = TradeGood.Luxury + 3;
+  let sim = createSimulation(generateWorld({ seed: 1 }));
   let a = -1;
   let b = -1;
   let hub = -1;
-  for (const x of ids) {
-    for (const y of ids) {
-      if (x === y || hub >= 0) continue;
-      hub = exportHub(sim, x, y, gold);
-      [a, b] = [x, y];
+  for (let seed = 1; seed <= 6 && hub < 0; seed++) {
+    sim = createSimulation(generateWorld({ seed }));
+    runYears(sim, 300);
+    const ids = livingCivilizations(sim).map((c) => c.id);
+    for (const x of ids) for (const y of ids) if (x !== y) sim.diplomacy.known[pair(x, y)] = sim.diplomacy.open[pair(x, y)] = 1;
+    for (const x of ids) {
+      for (const y of ids) {
+        if (x === y || hub >= 0) continue;
+        hub = exportHub(sim, x, y, gold);
+        [a, b] = [x, y];
+      }
     }
   }
+  const dip = sim.diplomacy;
   assert.ok(hub >= 0, 'two peoples reach each other');
   const l = leg(a, b, gold, 10, sim.tick);
   l.hub = hub;

@@ -238,3 +238,46 @@ belegt weniger Speicher als vorher (aged 13,8 statt 14,6 KB, diplomacy
 Die Handelszahlen schwanken stark mit dem Weltverlauf: Mehr Abspaltungen
 ändern, wer wen kennt. Rechenzeit (Node, langsamster Tick): aged 2,5 ms,
 unrest 3,9 ms, diplomacy 3,9 ms.
+
+## 9. Aufstände und Regierungssitze
+
+**Analyse** (Teilwerte der aufständischen Siedlungen im Moment des
+Aufstands, `tools/economyStats.ts`): 92 % sind überfüllt, 81 % liegen in
+der Ebene. Ursachen:
+- Fast die Hälfte hätte Bauplätze und Material, baut aber nicht: Gebaut
+  wird nur, was die eigene Ernte dauerhaft unterhält, und in der Ebene sind
+  das 2 Holz im Jahr.
+- Gut ein Drittel ist voll bebaut, und es gibt kein freies Land für
+  Siedler.
+- Der Weg zum Regierungssitz wiegt bei einem Viertel bis Drittel am
+  schwersten.
+
+**Geprüft und zurückgestellt:** Bauen mit Unterhalt aus dem Handel (auch
+mit 10 Jahren Vorrat, Vorrang und Handelsposten) und eine dynamische
+Gebäudegrenze (je 50 oder 30 Einwohner ein Platz mehr, oder steigende
+Kosten ×1,5 / ×1,25). Sie bringen viel Handel und große Städte, aber in
+einzelnen Welten zerfallen Reiche in Kettenreaktionen (bis 86 Völker).
+Ursache: Standort-Siedlungen geplanter Regierungssitze bauen andere Gebäude
+statt des Sitzes, und Sitze verfallen mangels Unterhalt; große Reiche
+haben dann nur 2–3 Sitze für über 80 Siedlungen.
+
+**Umgesetzt:**
+- **Der Sitz geht vor:** Eine Siedlung, die als Standort für einen neuen
+  Regierungssitz geplant ist, beginnt nichts anderes Neues, bis der Sitz
+  steht (Reparaturen erlaubt).
+- **Unterhalt für Sitze zuerst:** Eine Siedlung mit Regierungssitz, deren
+  Ernte seinen Unterhalt nicht deckt, hält 10 Jahre des Fehlbetrags vorrätig,
+  bestellt nach, sobald es weniger ist (mindestens eine halbe
+  Händlerladung), und diese Fahrten gehen allen anderen vor.
+
+| 24 Welten, 500 Jahre | vorher | mit den Sitz-Regeln |
+|---|---|---|
+| Aufstände je Welt (Spanne) | 4,4 (1–14) | 2,5 (0–14) |
+| Völker (Spanne) | 12,2 (7–24) | 9,9 (5–26) |
+| Regierungssitze | 26,0 | 27,3 |
+| Ruinen | 12 | 4 |
+| Menschen | 16.824 | 16.284 |
+| Holz / Stein gehandelt | 5.249 / 3.453 | 8.448 / 5.627 |
+
+Verbleibende Hauptgründe: Enge 48 %, weiter Weg zum Sitz 30 %, keine
+Straße zum Sitz 10 %.

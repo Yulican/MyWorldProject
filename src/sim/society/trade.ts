@@ -59,19 +59,8 @@ const FOCUS_UNHAPPY = 2;
 const MIN_TRIP_VALUE = 5;
 /** Wood and stone a settlement keeps for this many years of upkeep before it sells. */
 const RESERVE_YEARS = 2;
-/**
- * Simulation phase (uprisings): `bulk` = a settlement whose upkeep its own
- * harvest doesn't cover keeps BULK_YEARS of the shortfall and orders when it
- * falls below half of that, at least half a merchant's load, first;
- * `tradePost` = such a settlement without merchants builds a trade center;
- * `seatsUseHeld` = a planned seat of government counts those held reserves
- * as spare (seats come first); `seatFirst` = a planned seat site builds
- * nothing new until the seat stands (economy.ts); `seatUpkeepFirst` = a
- * settlement with a seat keeps BULK_YEARS of its missing upkeep, orders
- * before it runs low, and those trips come first of all.
- */
-export const UPKEEP_TUNING = { bulk: false, tradePost: false, seatsUseHeld: false, seatFirst: false, seatUpkeepFirst: false };
-const BULK_YEARS = 10;
+/** A settlement with a seat of government whose harvest doesn't cover its upkeep keeps this many years of the shortfall. */
+const SEAT_UPKEEP_YEARS = 10;
 const RESERVE_MIN = 10;
 /** Luxury goods a settlement keeps (and asks for): this many years of its need. */
 const LUXURY_YEARS = 2;
@@ -93,6 +82,8 @@ const ROAD_RECHECK_YEARS = 4;
 const CENTER_MIN_VALUE = 15;
 /** Goods a trade agreement owes count this many times when a merchant picks a trip. */
 const FOCUS_AGREEMENT = 3;
+/** Priority of bringing a seat of government the upkeep it lacks: before everything else. */
+const FOCUS_SEAT_UPKEEP = 3 * FOCUS_AGREEMENT;
 /** Settlements with merchants (nearest the buyer) an export hub is searched among. */
 const HUB_CANDIDATES = 3;
 
@@ -108,9 +99,6 @@ export type Trade = {
   transitFor: Uint8Array;
   /** Goods sold abroad in transit so far (statistics). */
   transit: number;
-  /** Per cell and material: wood and stone held as an upkeep reserve (bulk), not counted as spare. Per people: their total (civHeld). */
-  held: Float32Array;
-  civHeld: Float32Array;
   /** Per people: bit per good it still owes under trade agreements (see owedGoods), valid for tick `owedTick`. */
   owedMask: Uint16Array;
   owedTick: number;
@@ -175,8 +163,6 @@ export function createTrade(seed: number, cellCount: number): Trade {
     incoming: new Float32Array(cellCount * TRADE_GOODS),
     transitFor: new Uint8Array(cellCount * TRADE_GOODS),
     transit: 0,
-    held: new Float32Array(cellCount * MATERIAL_COUNT),
-    civHeld: new Float32Array(0),
     owedMask: new Uint16Array(PAIRS),
     owedTick: -1,
     hubMark: new Uint8Array(cellCount),
@@ -289,7 +275,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
 
   // Wood and stone: ask for what the next building lacks, spare what is
   // beyond it and a reserve for upkeep.
-  let upkeepFocus = 0;
+  let seatOrders = 0;
   for (let m = 0; m < MATERIAL_COUNT; m++) {
     const stock = economy.stock[cell * MATERIAL_COUNT + m];
     const goal = economy.goal[cell * MATERIAL_COUNT + m];
@@ -300,19 +286,18 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
     const yearly = Math.max(0, upkeep - harvest);
-    const seatHere = UPKEEP_TUNING.seatUpkeepFirst && yearly > 0 && hasSeat(economy, cell);
-    if ((UPKEEP_TUNING.bulk || seatHere) && yearly > 0) {
-      // Upkeep by trade: keep BULK_YEARS of it, order in worthwhile lots, first.
-      const keep = yearly * BULK_YEARS;
+    if (yearly > 0 && hasSeat(economy, cell)) {
+      // A seat of government's upkeep comes first: it keeps SEAT_UPKEEP_YEARS
+      // of what its harvest lacks, orders in worthwhile lots before it runs
+      // out, and those trips go before all others.
+      const keep = yearly * SEAT_UPKEEP_YEARS;
       const have = stock - goal + trade.incoming[t + m];
-      const order = have < (seatHere ? keep : keep / 2) ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
+      const order = have < keep ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
       trade.want[t + m] = Math.max(0, goal - stock - trade.incoming[t + m]) + order;
       trade.surplus[t + m] = Math.max(0, stock - goal - Math.max(reserve, keep));
-      trade.held[cell * MATERIAL_COUNT + m] = Math.max(0, Math.min(stock - goal - reserve, keep - reserve));
-      if (order > 0) upkeepFocus |= (seatHere ? 4 : 1) << m;
+      if (order > 0) seatOrders |= 1 << m;
       continue;
     }
-    trade.held[cell * MATERIAL_COUNT + m] = 0;
     const shortfall = yearly * RESERVE_YEARS;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
@@ -346,10 +331,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // that stock is its surplus for the buyers. The further behind its
   // deliveries, the more its people hurry to bring it.
   trade.hubFocus.fill(0, t, t + TRADE_GOODS);
-  for (let m = 0; m < MATERIAL_COUNT; m++) {
-    if (upkeepFocus & (4 << m)) trade.hubFocus[t + m] = FOCUS_AGREEMENT * 3;
-    else if (upkeepFocus & (1 << m)) trade.hubFocus[t + m] = FOCUS_AGREEMENT;
-  }
+  for (let m = 0; m < MATERIAL_COUNT; m++) if (seatOrders & (1 << m)) trade.hubFocus[t + m] = FOCUS_SEAT_UPKEEP;
   if (isHub(sim, cell)) hubWants(sim, cell, t);
   // Only goods the rest of its people, or its people's trade partners, ask
   // for or spare count (totals from the last refresh).
@@ -406,12 +388,10 @@ export function sumCivWants(sim: Simulation, owner: Uint8Array): void {
     trade.civWant = new Float32Array(size);
     trade.civSpare = new Float32Array(size);
     trade.civMake = new Float32Array(sim.civSlots * 2);
-    trade.civHeld = new Float32Array(sim.civSlots * MATERIAL_COUNT);
   } else {
     trade.civWant.fill(0);
     trade.civSpare.fill(0);
     trade.civMake.fill(0);
-    trade.civHeld.fill(0);
   }
   for (let c = 0; c < owner.length; c++) {
     const id = owner[c];
@@ -420,7 +400,6 @@ export function sumCivWants(sim: Simulation, owner: Uint8Array): void {
       trade.civWant[id * TRADE_GOODS + g] += trade.want[c * TRADE_GOODS + g];
       trade.civSpare[id * TRADE_GOODS + g] += trade.surplus[c * TRADE_GOODS + g];
     }
-    for (let m = 0; m < MATERIAL_COUNT; m++) trade.civHeld[id * MATERIAL_COUNT + m] += trade.held[c * MATERIAL_COUNT + m];
     if (!sim.hasBuildings[c]) continue;
     for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
       const st = economy.state[s];
@@ -1115,17 +1094,6 @@ export function isCoast(world: World, cell: number): boolean {
  * when the hex has 25 more food or water than it can use and its people ask
  * for more of that good than they spare and make.
  */
-/** Whether a settlement's own harvest leaves the upkeep of its buildings short in wood or stone. */
-function importsUpkeep(sim: Simulation, cell: number): boolean {
-  const economy = sim.economy;
-  for (let m = 0; m < MATERIAL_COUNT; m++) {
-    const good = m === 0 ? Good.Wood : Good.Stone;
-    const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
-    if (upkeepOf(economy, cell, m) > harvest) return true;
-  }
-  return false;
-}
-
 export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: number) => boolean): number {
   const { world, trade } = sim;
   const owner = world.owner;
@@ -1133,8 +1101,6 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
   if (!civ) return -1;
   const workshop = WORKSHOP_OF[world.deposit[cell]];
   if (workshop !== undefined && !has(BUILDINGS[workshop].good)) return workshop;
-  // A settlement that lives on imported upkeep gets merchants of its own.
-  if (UPKEEP_TUNING.tradePost && !has(Good.Merchants) && importsUpkeep(sim, cell)) return TYPE_OF[Good.Merchants];
   if (!trade.interest[cell]) return granaryOrBarrels(sim, cell, civ);
   if (!takeSearches(sim, 3)) return -1;
   if (!has(Good.Merchants)) {
