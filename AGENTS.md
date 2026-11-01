@@ -64,6 +64,10 @@ Rules for every agent and every change:
 ## Rules
 
 - Discuss every change to game logic (simulation rules, balancing, what the player sees happen) with the user before implementing it: describe the planned rule and its open details, and wait for the user's go. Pure bug fixes that restore agreed behavior, performance work and tooling don't need this.
+- Game logic changes go **design → simulation → implementation**:
+  1. Design: agree on the rule with the user and write it into the requirement in `Design Documents/`.
+  2. Simulation: try it with its numbers as parameters over many worlds (`tools/*Stats.ts`, 12 worlds at least) and show the user how it affects settlement growth, trade and diplomacy, compared with before, so the numbers can be tuned together.
+  3. Implementation: finish it (tests, panel texts, docs, benchmark) with the numbers the user chose.
 - The `android/` directory is generated (Continuous Native Generation). Never create or edit it by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:android` locally, or `eas build --profile development --platform android`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
