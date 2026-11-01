@@ -227,7 +227,8 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       const b = BUILDINGS[type];
       const w = site * MATERIAL_COUNT;
       if (owner[site] !== owner[s] || sim.cellPop[site] === 0 || economy.state[slot] !== SlotState.Empty) continue; // lost or taken
-      if (gov.stock[w] >= b.wood && gov.stock[w + 1] >= b.stone) {
+      // Its upkeep reserve stays (upkeep first).
+      if (gov.stock[w] - upkeepReserve(sim, site, 0) >= b.wood && gov.stock[w + 1] - upkeepReserve(sim, site, 1) >= b.stone) {
         gov.stock[w] -= b.wood;
         gov.stock[w + 1] -= b.stone;
         economy.type[slot] = type;
@@ -265,6 +266,18 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       [gov.projectSite[i], gov.projectSlot[i], gov.projectType[i], gov.projectYear[i]] = [pickSite, pickSlot, pickType, year];
     }
   }
+}
+
+/** Wood or stone the government keeps at `cell` for its buildings' upkeep (UPKEEP_RESERVE_YEARS of it). */
+function upkeepReserve(sim: Simulation, cell: number, m: number): number {
+  const { economy } = sim;
+  let sum = 0;
+  for (let s = cell * SLOTS + GOV_SLOT, end = s + usableSlots(sim, cell); s < end; s++) {
+    const st = economy.state[s];
+    if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
+    sum += m === 0 ? BUILDINGS[economy.type[s]].upkeepWood : BUILDINGS[economy.type[s]].upkeepStone;
+  }
+  return sum * UPKEEP_RESERVE_YEARS;
 }
 
 /** Whether a seat's queue already has a project at `cell`. */
@@ -359,18 +372,10 @@ export function advanceGovernment(sim: Simulation): void {
   for (let seat = 0; seat < n; seat++) {
     if (gov.traders[seat] === 0 || gov.away[seat] >= gov.traders[seat]) continue;
     const civ = owner[seat];
-    // What its sites need: the queued projects' materials in turn, then upkeep reserves.
+    // What its sites need: upkeep reserves of its buildings first, then the queued projects' materials in turn.
     let need = -1;
     let needM = 0;
     let needAmount = 0;
-    for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end && need < 0; i++) {
-      const site = gov.projectSite[i];
-      const b = BUILDINGS[gov.projectType[i]];
-      for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
-        const lack = (m === 0 ? b.wood : b.stone) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
-        if (lack > 0) [need, needM, needAmount] = [site, m, lack];
-      }
-    }
     if (need < 0) {
       for (let c = 0; c < n && need < 0; c++) {
         if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
@@ -385,6 +390,16 @@ export function advanceGovernment(sim: Simulation): void {
         for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
           const lack = (m === 0 ? upWood : upStone) * UPKEEP_RESERVE_YEARS - gov.stock[c * MATERIAL_COUNT + m] - gov.incoming[c * MATERIAL_COUNT + m];
           if (lack > 0.5) [need, needM, needAmount] = [c, m, lack];
+        }
+      }
+    }
+    if (need < 0) {
+      for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end && need < 0; i++) {
+        const site = gov.projectSite[i];
+        const b = BUILDINGS[gov.projectType[i]];
+        for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
+          const lack = (m === 0 ? b.wood : b.stone) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
+          if (lack > 0) [need, needM, needAmount] = [site, m, lack];
         }
       }
     }
