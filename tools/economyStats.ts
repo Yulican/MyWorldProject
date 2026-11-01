@@ -1,6 +1,6 @@
 // Settlement growth, trade and diplomacy over many worlds, for one variant of
 // the material rules (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=150,300] [regional=1] [cost=1] [scope=all|advanced]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=150,300] [regional=1] [cost=1] [scope=all|advanced] [base=1]
 //   regional: 1 = wood only from woods, stone only from hills and mountains
 //   cost:     factor on every building's wood and stone cost and upkeep
 import { performance } from 'node:perf_hooks';
@@ -15,10 +15,15 @@ const regional = (process.argv[4] ?? '1') === '1';
 const cost = Number(process.argv[5] ?? 1);
 // all = every building; advanced = all but the basic ones a new settlement needs.
 const scope = process.argv[6] ?? 'all';
+// Wood and stone every hex forages outside woods (and hills and mountains).
+const base = Number(process.argv[7] ?? 1);
 const BASIC = ['Hut', 'Fields', 'Well', 'Lumber camp', 'Quarry', 'Trade center', 'Harbor', 'Granary', 'Water carriers', 'Meeting place'];
 
-const tuning = (buildings as { MATERIAL_TUNING?: { regional: boolean } }).MATERIAL_TUNING;
-if (tuning) tuning.regional = regional;
+const tuning = (buildings as { MATERIAL_TUNING?: { regional: boolean; base: number } }).MATERIAL_TUNING;
+if (tuning) {
+  tuning.regional = regional;
+  tuning.base = base;
+}
 for (const b of BUILDINGS as { name: string; wood: number; stone: number; upkeepWood: number; upkeepStone: number }[]) {
   if (scope === 'advanced' && BASIC.includes(b.name)) continue;
   b.wood *= cost;
@@ -77,6 +82,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       broken: text('broke: too little'),
       endedTooLittle: text('too little could be delivered'),
       ranOut: text('ran out.'),
+      uprisings: text('rose up'),
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);
@@ -84,7 +90,7 @@ for (let seed = 1; seed <= worlds; seed++) {
   }
 }
 
-console.log(`regional ${regional ? 'on' : 'off'}, cost ×${cost} (${scope}), ${worlds} worlds (goods: ${TRADE_GOODS})`);
+console.log(`regional ${regional ? 'on' : 'off'}, cost ×${cost} (${scope}), base ${base}, ${worlds} worlds (goods: ${TRADE_GOODS})`);
 for (const [year, list] of rows) {
   const keys = Object.keys(list[0]);
   const mean = (k: string) => list.reduce((s, r) => s + r[k], 0) / list.length;

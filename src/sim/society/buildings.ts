@@ -73,7 +73,7 @@ export const WOOD_BIOMES: readonly number[] = [Biome.Forest, Biome.Jungle];
 export const STONE_BIOMES: readonly number[] = [Biome.Hills, Biome.Mountains];
 
 /** Simulation-phase tuning (Requirement Regionale Rohstoffe): regional harvest on or off. */
-export const MATERIAL_TUNING = { regional: true };
+export const MATERIAL_TUNING = { regional: true, base: 1 };
 
 export type BuildingType = {
   name: string;
@@ -188,8 +188,8 @@ export function createEconomy(cellCount: number): Economy {
 
 /** Wood or stone a hex yields per year by foraging alone. */
 export function forageYield(world: World, cell: number, good: number): number {
-  if (MATERIAL_TUNING.regional && !harvestsHere(world, cell, good)) return FORAGE_BASE;
-  return FORAGE_BASE + FORAGE_PER_RESOURCE * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
+  if (MATERIAL_TUNING.regional && !harvestsHere(world, cell, good)) return MATERIAL_TUNING.base;
+  return MATERIAL_TUNING.base + FORAGE_PER_RESOURCE * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
 }
 
 /** Whether the hex's biome yields its wood (woods) or stone (hills, mountains) beyond foraging. */
