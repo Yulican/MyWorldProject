@@ -55,6 +55,8 @@ if (options.income) GOV_TUNING.incomeShare = Number(options.income);
 if (options.goodsneed === '1') GOV_TUNING.goodsByNeed = true;
 if (options.goodsplus) GOV_TUNING.goodsPlus = Number(options.goodsplus);
 if (options.goodsminus) GOV_TUNING.goodsMinus = Number(options.goodsminus);
+// potential=1: the income check compares upkeep with what the district could raise at its loyalty limit instead of last year's taxes.
+if (options.potential === '1') GOV_TUNING.potentialIncome = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;

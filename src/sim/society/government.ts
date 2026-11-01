@@ -59,6 +59,8 @@ export type Government = {
   seatQueued: Uint8Array;
   /** Per seat cell: last year's taxes of its district in money (goods at market prices), for the income check. */
   income: Float32Array;
+  /** Per seat cell: what its district could raise in a year at its loyalty limit (potentialIncome). */
+  potential: Float32Array;
   /** Per cell: money the government owes the settlement for materials taken for a seat (seatLoan), and the seat that owes it. */
   debt: Float32Array;
   debtSeat: Int32Array;
@@ -108,6 +110,7 @@ export function createGovernment(cellCount: number): Government {
     projectCount: new Uint8Array(cellCount),
     seatQueued: new Uint8Array(cellCount),
     income: new Float32Array(cellCount),
+    potential: new Float32Array(cellCount),
     debt: new Float32Array(cellCount),
     debtSeat: new Int32Array(cellCount).fill(-1),
     funded: new WeakSet(),
@@ -260,13 +263,22 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   // goodsByNeed: what each district needs in wood and stone this year (its buildings' upkeep, its queued
   // projects' missing materials, less what its seat holds) and what its settlements spare.
   const goodsNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
-  const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
+  const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed || GOV_TUNING.potentialIncome ? n * MATERIAL_COUNT : 0);
+  const moneyBase = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
+  if (GOV_TUNING.potentialIncome) {
+    for (let c = 0; c < n; c++) {
+      const s = gov.district[c];
+      if (s < 0) continue;
+      moneyBase[s] += sim.cellAdults[c] * MONEY_PER_ADULT * ECON_TUNING.money; // the money tax base at 100 %
+      for (let m = 0; m < MATERIAL_COUNT; m++) goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
+    }
+  }
   if (GOV_TUNING.goodsByNeed) {
     for (let c = 0; c < n; c++) {
       const s = gov.district[c];
       if (s < 0) continue;
       for (let m = 0; m < MATERIAL_COUNT; m++) {
-        goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
+        if (!GOV_TUNING.potentialIncome) goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
         if (sim.hasBuildings[c]) goodsNeed[s * MATERIAL_COUNT + m] += upkeepReserve(sim, c, m, 1);
       }
     }
@@ -304,6 +316,14 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       goodsRate = Math.min(goodsRate, TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
     }
     const rate = rateFor(room - goodsTaxValue(Math.max(0, goodsRate)));
+    if (GOV_TUNING.potentialIncome) {
+      // At the loyalty limit: all room for the money tax (goods tax 0 %), or all for the goods tax (money tax 0 %).
+      const moneyOnly = rateFor(room - goodsTaxValue(0)) * moneyBase[s];
+      let goodsValue = 0;
+      for (let m = 0; m < MATERIAL_COUNT; m++) goodsValue += goodsSpare[s * MATERIAL_COUNT + m] * PRICE[m];
+      const goodsOnly = (GOV_TUNING.goodsByNeed ? Math.min(TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus)) : 0) * goodsValue;
+      gov.potential[s] = Math.max(moneyOnly, goodsOnly);
+    }
     if (Math.abs(rate - gov.rate[s]) >= 0.1) {
       record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s);
     }
@@ -480,7 +500,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   const upkeep = districtUpkeep(sim, seat);
   // With GOV_TUNING.incomeShare instead: the yearly upkeep stays within that share of last year's taxes;
   // a seat only has to fit beside the district's other seats (seats first in the budget).
-  const budget = GOV_TUNING.incomeShare * gov.income[seat];
+  const budget = GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[seat] : gov.income[seat]);
   const seatUpkeep = GOV_TUNING.incomeShare > 0 ? districtSeatUpkeep(sim, seat) : 0;
   const secured = (t: number) =>
     GOV_TUNING.incomeShare > 0
