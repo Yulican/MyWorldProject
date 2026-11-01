@@ -42,6 +42,9 @@ if (options.secure) GOV_TUNING.secureYears = Number(options.secure);
 if (options.partners === '1') GOV_TUNING.buyPartners = true;
 // district=1: one planned seat per government district instead of per people.
 if (options.district === '1') GOV_TUNING.seatPerDistrict = true;
+// start: seats' worth of starting money per new people's government; loan=1: queued seats take materials from their site's settlement on credit.
+if (options.start) GOV_TUNING.startSeats = Number(options.start);
+if (options.loan === '1') GOV_TUNING.seatLoan = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -178,6 +181,9 @@ for (let seed = 1; seed <= worlds; seed++) {
       'money transfers': sim.government.transfers,
       'money transferred': sim.government.transferred,
       'no seat could help': sim.government.noRichSeat,
+      'starting money': sim.government.startMoney,
+      'seat loans': sim.government.loaned,
+      'loans repaid': sim.government.repaid,
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);

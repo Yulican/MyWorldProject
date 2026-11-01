@@ -4,7 +4,7 @@ import { buildingFits, capacityWith, usableSlots } from './economy';
 import { satisfactionTarget, seatsOf } from './satisfaction';
 import type { Simulation } from './simulation';
 import { ECON_TUNING, GOV_TUNING, TAX_MAX, TAX_NEUTRAL, taxValue } from './taxes';
-import { MONEY_PER_ADULT, PRICE, TRADE_GOODS } from './trade';
+import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, upkeepOf as settlementUpkeep } from './trade';
 
 export { GOV_TUNING, taxValue };
 
@@ -53,6 +53,15 @@ export type Government = {
   projectCount: Uint8Array;
   /** Per cell: 1 if a seat of government is queued there (seat planning re-evaluates it, economy.ts). */
   seatQueued: Uint8Array;
+  /** Per cell: money the government owes the settlement for materials taken for a seat (seatLoan), and the seat that owes it. */
+  debt: Float32Array;
+  debtSeat: Int32Array;
+  /** Peoples whose government got its starting money. */
+  funded: WeakSet<object>;
+  /** Statistics: starting money given, materials taken on loan, debt repaid. */
+  startMoney: number;
+  loaned: number;
+  repaid: number;
   /** Per seat cell: its traders and how many are away. */
   traders: Uint8Array;
   away: Uint8Array;
@@ -91,6 +100,12 @@ export function createGovernment(cellCount: number): Government {
     projectYear: new Int32Array(cellCount * QUEUE_MAX),
     projectCount: new Uint8Array(cellCount),
     seatQueued: new Uint8Array(cellCount),
+    debt: new Float32Array(cellCount),
+    debtSeat: new Int32Array(cellCount).fill(-1),
+    funded: new WeakSet(),
+    startMoney: 0,
+    loaned: 0,
+    repaid: 0,
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     incoming: new Float32Array(cellCount * MATERIAL_COUNT),
@@ -187,6 +202,16 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       gov.traders[s] = civObj && civObj.capital === s ? GOV_TUNING.capitalTraders : GOV_TUNING.traders;
     }
   }
+  // Starting money: a new people's government gets GOV_TUNING.startSeats seats' worth.
+  if (GOV_TUNING.startSeats > 0) {
+    const money = GOV_TUNING.startSeats * (costOf(SEAT_TYPE, 0) * PRICE[0] + costOf(SEAT_TYPE, 1) * PRICE[1]);
+    for (const civObj of sim.civs) {
+      if (!civObj || gov.funded.has(civObj) || civObj.capital < 0) continue;
+      gov.funded.add(civObj);
+      gov.treasury[civObj.capital] += money;
+      gov.startMoney += money;
+    }
+  }
   const civFinancing = new Uint8Array(sim.civSlots);
   for (let s = 0; s < n; s++) if (isSeat[s] && seatQueued(gov, s)) civFinancing[owner[s]] = 1;
   const low = new Float32Array(n).fill(Infinity);
@@ -236,6 +261,20 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         gov.stock[s * MATERIAL_COUNT + m] += take;
         gov.collectedGoods += take;
       }
+    }
+  }
+  // Debts for materials taken for seats are paid first.
+  for (let c = 0; c < n; c++) {
+    const s = gov.debtSeat[c];
+    if (s < 0) continue;
+    const pay = Math.min(gov.debt[c], gov.treasury[s]);
+    gov.treasury[s] -= pay;
+    gov.debt[c] -= pay;
+    gov.repaid += pay;
+    if (sim.cellPop[c] > 0) economy.money[c] += pay;
+    if (gov.debt[c] <= 1e-3 || sim.cellPop[c] === 0 || owner[c] !== owner[s]) {
+      gov.debt[c] = 0;
+      gov.debtSeat[c] = -1;
     }
   }
   // Upkeep of government buildings, from the government's stock at their site.
@@ -431,6 +470,25 @@ export function advanceGovernment(sim: Simulation): void {
   for (let seat = 0; seat < n; seat++) {
     if (gov.traders[seat] === 0 || gov.away[seat] >= gov.traders[seat]) continue;
     const civ = owner[seat];
+    // seatLoan: a queued seat takes its missing materials from its site's settlement at once (one year of the settlement's own upkeep stays), owing their price.
+    if (GOV_TUNING.seatLoan) {
+      for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) {
+        if (gov.projectType[i] !== SEAT_TYPE) continue;
+        const site = gov.projectSite[i];
+        if (sim.cellPop[site] === 0 || owner[site] !== civ) continue;
+        for (let m = 0; m < MATERIAL_COUNT; m++) {
+          const lack = costOf(SEAT_TYPE, m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
+          const spare = economy.stock[site * MATERIAL_COUNT + m] - settlementUpkeep(economy, site, m);
+          const take = Math.min(lack, spare);
+          if (take <= 0) continue;
+          economy.stock[site * MATERIAL_COUNT + m] -= take;
+          gov.stock[site * MATERIAL_COUNT + m] += take;
+          gov.debt[site] += take * PRICE[m];
+          gov.debtSeat[site] = seat;
+          gov.loaned += take * PRICE[m];
+        }
+      }
+    }
     // What its sites need: upkeep reserves of its buildings first, then the queued projects' materials in turn.
     let need = -1;
     let needM = 0;

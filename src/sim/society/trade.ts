@@ -367,7 +367,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   return changed;
 }
 
-function upkeepOf(eco: Economy, cell: number, material: number): number {
+export function upkeepOf(eco: Economy, cell: number, material: number): number {
   let sum = 0;
   // The settlement's own buildings (the government keeps up its own).
   for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
