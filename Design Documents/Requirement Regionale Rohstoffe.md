@@ -1,7 +1,7 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
 Stand: Schritt 1 umgesetzt mit den Zahlen aus der Simulation (Ablauf:
-Design → Simulation → Umsetzung), Schritte 2 und 3 entworfen. Baut auf dem
+Design → Simulation → Umsetzung), Zwischenhandel im Entwurf, Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
 bestimmt.
@@ -17,8 +17,9 @@ Geld wird dadurch mehr wert.
 
 1. **Regionale Rohstoffe** (Abschnitt 3) und **verlässliche
    Handelsabkommen** (Abschnitt 4).
-2. **Handelsspanne:** Geld über dem festen Preis als Gegenware (Abschnitt 5).
-3. **Zwischenhandel** (Abschnitt 6).
+2. **Zwischenhandel** (Abschnitt 6).
+3. **Handelsspanne** (Abschnitt 5), zurückgestellt bis nach dem
+   Zwischenhandel.
 
 Jeder Schritt wird mit 12 Testwelten simuliert (Siedlungswachstum, Handel,
 Diplomatie, Vergleich mit vorher) und vor der Umsetzung mit dem Nutzer
@@ -69,15 +70,23 @@ Völker setzen viel daran, ihre Abkommen zu halten.
 5. Die frühere Grenze „höchstens, was die erreichbaren Abnehmer verlangen“
    entfällt durch die Annahmepflicht.
 
-## 5. Handelsspanne (Schritt 2)
+## 5. Handelsspanne (zurückgestellt)
 
-- Zwischen Völkern (nicht im eigenen Volk) verkaufen Händler über dem
-  festen Preis: Spanne ? (Vorschlag +50 %).
-- Die empfangende Siedlung zahlt. Kann sie nicht zahlen, wird nur
-  geliefert, was sie bezahlen kann.
-- Geld über dem Marktpreis zählt bei Handelsabkommen als Gegenware.
+Freigegeben: Spanne nur zwischen Völkern, die empfangende Siedlung zahlt,
+Geld über dem Marktpreis zählt bei Handelsabkommen als Gegenware.
+Vorgeschlagen: Spanne in beide Richtungen, eine fremde Siedlung bekommt nur,
+was sie bezahlen kann; einseitige Abkommen zahlen mit Spanne, zweiseitige
+tauschen zum festen Preis.
 
-## 6. Zwischenhandel (Schritt 3)
+Nach der Simulation vom Nutzer zurückgestellt, bis der Zwischenhandel
+steht; dann wird die Höhe neu kalibriert. Ergebnis (24 Welten, 500 Jahre,
+Spanne 0 / 25 / 50 / 100 %): ins Ausland geliefert 4.033 / 5.122 / 4.435 /
+4.630, gezahlte Spanne 0 / 2.113 / 3.748 / 7.225 Geld (bei rund 170.000
+Geld aller Völker), Abkommen gebrochen 9 / 9 / 16 / 11 %. Die Unterschiede
+liegen im Rauschen: Handel mit anderen Völkern ist nur gut 6 % des
+Handels, die Spanne verschiebt vor allem Geld.
+
+## 6. Zwischenhandel (Schritt 2)
 
 - Eine Siedlung darf Waren einkaufen, die sie selbst nicht braucht, solange
   ein Handelspartner ihres Volks sie verlangt, und sie weiterverkaufen.
