@@ -49,6 +49,8 @@ if (options.loan === '1') GOV_TUNING.seatLoan = true;
 if (options.alltraders === '1') GOV_TUNING.allTraders = true;
 if (options.reserve === '1') GOV_TUNING.reserveUpkeep = true;
 if (options.seatsfirst === '1') GOV_TUNING.seatsFirst = true;
+// income: share of last year's taxes the yearly upkeep may take (income check, seats first in the budget; 0 = check the treasury instead).
+if (options.income) GOV_TUNING.incomeShare = Number(options.income);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
