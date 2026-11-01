@@ -179,3 +179,43 @@ Ausfuhrort nichts.
 Menschen, 11,7 Völker, 221 Siedlungen, 641 Gebäude, 5.223 Holz und 3.319
 Stein gehandelt, 4.604 Einheiten ins Ausland, 23 Handelsabkommen je Welt
 (davon 3,9 zweiseitig), 4,4 Aufstände.
+
+## 8. Simulation und Kalibrierung (Schritt 2)
+
+24 Welten, 500 Jahre, alle mit Zwischenhandel und Reserve
+(`npx tsx tools/economyStats.ts 24 500`).
+
+| | heute | Faktor 5 + Ladung 40 | + Luxusabbau | **+ 6 Plätze Ebene, Grund 2** | … Grund 1,5 | … Grund 1 |
+|---|---|---|---|---|---|---|
+| Menschen | 15.375 | 16.074 | 15.154 | **16.793** | 12.935 | 13.011 |
+| Völker | 10,7 | 12,3 | 10,8 | 13,4 | 14,3 | 17,2 |
+| Gebäude | 629 | 654 | 612 | **722** | 481 | 458 |
+| Große Städte | 1,0 | 0,8 | 0,9 | **1,9** | 0,3 | 0,6 |
+| Holz / Stein auf Lager je Siedlung | 454 / 289 | 234 / 223 | 241 / 231 | 248 / 236 | 254 / 200 | 181 / 161 |
+| Luxus-Abbaugebäude | 1,3 | 1,4 | 3,9 | 4,2 | 3,6 | 3,4 |
+| Siedlungen mit Luxusgütern | 4,8 % | 5,2 % | 11,1 % | 10,6 % | 10,1 % | 9,0 % |
+| Ins Ausland (davon Zwischenhandel) | 4.910 (1.485) | 9.559 (3.594) | 7.039 (3.062) | 7.652 (3.044) | 4.467 (2.191) | 7.948 (3.969) |
+| Abkommen einseitig / zweiseitig | 21 / 4,4 | 36 / 9,5 | 39 / 7,8 | 47 / 9,3 | 40 / 3,2 | 52 / 7,1 |
+| Aufstände je Welt | 3,6 | 4,3 | 3,4 | 5,3 | 5,7 | 8,5 |
+
+Gewählt: Faktor 5, Ladung 40, gezielter Luxusabbau, 6 Bauplätze in der
+Ebene, Grundsammeln 2 (fett). Ohne Zwischenhandel gegenüber mit: ins
+Ausland 4.604 statt 5.148, davon 0 statt 1.304 im Zwischenhandel; die
+Reserve hebt den Zwischenhandel um 14 %.
+
+**Überproduktion vorher** (je Siedlung nach 500 Jahren): 499 Holz und 344
+Stein auf Lager bei einem Bedarf unter 1; Wasser 110, Getreide 50. Holz
+wurde nur verlangt, wenn eine Siedlung auf ein Gebäude sparte, und das tat
+fast keine.
+
+**Aufstandsgründe** (Teilwert, der bei den aufständischen Siedlungen am
+schwersten wog): Enge rund 50 %, weiter Weg zum Regierungssitz rund 25 %,
+keine Straße zum Regierungssitz 5–16 %, verlorene Revolution bis 10 %.
+Fehlende Luxusgüter spielen keine Rolle. Mit 6 Bauplätzen steigen die
+Aufstände von 3,6 auf 5,3 je Welt; das wird gesondert untersucht.
+
+**Rechenzeit** (Node, 5 Welten nach 300 Jahren, je 5 Jahre): Ein Tick
+belegt weniger Speicher als vorher (aged 13,8 statt 14,6 KB, diplomacy
+20,0 statt 21,6 KB), der Median ist durch mehr Siedlungen und Gebäude etwa
+25 % langsamer, der langsamste Tick 4,2 ms (aged) bzw. 6,3 ms (diplomacy).
+
