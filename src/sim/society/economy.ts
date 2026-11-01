@@ -35,7 +35,7 @@ import {
 import { TRANSIT_TUNING } from './diplomacy';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
-import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, buildTradeRoad, totalStock, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -228,8 +228,18 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
     if (people === 0 && !sim.hasBuildings[c]) continue;
     const stock = c * MATERIAL_COUNT;
     if (people > 0) {
-      economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
-      economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
+      let wood = harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
+      let stone = harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
+      if (TRANSIT_TUNING.storeCap > 0 && TRANSIT_TUNING.capMode === 'stop') {
+        // A full store: people harvest only what still fits.
+        const room = Math.max(0, TRANSIT_TUNING.storeCap - totalStock(economy, c));
+        const share = wood + stone > room ? room / (wood + stone) : 1;
+        sim.trade.notHarvested += (wood + stone) * (1 - share);
+        wood *= share;
+        stone *= share;
+      }
+      economy.stock[stock + Material.Wood] += wood;
+      economy.stock[stock + Material.Stone] += stone;
       if (sim.hasBuildings[c]) harvestLuxury(sim, c, yearEnd);
     }
     let busy = false;

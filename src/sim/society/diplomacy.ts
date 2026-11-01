@@ -162,8 +162,10 @@ export const TRANSIT_TUNING = {
   counterVia: true,
   /** Luxury goods held for a partner are not used up by the settlement's own people. */
   reserve: false,
-  /** At most this much stock (all goods but money) per settlement, the rest spoils; 0 = no limit. */
+  /** At most this much stock (all goods but money) per settlement; 0 = no limit. */
   storeCap: 0,
+  /** Above the limit: 'spoil' = the rest spoils, 'stop' = wood and stone are harvested only up to it. */
+  capMode: 'spoil' as 'spoil' | 'stop',
 };
 
 export function createDiplomacy(cellCount: number): Diplomacy {

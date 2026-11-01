@@ -1,25 +1,57 @@
 // Settlement growth, trade and diplomacy over many worlds, to calibrate the
 // economy (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [open=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [capMode=spoil|stop] [merchants=4] [open=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
-import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
+import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
+import { satisfactionTerms } from '../src/sim/society/satisfaction';
+import * as simulation from '../src/sim/society/simulation';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
-import { SLOTS, SlotState } from '../src/sim/society/buildings';
+import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
 import * as diplomacy from '../src/sim/society/diplomacy';
 
 const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 // Simulation phase of the transit trade (older code has no switches).
-const tuning = (diplomacy as unknown as { TRANSIT_TUNING?: { on: boolean; counterVia: boolean; reserve: boolean; storeCap: number } }).TRANSIT_TUNING;
+const tuning = (diplomacy as unknown as { TRANSIT_TUNING?: { on: boolean; counterVia: boolean; reserve: boolean; storeCap: number; capMode: string } }).TRANSIT_TUNING;
 if (tuning) {
   tuning.on = (options.transit ?? '1') === '1';
   tuning.counterVia = (options.counterVia ?? '1') === '1';
   tuning.reserve = options.reserve === '1';
   tuning.storeCap = Number(options.storeCap ?? 0);
+  tuning.capMode = options.capMode ?? 'spoil';
 }
 const open = options.open === '1';
+// Merchants per trade center and harbor.
+if (options.merchants) {
+  for (const b of BUILDINGS as unknown as { name: string; amount: number }[]) if (b.name === 'Trade center' || b.name === 'Harbor') b.amount = Number(options.merchants);
+}
+
+// Why settlements rise up: their satisfaction terms at the moment of the uprising.
+const reasons = new Map<string, { sum: number; main: number }>();
+let rebels = 0;
+const hook = (simulation as unknown as { UPRISING_HOOK?: { fn: unknown } }).UPRISING_HOOK;
+if (hook) {
+  hook.fn = (sim: Simulation, cells: readonly number[], parent: number) => {
+    for (const c of cells) {
+      rebels++;
+      let worst = '';
+      let worstValue = 0;
+      for (const t of satisfactionTerms(sim, c, sim.civs[parent] ?? null)) {
+        const label = t.label.replace(/[\d.]+/g, '#').replace(/^(Luxury|Comfort).*/, '$1');
+        const r = reasons.get(label) ?? { sum: 0, main: 0 };
+        r.sum += t.value;
+        reasons.set(label, r);
+        if (t.value < worstValue) {
+          worstValue = t.value;
+          worst = label;
+        }
+      }
+      if (worst) reasons.get(worst)!.main++;
+    }
+  };
+}
 
 type Row = Record<string, number>;
 const rows = new Map<number, Row[]>();
@@ -68,6 +100,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       deliveredAbroad: abroad,
       transit: (sim.trade as { transit?: number }).transit ?? 0,
       spoiled: (sim.trade as { spoiled?: number }).spoiled ?? 0,
+      notHarvested: (sim.trade as { notHarvested?: number }).notHarvested ?? 0,
       freeTrade: countFreeTrade(sim),
       money,
       known: sim.chronicle.filter((e) => e.text.endsWith(' met.')).length,
@@ -93,6 +126,13 @@ for (const [year, list] of rows) {
   const range = (k: string) => `${Math.min(...list.map((r) => r[k])).toFixed(0)}..${Math.max(...list.map((r) => r[k])).toFixed(0)}`;
   console.log(`\nYear ${year}: mean [min..max]`);
   for (const k of keys) console.log(`  ${k.padEnd(20)} ${mean(k).toFixed(1).padStart(9)}  [${range(k)}]`);
+}
+
+if (rebels > 0) {
+  console.log(`\nUprisings: ${rebels} rebel settlements in ${worlds} worlds. Their satisfaction terms (mean per rebel settlement; main = the term that weighed worst):`);
+  for (const [label, r] of [...reasons].sort((a, b) => a[1].sum - b[1].sum)) {
+    console.log(`  ${label.padEnd(40)} ${(r.sum / rebels).toFixed(2).padStart(7)}  main for ${Math.round((100 * r.main) / rebels)} %`);
+  }
 }
 
 function countFreeTrade(sim: ReturnType<typeof createSimulation>): number {

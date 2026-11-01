@@ -1074,6 +1074,7 @@ function breakAway(sim: Simulation, owner: Uint8Array): void {
         if (hasSeat(sim.economy, c) && (capital < 0 || sim.cellPop[c] > sim.cellPop[capital])) capital = c;
       }
       if (capital < 0) capital = mostPopulousCell(sim, parent.id, inLeague);
+      UPRISING_HOOK.fn?.(sim, cells, parent.id);
       const civ = foundCivilization(sim, 'revolution', capital, parent);
       if (!civ) return; // all civilization ids in use; try again next quarter
       for (let i = 0; i < pop.end; i++) {
@@ -1092,6 +1093,9 @@ function breakAway(sim: Simulation, owner: Uint8Array): void {
     }
   }
 }
+
+/** Simulation phase (tools/economyStats.ts): called with the settlements of every uprising before they become a people. */
+export const UPRISING_HOOK: { fn: ((sim: Simulation, cells: readonly number[], parent: number) => void) | null } = { fn: null };
 
 /** Occasionally a new people appears in empty, livable land far from everyone. */
 function tryNewTribe(sim: Simulation): void {
