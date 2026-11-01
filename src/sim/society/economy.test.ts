@@ -9,6 +9,7 @@ import {
   Good,
   MATERIAL_COUNT,
   Material,
+  SETTLEMENT_SLOTS,
   SLOTS,
   SlotState,
   UPKEEP_GRACE_YEARS,
@@ -236,9 +237,9 @@ test('plains have more building slots than other land', () => {
     for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.biome[c] === biome) return c;
     throw new Error(`no biome ${biome}`);
   };
-  assert.equal(usableSlots(sim, first(Biome.Plains)), SLOTS);
+  assert.equal(usableSlots(sim, first(Biome.Plains)), SETTLEMENT_SLOTS);
   assert.equal(usableSlots(sim, first(Biome.Forest)), 4);
-  assert.ok(SLOTS > 4);
+  assert.ok(SETTLEMENT_SLOTS > 4);
 });
 
 /** A settled hex of the first people after some years, cleared of buildings, with a happy population. */

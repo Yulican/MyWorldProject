@@ -6,7 +6,8 @@
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
-import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
+import { BUILDINGS, GOV_SLOT, SLOTS, SlotState } from '../src/sim/society/buildings';
+import { GOV_TUNING } from '../src/sim/society/taxes';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
@@ -15,6 +16,15 @@ const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 const open = options.open === '1';
+// Central government variants: gov=1 switches it on; goods=1 taxes goods too (variant B); mean=1 sets the rate by the district mean instead of the weakest settlement; margin, plus, minus, traders, capital tune it.
+if (options.gov === '1') GOV_TUNING.on = true;
+if (options.goods === '1') GOV_TUNING.goodsTax = true;
+if (options.mean === '1') GOV_TUNING.weakest = false;
+if (options.margin) GOV_TUNING.margin = Number(options.margin);
+if (options.plus) GOV_TUNING.taxPlus = Number(options.plus);
+if (options.minus) GOV_TUNING.taxMinus = Number(options.minus);
+if (options.traders) GOV_TUNING.traders = Number(options.traders);
+if (options.capital) GOV_TUNING.capitalTraders = Number(options.capital);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -65,6 +75,10 @@ for (let seed = 1; seed <= worlds; seed++) {
     let seats = 0;
     let travel = 0;
     let farFromSeat = 0;
+    let govBuildings = 0;
+    let govRuins = 0;
+    let govSeats = 0;
+    let rateSum = 0;
     for (let c = 0; c < sim.world.cellCount; c++) {
       const pop = sim.cellPop[c];
       if (pop > 0) {
@@ -75,6 +89,7 @@ for (let seed = 1; seed <= worlds; seed++) {
         if (sim.economy.luxuryCovered[c]) luxuryCovered++;
         travel += Math.min(sim.seatCost[c], 5);
         if (!(sim.seatCost[c] <= 2)) farFromSeat++;
+        rateSum += sim.government.cellRate[c];
       }
       if (pop >= 50) towns++;
       if (pop >= 150) cities++;
@@ -83,6 +98,11 @@ for (let seed = 1; seed <= worlds; seed++) {
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].deposit !== undefined) luxuryShops++;
         if (sim.economy.state[s] === SlotState.Ruin) ruins++;
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') seats++;
+        if (s - c * SLOTS >= GOV_SLOT) {
+          if (sim.economy.state[s] === SlotState.Standing) govBuildings++;
+          if (sim.economy.state[s] === SlotState.Ruin) govRuins++;
+          if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') govSeats++;
+        }
       }
     }
     const text = (s: string) => sim.chronicle.filter((e) => e.text.includes(s)).length;
@@ -123,6 +143,17 @@ for (let seed = 1; seed <= worlds; seed++) {
       running: sim.diplomacy.agreements.length,
       ranOut: text('ran out.'),
       uprisings: text('rose up'),
+      'tax rate % (mean)': (100 * rateSum) / Math.max(1, settlements),
+      'taxes collected': sim.government.collected,
+      'goods taxed': sim.government.collectedGoods,
+      'gov spent': sim.government.spent,
+      'gov built': sim.government.built,
+      'gov buildings': govBuildings,
+      'gov seats': govSeats,
+      'gov ruins': govRuins,
+      treasuries: sim.government.treasury.reduce((a, v) => a + v, 0),
+      'gov trips running': sim.government.trips.length,
+      'tax changes': text('the taxes'),
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);

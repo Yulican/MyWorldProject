@@ -4,9 +4,9 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
-import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
 import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
-import { LUXURY_PER_PERSON, hasSeat, yieldFactor } from './satisfaction';
+import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
@@ -286,7 +286,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
     const yearly = Math.max(0, upkeep - harvest);
-    if (yearly > 0 && hasSeat(economy, cell)) {
+    if (yearly > 0 && settlementSeat(economy, cell)) {
       // A seat of government's upkeep comes first: it keeps SEAT_UPKEEP_YEARS
       // of what its harvest lacks, orders in worthwhile lots before it runs
       // out, and those trips go before all others.
@@ -368,7 +368,8 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
 
 function upkeepOf(eco: Economy, cell: number, material: number): number {
   let sum = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  // The settlement's own buildings (the government keeps up its own).
+  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
     sum += material === 0 ? b.upkeepWood : b.upkeepStone;
@@ -742,6 +743,14 @@ function isHub(sim: Simulation, cell: number): boolean {
     trade.hubTick = sim.tick;
   }
   return trade.hubMark[cell] === 1;
+}
+
+/** Whether the settlement itself keeps up a seat of government (not one in the government's slots). */
+function settlementSeat(eco: Economy, cell: number): boolean {
+  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
+    if (eco.state[s] === SlotState.Standing && BUILDINGS[eco.type[s]].good === Good.Seat) return true;
+  }
+  return false;
 }
 
 /** Bits of the goods `civ` still owes under trade agreements this tick (computed once per tick for all peoples). */

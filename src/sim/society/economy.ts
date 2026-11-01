@@ -10,6 +10,8 @@ import {
   MATERIAL_COUNT,
   Material,
   REPAIR_SHARE,
+  GOV_SLOT,
+  SETTLEMENT_SLOTS,
   SLOTS,
   SlotState,
   UPKEEP_GRACE_YEARS,
@@ -32,6 +34,7 @@ import {
   seatField,
   yieldFactor,
 } from './satisfaction';
+import { GOV_TUNING } from './taxes';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
 import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
@@ -57,7 +60,7 @@ const BUILD_FROM_CROWDING = 0.5;
 export const SAVE_UP_YEARS = 5;
 
 /** Building slots of a hex on plains and elsewhere: plains build up, woods and mountains supply them. */
-const PLAINS_SLOTS = SLOTS;
+const PLAINS_SLOTS = SETTLEMENT_SLOTS;
 const OTHER_SLOTS = 4;
 
 /** Building slots a hex can use. */
@@ -135,7 +138,7 @@ export function cellModifiers(sim: Simulation, cell: number): SupplyModifier[] {
 }
 
 /** People a hex would support with its standing buildings plus up to two extra types. */
-function capacityWith(sim: Simulation, cell: number, extraA: number, extraB: number): number {
+export function capacityWith(sim: Simulation, cell: number, extraA: number, extraB: number): number {
   const base = cell * SUPPLY_KINDS;
   let capacity = Infinity;
   for (let k = 0; k < SUPPLY_KINDS; k++) {
@@ -201,7 +204,8 @@ function harvestWith(sim: Simulation, cell: number, good: number, extraA: number
 function upkeepWith(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
   const { economy } = sim;
   let sum = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  // The settlement's own buildings (the government keeps up its own).
+  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
     if (economy.state[s] === SlotState.Standing) sum += upkeepOfType(economy.type[s], material);
   }
   if (extraA >= 0) sum += upkeepOfType(extraA, material);
@@ -278,14 +282,15 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       if (st === SlotState.Construction || st === SlotState.Repair) {
         // Only people build; an empty hex's construction site waits.
         if (people > 0) economy.work[s] -= 1 / STEPS_PER_YEAR;
-        if (economy.work[s] > 1e-4) busy = true;
+        if (economy.work[s] > 1e-4 && s < c * SLOTS + GOV_SLOT) busy = true;
         else {
           economy.state[s] = SlotState.Standing;
           economy.work[s] = 0;
           economy.unpaid[s] = 0;
           supplyChanged = true;
         }
-      } else if (st === SlotState.Standing && yearEnd) {
+      } else if (st === SlotState.Standing && yearEnd && s < c * SLOTS + GOV_SLOT) {
+        // The government keeps up its own buildings (government.ts).
         const b = BUILDINGS[economy.type[s]];
         // Nobody maintains an empty hex's buildings.
         if (
@@ -317,14 +322,14 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
       const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
       // A planned seat of government comes first: nothing new, only repairs, until it stands.
-      const seatFirst = sim.seatSite[c] > 0;
+      const seatFirst = sim.seatSite[c] > 0 && !GOV_TUNING.on;
       const started =
         !busy &&
         (seatFirst
           ? planBuilding(sim, c, true)
           : planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
       if (started || (!busy && !seatFirst && yearEnd && planTrade(sim, c))) supplyChanged = true;
-      if (sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
+      if (sim.seatSite[c] && !GOV_TUNING.on && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
         buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
@@ -383,7 +388,7 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
   let firstType = -1;
 
   // Options: every population building type in a free slot, every ruined one repaired.
-  for (let option = 0; option < BUILDINGS.length + SLOTS; option++) {
+  for (let option = 0; option < BUILDINGS.length + SETTLEMENT_SLOTS; option++) {
     let type: number;
     let slot = -1;
     if (option < BUILDINGS.length) {
@@ -415,7 +420,7 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
     }
 
     // After an affordable production building (new or repaired) first.
-    for (let first = 0; first < BUILDINGS.length + SLOTS; first++) {
+    for (let first = 0; first < BUILDINGS.length + SETTLEMENT_SLOTS; first++) {
       let ptype: number;
       let pslot = -1;
       if (first < BUILDINGS.length) {
@@ -588,7 +593,7 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
   let bestTime = Infinity;
   let bestSlot = -1;
   let bestType = -1;
-  for (let option = 0; option < BUILDINGS.length + SLOTS; option++) {
+  for (let option = 0; option < BUILDINGS.length + SETTLEMENT_SLOTS; option++) {
     let type: number;
     let slot = -1;
     if (option < BUILDINGS.length) {
@@ -871,7 +876,7 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
     upkeepWood: upkeepWith(sim, cell, Material.Wood, -1, -1),
     upkeepStone: upkeepWith(sim, cell, Material.Stone, -1, -1),
     buildings,
-    slots: SLOTS,
+    slots: usableSlots(sim, cell),
     trade: hexTrade(sim, cell),
   };
 }
