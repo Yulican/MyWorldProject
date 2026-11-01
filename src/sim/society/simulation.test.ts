@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mayPass } from './diplomacy';
 import { test } from 'node:test';
 import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
@@ -250,19 +251,21 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
     const c = queue.pop()!;
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
-      if (hasRoad(world, c, d) && world.owner[nb] === civId && !reached.has(nb)) {
+      // Roads through its own land, and land opened to it, connect.
+      if (hasRoad(world, c, d) && mayPass(sim.diplomacy, civId, world.owner[nb]) && world.owner[nb] !== 0 && !reached.has(nb)) {
         reached.add(nb);
         queue.push(nb);
       }
     }
   }
-  return [...world.owner.keys()].filter((c) => world.owner[c] === civId && !reached.has(c));
+  // Land in its grace period (cut off by a closed border) may still belong to it.
+  return [...world.owner.keys()].filter((c) => world.owner[c] === civId && !reached.has(c) && sim.diplomacy.cutOffSince[c] < 0);
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement is cut off in year 207.
-  const sim = createSimulation(generateWorld({ seed: 103 }));
-  for (let year = 1; year <= 210; year++) {
+  // In this world a settlement is cut off in year 180.
+  const sim = createSimulation(generateWorld({ seed: 137 }));
+  for (let year = 1; year <= 183; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);

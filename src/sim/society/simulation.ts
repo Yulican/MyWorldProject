@@ -176,6 +176,8 @@ export type Simulation = {
   diplomacy: Diplomacy;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
+  /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
+  cutOwnerSeen: Uint8Array;
   /** Inhabitants of 16 and older per hex, counted at every refresh (they earn money). */
   cellAdults: Int32Array;
   /** Notable events, oldest first. */
@@ -221,6 +223,7 @@ export function createSimulation(world: World): Simulation {
     trade: createTrade(world.seed, n),
     diplomacy: createDiplomacy(n),
     bordersSeen: 0,
+    cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
     chronicle: [],
     migrations: { groups: 0, abroad: 0 },
@@ -660,27 +663,23 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
   }
 }
 
-/**
- * Quarterly: a people's hexes that are no longer connected to its capital by
- * roads through its own hexes (e.g. because a hex between them emptied and
- * was lost) found a new civilization, one per cut-off group. This ignores the
- * soft cap MAX_CIVS (only new tribes respect it). Its people keep 60 % of their faith and no
- * longer worship the player (design doc, section 5).
- */
 /** Scratch for splitCutOffLand: group per hex (-1 between calls) and visit stamps. */
 let cutGroup = new Int32Array(0);
 let cutMarks = new Int32Array(0);
 let cutStamp = 0;
 
-export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
+/** splitCutOffLand without remembering the owners it saw. */
+function splitCutOffLandOnce(sim: Simulation, owner: Uint8Array): void {
   const { world, pop } = sim;
   const n = world.cellCount;
-  // Land is only cut off after a hex changed hands since the last snapshot
-  // (`world.owner`); otherwise skip the search.
+  // Land is only cut off after a hex changed hands since the last check
+  // (`cutOwnerSeen`; uprisings and migration happen after it); otherwise
+  // skip the search.
   // A grace period running is checked again, but only for its people.
   const dip = sim.diplomacy;
   let changed = sim.bordersSeen !== dip.bordersVersion;
-  for (let c = 0; c < n && !changed; c++) changed = owner[c] !== world.owner[c] && world.owner[c] !== 0;
+  const seen = sim.cutOwnerSeen;
+  for (let c = 0; c < n && !changed; c++) changed = owner[c] !== seen[c] && seen[c] !== 0;
   let pending: Set<number> | null = null;
   if (!changed) {
     for (let c = 0; c < n; c++) if (dip.cutOffSince[c] >= 0 && owner[c]) (pending ??= new Set()).add(owner[c]);
@@ -783,6 +782,18 @@ export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
       record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital);
     }
   }
+}
+
+/**
+ * Quarterly: a people's hexes that are no longer connected to its capital by
+ * roads through its own hexes (e.g. because a hex between them emptied and
+ * was lost) found a new civilization, one per cut-off group. This ignores the
+ * soft cap MAX_CIVS (only new tribes respect it). Its people keep 60 % of their faith and no
+ * longer worship the player (design doc, section 5).
+ */
+export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
+  splitCutOffLandOnce(sim, owner);
+  sim.cutOwnerSeen.set(owner);
 }
 
 /**

@@ -268,7 +268,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
     if (people > 0) {
       economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
       economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
-      if (sim.hasBuildings[c]) harvestLuxury(sim, c, yearEnd);
+      harvestLuxury(sim, c, yearEnd);
     }
     let busy = false;
     let supplyChanged = false;
@@ -479,7 +479,8 @@ function planTrade(sim: Simulation, cell: number): boolean {
 
 /**
  * A quarter of the luxury goods the hex's standing buildings harvest from
- * its deposit; at the year's end its people use their yearly need of each,
+ * its deposit; at the year's end its people use their yearly need of each
+ * (with buildings or without),
  * and the goods whose need the stock covered count for their satisfaction.
  */
 function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
