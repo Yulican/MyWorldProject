@@ -1,7 +1,7 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
-Stand: Schritt 1 umgesetzt mit den Zahlen aus der Simulation (Ablauf:
-Design → Simulation → Umsetzung), Zwischenhandel im Entwurf, Handelsspanne zurückgestellt. Baut auf dem
+Stand: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
+(Ablauf: Design → Simulation → Umsetzung), Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
 bestimmt.
@@ -17,7 +17,7 @@ Geld wird dadurch mehr wert.
 
 1. **Regionale Rohstoffe** (Abschnitt 3) und **verlässliche
    Handelsabkommen** (Abschnitt 4).
-2. **Zwischenhandel** (Abschnitt 6).
+2. **Zwischenhandel, gezielter Luxusabbau, Ausbau der Ebene** (Abschnitt 6).
 3. **Handelsspanne** (Abschnitt 5), zurückgestellt bis nach dem
    Zwischenhandel.
 
@@ -29,9 +29,10 @@ abgestimmt.
 
 - **Grundsammeln:** Jedes Feld sammelt 2 Holz und 2 Stein im Jahr.
 - **Holz aus Wäldern:** Nur Wald und Dschungel sammeln dazu Holz nach ihrem
-  Holzvorkommen (10 × Vorkommen: Wald etwa 9, Dschungel 10).
+  Holzvorkommen (5 × Vorkommen: Wald etwa 4,5, Dschungel 5; in Schritt 1
+  noch 10 ×, in Schritt 2 gesenkt, weil Holz und Stein sich stapelten).
 - **Stein aus Bergen:** Nur Hügel und Gebirge sammeln dazu Stein nach ihrem
-  Steinvorkommen (10 × Vorkommen: Hügel etwa 6, Gebirge 9; Marmor-Vorkommen
+  Steinvorkommen (5 × Vorkommen: Hügel etwa 3, Gebirge 4,5; Marmor-Vorkommen
   zählen dazu).
 - Andere Gebiete bekommen kein zusätzliches Holz oder Stein aus ihrem
   Vorkommen.
@@ -86,13 +87,47 @@ Geld aller Völker), Abkommen gebrochen 9 / 9 / 16 / 11 %. Die Unterschiede
 liegen im Rauschen: Handel mit anderen Völkern ist nur gut 6 % des
 Handels, die Spanne verschiebt vor allem Geld.
 
-## 6. Zwischenhandel (Schritt 2)
+## 6. Zwischenhandel, Luxusabbau, Ausbau der Ebene (Schritt 2)
 
-- Eine Siedlung darf Waren einkaufen, die sie selbst nicht braucht, solange
-  ein Handelspartner ihres Volks sie verlangt, und sie weiterverkaufen.
-- Als Gegenware eines Handelsabkommens zählen auch Waren, die der Abnehmer
-  selbst aus einem anderen Abkommen bezieht.
-- Zwischenlager: getestet wird eine Grenze für den Vorrat pro Siedlung.
+**Zwischenhandel**
+- Zwischenhändler sind nur Siedlungen mit Händlern (Handelszentrum oder
+  Hafen): für jeden Handelspartner des Volks (Freihandel, Abnehmer eines
+  Handelsabkommens) die Siedlung, die ihn am schnellsten erreicht. Sie wird
+  einmal im Jahr bestimmt, je Volk in der Woche seiner Nummer.
+- Fehlt dem Partner eine Ware in Summe, verlangt der Zwischenhändler sie
+  zusätzlich zum eigenen Bedarf, höchstens eine Händlerladung, und hält sie
+  für den Partner bereit. Sie kommt aus dem eigenen Volk oder von einem
+  anderen Partner (Weiterverkauf A → B → C).
+- **Reserve:** Was er für den Partner hält, verbrauchen seine eigenen
+  Bewohner nicht.
+- Bezahlt wird zum festen Preis (ohne Spanne).
+- **Gegenware über Dritte:** Bei Handelsabkommen zählt als Gegenware auch,
+  was der Abnehmer von seinen anderen Partnern bekommen kann (was diese in
+  Summe übrig haben).
+- Eine Lagergrenze gibt es nicht. Getestet und verworfen: Mit 1.000 Einheiten
+  pro Siedlung (Rest verdirbt) mehr Handel, aber etwa 5 % weniger Menschen
+  und mehr Verderb als insgesamt gehandelt wird. Die Ernte bei vollem Lager
+  zu drosseln, kann später als Rechenzeit-Verbesserung dienen.
+
+**Gezielter Luxusabbau**
+- Luxusgüter sind strategisch wichtig. Eine Siedlung auf einem
+  Luxus-Vorkommen baut das Abbaugebäude, sobald ihr Volk oder einer seiner
+  Handelspartner die Ware in Summe vermisst, auch wenn sie selbst zufrieden
+  ist (bisher nur, wenn sie unzufrieden war; Pferde, Marmor und Edelsteine
+  wurden so nie abgebaut).
+- Deckt ihre Ernte den Unterhalt nicht, kommt er über den Handel, sofern
+  ihr Volk Holz und Stein übrig hat.
+
+**Ausbau der Ebene**
+- Ebenen haben 6 statt 4 Bauplätze. Wälder und Gebirge liefern das Holz
+  und den Stein dafür.
+- Grundsammeln bleibt bei 2; mit 1,5 oder 1 werden Regierungssitze
+  unbezahlbar (16 % weniger Menschen, Aufstände bis 8,5 je Welt).
+
+**Händler**
+- Ein Händler trägt 40 statt 20 Gewichtseinheiten. Mehr Händler pro Gebäude
+  (6 oder 8 statt 4) brachten dagegen kaum etwas: Engpass war die Nachfrage,
+  nicht die Zahl der Händler.
 
 ## 7. Simulation und Kalibrierung (Schritt 1)
 

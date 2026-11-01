@@ -1,55 +1,26 @@
-// Settlement growth, trade and diplomacy over many worlds, to calibrate the
-// economy (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [capMode=spoil|stop] [merchants=4] [load=20] [forage=10] [base=2] [luxury=0] [plainsSlots=4] [open=0]
+// Settlement growth, trade, diplomacy and uprisings over many worlds, to
+// calibrate the economy (see "Design Documents/Requirement Regionale
+// Rohstoffe.md").
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
-import { satisfactionTerms } from '../src/sim/society/satisfaction';
-import * as simulation from '../src/sim/society/simulation';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
-import * as buildings from '../src/sim/society/buildings';
 import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
-import * as trade from '../src/sim/society/trade';
-import * as economy from '../src/sim/society/economy';
-import * as diplomacy from '../src/sim/society/diplomacy';
+import { PAIRS } from '../src/sim/society/diplomacy';
+import { satisfactionTerms } from '../src/sim/society/satisfaction';
+import { UPRISING_HOOK } from '../src/sim/society/simulation';
 
 const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
-// Simulation phase of the transit trade (older code has no switches).
-const tuning = (diplomacy as unknown as { TRANSIT_TUNING?: { on: boolean; counterVia: boolean; reserve: boolean; storeCap: number; capMode: string } }).TRANSIT_TUNING;
-if (tuning) {
-  tuning.on = (options.transit ?? '1') === '1';
-  tuning.counterVia = (options.counterVia ?? '1') === '1';
-  tuning.reserve = options.reserve === '1';
-  tuning.storeCap = Number(options.storeCap ?? 0);
-  tuning.capMode = options.capMode ?? 'spoil';
-}
 const open = options.open === '1';
-// Merchants per trade center and harbor.
-if (options.merchants) {
-  for (const b of BUILDINGS as unknown as { name: string; amount: number }[]) if (b.name === 'Trade center' || b.name === 'Harbor') b.amount = Number(options.merchants);
-}
-
-// A merchant's load, and the factor on a hex's wood or stone (woods, hills, mountains).
-const load = (trade as unknown as { LOAD_TUNING?: { load: number } }).LOAD_TUNING;
-if (load && options.load) load.load = Number(options.load);
-const harvest = (buildings as unknown as { HARVEST_TUNING?: { perResource: number; base: number } }).HARVEST_TUNING;
-if (harvest && options.forage) harvest.perResource = Number(options.forage);
-if (harvest && options.base) harvest.base = Number(options.base);
-// Luxury deposits mined for trade, and building slots on plains.
-const econ = (economy as unknown as { ECONOMY_TUNING?: { luxuryForTrade: boolean; plainsSlots: number } }).ECONOMY_TUNING;
-if (econ) {
-  econ.luxuryForTrade = options.luxury === '1';
-  if (options.plainsSlots) econ.plainsSlots = Number(options.plainsSlots);
-}
 
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
-const hook = (simulation as unknown as { UPRISING_HOOK?: { fn: unknown } }).UPRISING_HOOK;
-if (hook) {
-  hook.fn = (sim: Simulation, cells: readonly number[], parent: number) => {
+{
+  UPRISING_HOOK.fn = (sim: Simulation, cells: readonly number[], parent: number) => {
     for (const c of cells) {
       rebels++;
       let worst = '';
@@ -131,9 +102,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       stoneTraded: sim.trade.delivered[1],
       allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0),
       deliveredAbroad: abroad,
-      transit: (sim.trade as { transit?: number }).transit ?? 0,
-      spoiled: (sim.trade as { spoiled?: number }).spoiled ?? 0,
-      notHarvested: (sim.trade as { notHarvested?: number }).notHarvested ?? 0,
+      transit: sim.trade.transit,
       freeTrade: countFreeTrade(sim),
       money,
       known: sim.chronicle.filter((e) => e.text.endsWith(' met.')).length,
@@ -170,6 +139,6 @@ if (rebels > 0) {
 
 function countFreeTrade(sim: ReturnType<typeof createSimulation>): number {
   let n = 0;
-  for (let a = 1; a < sim.civs.length; a++) for (let b = a + 1; b < sim.civs.length; b++) n += sim.diplomacy.freeTrade[a * diplomacy.PAIRS + b];
+  for (let a = 1; a < sim.civs.length; a++) for (let b = a + 1; b < sim.civs.length; b++) n += sim.diplomacy.freeTrade[a * PAIRS + b];
   return n;
 }

@@ -5,7 +5,7 @@ import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
-import { PAIRS, TRANSIT_TUNING, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
+import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
@@ -29,9 +29,7 @@ export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Sa
 const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
 export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
-export const MERCHANT_LOAD = 20;
-/** Simulation phase (Requirement Regionale Rohstoffe): a merchant's load, 20 = MERCHANT_LOAD. */
-export const LOAD_TUNING = { load: MERCHANT_LOAD };
+export const MERCHANT_LOAD = 40;
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
 /** Merchants go at most this far (travel cost, about weeks) one way. */
@@ -99,9 +97,6 @@ export type Trade = {
   transit: number;
   /** Per cell and good: what the settlement holds for a partner in transit (its own people don't use it up). */
   transitKeep: Float32Array;
-  /** Stock spoiled above the storage limit, and wood and stone not harvested because the store was full, so far (statistics). */
-  spoiled: number;
-  notHarvested: number;
   /** Per cell and good: priority factor for bringing an export hub goods it still lacks for a trade agreement, 0 = none. */
   hubFocus: Float32Array;
   /** Merchants per hex from its standing trade buildings, and how many are away. */
@@ -159,8 +154,6 @@ export function createTrade(seed: number, cellCount: number): Trade {
     transitFor: new Uint8Array(cellCount * TRADE_GOODS),
     transit: 0,
     transitKeep: new Float32Array(cellCount * TRADE_GOODS),
-    spoiled: 0,
-    notHarvested: 0,
     hubFocus: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -198,13 +191,6 @@ export function createTrade(seed: number, cellCount: number): Trade {
 // Stock
 
 /** A hex's stock of a trade good. */
-/** Stock of every good but money. */
-export function totalStock(eco: Economy, cell: number): number {
-  let total = 0;
-  for (let g = 0; g < TRADE_GOODS; g++) if (g !== TradeGood.Money) total += stockOf(eco, cell, g);
-  return total;
-}
-
 export function stockOf(eco: Economy, cell: number, good: number): number {
   if (good <= TradeGood.Stone) return eco.stock[cell * MATERIAL_COUNT + good];
   if (good === TradeGood.Money) return eco.money[cell];
@@ -336,35 +322,16 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // spares that stock for it.
   trade.transitFor.fill(0, t, t + TRADE_GOODS);
   trade.transitKeep.fill(0, t, t + TRADE_GOODS);
-  let room = Infinity;
-  if (TRANSIT_TUNING.storeCap > 0) {
-    // The storage limit: what lies above it spoils, and transit buys no more than fits.
-    const total0 = totalStock(economy, cell);
-    let total = total0;
-    if (total > TRANSIT_TUNING.storeCap && TRANSIT_TUNING.capMode === 'spoil') {
-      const keepShare = TRANSIT_TUNING.storeCap / total;
-      for (let g = 0; g < TRADE_GOODS; g++) {
-        if (g === TradeGood.Money) continue;
-        const stock = stockOf(economy, cell, g);
-        trade.spoiled += stock * (1 - keepShare);
-        addStock(economy, cell, g, -stock * (1 - keepShare));
-      }
-      total = TRANSIT_TUNING.storeCap;
-    }
-    room = Math.max(0, TRANSIT_TUNING.storeCap - Math.min(total, total0));
-  }
-  if (TRANSIT_TUNING.on && partners && known) {
+  if (partners && known) {
     for (const p of partners) {
       if (sim.diplomacy.transitHub[civ * PAIRS + p] !== cell || (p + 1) * TRADE_GOODS > trade.civWant.length) continue;
       for (let g = 0; g < TRADE_GOODS; g++) {
         if (g === TradeGood.Money) continue;
         const lack = trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g];
         if (lack <= 0) continue;
-        const keep = Math.min(lack, LOAD_TUNING.load / WEIGHT[g]);
+        const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
         const stock = stockOf(economy, cell, g);
-        const more = Math.min(keep - stock - trade.incoming[t + g], room);
-        if (more > trade.want[t + g]) room -= more - trade.want[t + g];
-        trade.want[t + g] = Math.max(trade.want[t + g], more);
+        trade.want[t + g] = Math.max(trade.want[t + g], keep - stock - trade.incoming[t + g]);
         trade.transitKeep[t + g] = Math.max(trade.transitKeep[t + g], keep);
         trade.surplus[t + g] = Math.max(trade.surplus[t + g], Math.min(stock, keep));
         trade.transitFor[t + g] = 1;
@@ -673,7 +640,7 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   const { trade, economy: eco } = sim;
   dealSell.fill(0);
   dealBuy.fill(0);
-  let load = LOAD_TUNING.load;
+  let load = MERCHANT_LOAD;
   let worth = 0;
   dealPriority = 0;
   dealOwed = false;
@@ -700,7 +667,7 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
   }
   let money = eco.money[home];
-  let backLoad = LOAD_TUNING.load;
+  let backLoad = MERCHANT_LOAD;
   for (const g of BY_VALUE) {
     if (g === TradeGood.Money || backLoad <= 0 || money <= 0) continue;
     const amount = Math.min(trade.want[home * TRADE_GOODS + g], trade.surplus[target * TRADE_GOODS + g], backLoad / WEIGHT[g], money / PRICE[g]);
@@ -975,7 +942,7 @@ export function advanceTrips(sim: Simulation): void {
         money += paid;
         owed -= paid;
         // Buy what home asked for with the money, or take it as payment for the rest.
-        let load = LOAD_TUNING.load;
+        let load = MERCHANT_LOAD;
         for (let g = 0; g < TRADE_GOODS; g++) load -= trade.tripCargo[cargo + g] * WEIGHT[g];
         for (const g of BY_VALUE) {
           if (g === TradeGood.Money || load <= 0) continue;

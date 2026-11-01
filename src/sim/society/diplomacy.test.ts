@@ -294,6 +294,11 @@ test('two-sided trade agreements: legs of equal value, limited by lack and spare
   // Too little of the counter good for a worthwhile leg.
   want[2 * goods + salt] = 1;
   assert.equal(exchangeAmounts(want, spare, 2, 1, TradeGood.Grain, salt), null);
+  // The buyer spares no salt itself, but gets it from a third people.
+  want[2 * goods + salt] = 3;
+  spare[1 * goods + salt] = 0;
+  assert.equal(exchangeAmounts(want, spare, 2, 1, TradeGood.Grain, salt), null);
+  assert.equal(exchangeAmounts(want, spare, 2, 1, TradeGood.Grain, salt, 6)![1], 3, 'from a third people');
 });
 
 const PERIOD = 2 * TICKS_PER_YEAR;
@@ -347,16 +352,24 @@ test('a supplier that could not deliver is not punished: the amount halves after
 });
 
 test('the buyer takes what a trade agreement owes even if it asks for nothing now', () => {
-  // World 1 after 300 years: settlements of the first people reach the sixth.
+  // World 1 after 300 years, borders open: the first pair of peoples whose merchants reach each other.
   const sim = createSimulation(generateWorld({ seed: 1 }));
   runYears(sim, 300);
-  const [a, b] = [1, 6];
   const dip = sim.diplomacy;
-  dip.known[pair(a, b)] = dip.known[pair(b, a)] = 1;
-  dip.open[pair(a, b)] = dip.open[pair(b, a)] = 1;
+  const ids = livingCivilizations(sim).map((c) => c.id);
+  for (const x of ids) for (const y of ids) if (x !== y) dip.known[pair(x, y)] = dip.open[pair(x, y)] = 1;
   const gold = TradeGood.Luxury + 3;
-  const hub = exportHub(sim, a, b, gold);
-  assert.ok(hub >= 0, 'a reaches b');
+  let a = -1;
+  let b = -1;
+  let hub = -1;
+  for (const x of ids) {
+    for (const y of ids) {
+      if (x === y || hub >= 0) continue;
+      hub = exportHub(sim, x, y, gold);
+      [a, b] = [x, y];
+    }
+  }
+  assert.ok(hub >= 0, 'two peoples reach each other');
   const l = leg(a, b, gold, 10, sim.tick);
   l.hub = hub;
   dip.agreements.push({ a, b, since: sim.tick, legs: [l] });

@@ -156,17 +156,6 @@ export type Diplomacy = {
   transitHub: Int32Array;
 };
 
-/** Simulation-phase tuning (Requirement Regionale Rohstoffe, Zwischenhandel): transit trade, and counter goods a buyer gets from third peoples. */
-export const TRANSIT_TUNING = {
-  on: true,
-  counterVia: true,
-  /** Luxury goods held for a partner are not used up by the settlement's own people. */
-  reserve: false,
-  /** At most this much stock (all goods but money) per settlement; 0 = no limit. */
-  storeCap: 0,
-  /** Above the limit: 'spoil' = the rest spoils, 'stop' = wood and stone are harvested only up to it. */
-  capMode: 'spoil' as 'spoil' | 'stop',
-};
 
 export function createDiplomacy(cellCount: number): Diplomacy {
   const pairs = PAIRS * PAIRS;
@@ -209,6 +198,7 @@ export function resetCivRelations(dip: Diplomacy, id: number): void {
       dip.freeTrade[k] = 0;
       dip.migration[k] = 0;
       dip.moods.delete(k);
+      dip.transitHub[k] = -1;
     }
   }
   dip.agreements = dip.agreements.filter((t) => t.a !== id && t.b !== id);
@@ -435,7 +425,6 @@ const reachTouched: number[] = [];
  */
 export function updateTransitHubs(sim: Simulation): void {
   const dip = sim.diplomacy;
-  if (!TRANSIT_TUNING.on) return;
   const week = sim.tick % TICKS_PER_YEAR;
   for (let a = week === 0 ? TICKS_PER_YEAR : week; a < sim.civs.length; a += TICKS_PER_YEAR) {
     if (!sim.civs[a]) continue;
@@ -772,7 +761,6 @@ function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, su
  * come from a third people).
  */
 function spareVia(dip: Diplomacy, want: Float32Array, spare: Float32Array, buyer: number, good: number, except: number): number {
-  if (!TRANSIT_TUNING.counterVia) return 0;
   let sum = 0;
   for (const p of dip.partners[buyer] ?? []) {
     if (p === except || p * TRADE_GOODS + good >= want.length) continue;

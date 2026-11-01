@@ -32,10 +32,9 @@ import {
   seatField,
   yieldFactor,
 } from './satisfaction';
-import { TRANSIT_TUNING } from './diplomacy';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
-import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, totalStock, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -57,18 +56,13 @@ const BUILD_FROM_CROWDING = 0.5;
 /** A settlement saves up for a building its harvest pays for within this many years. */
 export const SAVE_UP_YEARS = 5;
 
-/**
- * Simulation phase (Requirement Regionale Rohstoffe): `luxuryForTrade` = a
- * settlement on a luxury deposit mines it when its people or their trade
- * partners lack the good; `plainsSlots` = building slots on plains (SLOTS
- * is the most any hex has; others use OTHER_SLOTS).
- */
-export const ECONOMY_TUNING = { luxuryForTrade: false, plainsSlots: 4 };
+/** Building slots of a hex on plains (SLOTS, the most of any hex) and elsewhere: plains build up, woods and mountains supply them. */
+const PLAINS_SLOTS = SLOTS;
 const OTHER_SLOTS = 4;
 
 /** Building slots a hex can use. */
 export function usableSlots(sim: Simulation, cell: number): number {
-  return sim.world.biome[cell] === Biome.Plains ? ECONOMY_TUNING.plainsSlots : OTHER_SLOTS;
+  return sim.world.biome[cell] === Biome.Plains ? PLAINS_SLOTS : OTHER_SLOTS;
 }
 /** Smallest capacity gain (people) worth a building. */
 const MIN_GAIN = 0.5;
@@ -242,18 +236,8 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
     if (people === 0 && !sim.hasBuildings[c]) continue;
     const stock = c * MATERIAL_COUNT;
     if (people > 0) {
-      let wood = harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
-      let stone = harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
-      if (TRANSIT_TUNING.storeCap > 0 && TRANSIT_TUNING.capMode === 'stop') {
-        // A full store: people harvest only what still fits.
-        const room = Math.max(0, TRANSIT_TUNING.storeCap - totalStock(economy, c));
-        const share = wood + stone > room ? room / (wood + stone) : 1;
-        sim.trade.notHarvested += (wood + stone) * (1 - share);
-        wood *= share;
-        stone *= share;
-      }
-      economy.stock[stock + Material.Wood] += wood;
-      economy.stock[stock + Material.Stone] += stone;
+      economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
+      economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
       if (sim.hasBuildings[c]) harvestLuxury(sim, c, yearEnd);
     }
     let busy = false;
@@ -483,7 +467,7 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
     const i = cell * LUXURY_COUNT + k;
     if (economy.luxury[i] <= 0) continue;
     // Goods held for a trade partner in transit aren't the settlement's own.
-    const held = TRANSIT_TUNING.reserve ? Math.min(economy.luxury[i], sim.trade.transitKeep[cell * TRADE_GOODS + TradeGood.Luxury + k]) : 0;
+    const held = Math.min(economy.luxury[i], sim.trade.transitKeep[cell * TRADE_GOODS + TradeGood.Luxury + k]);
     const own = economy.luxury[i] - held;
     if (own >= need) covered |= 1 << k;
     economy.luxury[i] = held + Math.max(0, own - need);
@@ -518,7 +502,6 @@ function hasGood(sim: Simulation, cell: number, good: number): boolean {
  * people spare the wood and stone. Starts when affordable, else saves up.
  */
 function planDeposit(sim: Simulation, cell: number): boolean {
-  if (!ECONOMY_TUNING.luxuryForTrade) return false;
   const type = WORKSHOP_OF[sim.world.deposit[cell]];
   if (type === undefined || hasGood(sim, cell, BUILDINGS[type].good) || !buildingFits(sim, cell, type)) return false;
   const { economy, trade } = sim;

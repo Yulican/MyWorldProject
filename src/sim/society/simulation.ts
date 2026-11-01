@@ -1094,7 +1094,7 @@ function breakAway(sim: Simulation, owner: Uint8Array): void {
   }
 }
 
-/** Simulation phase (tools/economyStats.ts): called with the settlements of every uprising before they become a people. */
+/** Statistics only (tools/economyStats.ts: why settlements rise up): called with the settlements of every uprising before they become a people; unset in the game. */
 export const UPRISING_HOOK: { fn: ((sim: Simulation, cells: readonly number[], parent: number) => void) | null } = { fn: null };
 
 /** Occasionally a new people appears in empty, livable land far from everyone. */
