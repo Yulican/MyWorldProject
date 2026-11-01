@@ -56,13 +56,45 @@ const BUILD_FROM_CROWDING = 0.5;
 /** A settlement saves up for a building its harvest pays for within this many years. */
 export const SAVE_UP_YEARS = 5;
 
-/** Building slots of a hex on plains (SLOTS, the most of any hex) and elsewhere: plains build up, woods and mountains supply them. */
-const PLAINS_SLOTS = SLOTS;
+/** Building slots of a hex on plains and elsewhere: plains build up, woods and mountains supply them. */
+const PLAINS_SLOTS = 6;
 const OTHER_SLOTS = 4;
+
+/**
+ * Simulation phase (uprisings): `slots` = 'fixed' (PLAINS_SLOTS / OTHER_SLOTS),
+ * 'people' (one more per `perPeople` inhabitants) or 'cost' (up to SLOTS, each
+ * building beyond the fixed number costs `costStep` times the one before);
+ * `tradeUpkeep` = a settlement may build what its own harvest can't keep up
+ * if its people spare the wood and stone.
+ */
+export const SLOT_TUNING = { slots: 'fixed' as 'fixed' | 'people' | 'cost', perPeople: 50, costStep: 1.5, tradeUpkeep: false };
+
+const baseSlots = (sim: Simulation, cell: number) => (sim.world.biome[cell] === Biome.Plains ? PLAINS_SLOTS : OTHER_SLOTS);
 
 /** Building slots a hex can use. */
 export function usableSlots(sim: Simulation, cell: number): number {
-  return sim.world.biome[cell] === Biome.Plains ? PLAINS_SLOTS : OTHER_SLOTS;
+  if (SLOT_TUNING.slots === 'people') return Math.min(SLOTS, baseSlots(sim, cell) + Math.floor(sim.cellPop[cell] / SLOT_TUNING.perPeople));
+  if (SLOT_TUNING.slots === 'cost') return SLOTS;
+  return baseSlots(sim, cell);
+}
+
+/** Share of a building's cost: half for a repair; with rising costs more for every building beyond the fixed number. */
+function costShare(sim: Simulation, cell: number, slot: number): number {
+  if (slot >= 0) return REPAIR_SHARE;
+  if (SLOT_TUNING.slots !== 'cost') return 1;
+  let built = 0;
+  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (sim.economy.state[s] !== SlotState.Empty) built++;
+  const beyond = built + 1 - baseSlots(sim, cell);
+  return beyond > 0 ? Math.pow(SLOT_TUNING.costStep, beyond) : 1;
+}
+
+/** Whether a settlement can keep up a material with this yearly net: its own harvest, or (tradeUpkeep) what its people spare. */
+function keepsUp(sim: Simulation, cell: number, material: number, net: number): boolean {
+  if (net >= 0) return true;
+  if (!SLOT_TUNING.tradeUpkeep) return false;
+  const civ = sim.world.owner[cell];
+  const k = civ * TRADE_GOODS + material;
+  return k < sim.trade.civSpare.length && sim.trade.civSpare[k] - sim.trade.civWant[k] >= -net;
 }
 /** Smallest capacity gain (people) worth a building. */
 const MIN_GAIN = 0.5;
@@ -393,12 +425,12 @@ function planBuilding(sim: Simulation, cell: number): boolean {
     if (b.good >= SUPPLY_KINDS) continue;
     const gain = capacityWith(sim, cell, type, -1) - capacity;
     if (gain < MIN_GAIN || gain < bestGain) continue;
-    const share = slot >= 0 ? REPAIR_SHARE : 1;
+    const share = costShare(sim, cell, slot);
     const costWood = b.wood * share;
     const costStone = b.stone * share;
 
     // Directly, if the harvest keeps paying its upkeep.
-    if (netFast(sim, cell, Material.Wood, type, -1) >= 0 && netFast(sim, cell, Material.Stone, type, -1) >= 0) {
+    if (keepsUp(sim, cell, Material.Wood, netFast(sim, cell, Material.Wood, type, -1)) && keepsUp(sim, cell, Material.Stone, netFast(sim, cell, Material.Stone, type, -1))) {
       const wait = Math.max(yearsUntil(wood, costWood, netWood), yearsUntil(stone, costStone, netStone));
       if (wait <= SAVE_UP_YEARS && (gain > bestGain || wait < bestTime)) {
         bestGain = gain;
@@ -423,12 +455,12 @@ function planBuilding(sim: Simulation, cell: number): boolean {
       }
       const p = BUILDINGS[ptype];
       if (!isMaterial(p.good)) continue;
-      const pshare = pslot >= 0 ? REPAIR_SHARE : 1;
+      const pshare = costShare(sim, cell, pslot);
       if (wood < p.wood * pshare || stone < p.stone * pshare) continue;
       const netWood2 = netFast(sim, cell, Material.Wood, ptype, -1);
       const netStone2 = netFast(sim, cell, Material.Stone, ptype, -1);
-      if (netWood2 < 0 || netStone2 < 0) continue;
-      if (netFast(sim, cell, Material.Wood, ptype, type) < 0 || netFast(sim, cell, Material.Stone, ptype, type) < 0) continue;
+      if (!keepsUp(sim, cell, Material.Wood, netWood2) || !keepsUp(sim, cell, Material.Stone, netStone2)) continue;
+      if (!keepsUp(sim, cell, Material.Wood, netFast(sim, cell, Material.Wood, ptype, type)) || !keepsUp(sim, cell, Material.Stone, netFast(sim, cell, Material.Stone, ptype, type))) continue;
       const build = p.years * pshare;
       const wait =
         build +
@@ -456,7 +488,7 @@ function planBuilding(sim: Simulation, cell: number): boolean {
 /** Notes what a hex saves up for, so merchants can bring the rest (trade.ts). Returns false: nothing started. */
 function saveUp(sim: Simulation, cell: number, slot: number, type: number): boolean {
   const b = BUILDINGS[type];
-  const share = slot >= 0 ? REPAIR_SHARE : 1;
+  const share = costShare(sim, cell, slot);
   sim.economy.goal[cell * MATERIAL_COUNT + Material.Wood] = b.wood * share;
   sim.economy.goal[cell * MATERIAL_COUNT + Material.Stone] = b.stone * share;
   return false;
@@ -472,8 +504,9 @@ function planTrade(sim: Simulation, cell: number): boolean {
   for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free = true;
   if (!free) return false;
   const b = BUILDINGS[type];
-  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone) return false;
-  if (netWith(sim, cell, Material.Wood, type, -1) < 0 || netWith(sim, cell, Material.Stone, type, -1) < 0) return false;
+  const share = costShare(sim, cell, -1);
+  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood * share || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone * share) return false;
+  if (!keepsUp(sim, cell, Material.Wood, netWith(sim, cell, Material.Wood, type, -1)) || !keepsUp(sim, cell, Material.Stone, netWith(sim, cell, Material.Stone, type, -1))) return false;
   return startConstruction(sim, cell, -1, type);
 }
 
@@ -553,7 +586,7 @@ function planDeposit(sim: Simulation, cell: number): boolean {
   if (netWith(sim, cell, Material.Wood, type, -1) < 0 && !spares(TradeGood.Wood)) return false;
   if (netWith(sim, cell, Material.Stone, type, -1) < 0 && !spares(TradeGood.Stone)) return false;
   const b = BUILDINGS[type];
-  const share = slot >= 0 ? REPAIR_SHARE : 1;
+  const share = costShare(sim, cell, slot);
   const ready = economy.stock[cell * MATERIAL_COUNT + Material.Wood] >= b.wood * share && economy.stock[cell * MATERIAL_COUNT + Material.Stone] >= b.stone * share;
   return ready ? startConstruction(sim, cell, slot, type) : saveUp(sim, cell, slot, type);
 }
@@ -600,8 +633,8 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
     else if (isLuxury(b.good) && !hasGood(sim, cell, b.good)) gain = Math.min(LUXURY_EACH, LUXURY_MAX - luxuryNow);
     else continue;
     if (gain < bestGain || !buildingFits(sim, cell, type)) continue;
-    if (netFast(sim, cell, Material.Wood, type, -1) < 0 || netFast(sim, cell, Material.Stone, type, -1) < 0) continue;
-    const share = slot >= 0 ? REPAIR_SHARE : 1;
+    if (!keepsUp(sim, cell, Material.Wood, netFast(sim, cell, Material.Wood, type, -1)) || !keepsUp(sim, cell, Material.Stone, netFast(sim, cell, Material.Stone, type, -1))) continue;
+    const share = costShare(sim, cell, slot);
     const wait = Math.max(yearsUntil(wood, b.wood * share, netWood), yearsUntil(stone, b.stone * share, netStone));
     if (wait > SAVE_UP_YEARS || (gain === bestGain && wait >= bestTime)) continue;
     bestGain = gain;
@@ -695,7 +728,7 @@ function buildPlannedSeat(sim: Simulation, cell: number): boolean {
   const { economy } = sim;
   const b = BUILDINGS[SEAT_TYPE];
   let slot = seatSlot(sim, cell);
-  const share = slot !== null && slot >= 0 ? REPAIR_SHARE : 1;
+  const share = slot !== null && slot >= 0 ? REPAIR_SHARE : costShare(sim, cell, -1);
   economy.goal[cell * MATERIAL_COUNT + Material.Wood] = b.wood * share;
   economy.goal[cell * MATERIAL_COUNT + Material.Stone] = b.stone * share;
   if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood * share) return false;
@@ -777,7 +810,7 @@ function seatSlot(sim: Simulation, cell: number): number | null {
 function startConstruction(sim: Simulation, cell: number, slot: number, type: number): boolean {
   const { economy } = sim;
   const b = BUILDINGS[type];
-  const share = slot >= 0 ? REPAIR_SHARE : 1;
+  const share = costShare(sim, cell, slot);
   if (slot < 0) {
     for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end && slot < 0; s++) if (economy.state[s] === SlotState.Empty) slot = s;
     if (slot < 0) return false;
@@ -785,8 +818,9 @@ function startConstruction(sim: Simulation, cell: number, slot: number, type: nu
   }
   economy.stock[cell * MATERIAL_COUNT + Material.Wood] -= b.wood * share;
   economy.stock[cell * MATERIAL_COUNT + Material.Stone] -= b.stone * share;
-  economy.state[slot] = share < 1 ? SlotState.Repair : SlotState.Construction;
-  economy.work[slot] = b.years * share;
+  const repair = economy.state[slot] === SlotState.Ruin;
+  economy.state[slot] = repair ? SlotState.Repair : SlotState.Construction;
+  economy.work[slot] = b.years * (repair ? REPAIR_SHARE : 1);
   economy.unpaid[slot] = 0;
   sim.hasBuildings[cell] = 1;
   return true;

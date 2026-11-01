@@ -1,7 +1,7 @@
 // Settlement growth, trade, diplomacy and uprisings over many worlds, to
 // calibrate the economy (see "Design Documents/Requirement Regionale
 // Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [open=0] [slots=fixed|people|cost] [perPeople=50] [costStep=1.5] [tradeUpkeep=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
@@ -10,11 +10,20 @@ import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
+import * as economy from '../src/sim/society/economy';
 
 const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 const open = options.open === '1';
+// Simulation phase (uprisings): building limit and upkeep by trade.
+const slotTuning = (economy as unknown as { SLOT_TUNING?: { slots: string; perPeople: number; costStep: number; tradeUpkeep: boolean } }).SLOT_TUNING;
+if (slotTuning) {
+  if (options.slots) slotTuning.slots = options.slots;
+  if (options.perPeople) slotTuning.perPeople = Number(options.perPeople);
+  if (options.costStep) slotTuning.costStep = Number(options.costStep);
+  slotTuning.tradeUpkeep = options.tradeUpkeep === '1';
+}
 
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
