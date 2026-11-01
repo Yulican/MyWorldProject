@@ -1,4 +1,4 @@
-import { DIRECTION_COUNT } from '../hex';
+import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
@@ -80,6 +80,8 @@ const ROAD_RECHECK_YEARS = 4;
 const CENTER_MIN_VALUE = 15;
 /** Goods a trade agreement owes count this many times when a merchant picks a trip. */
 const FOCUS_AGREEMENT = 3;
+/** Settlements with merchants (nearest the buyer) an export hub is searched among. */
+const HUB_CANDIDATES = 3;
 
 /** Merchants on their way, as flat arrays per trip slot. */
 export type Trade = {
@@ -444,8 +446,12 @@ export function exportHub(sim: Simulation, supplier: number, buyer: number, good
   trialBuyer = buyer;
   let hub = -1;
   let hubCost = Infinity;
-  for (let home = 0; home < world.cellCount; home++) {
-    if (owner[home] !== supplier || !trade.merchants[home]) continue;
+  // Only the HUB_CANDIDATES settlements with merchants nearest the buyer's capital are searched from.
+  const capital = sim.civs[buyer]?.capital ?? -1;
+  const homes: number[] = [];
+  for (let home = 0; home < world.cellCount; home++) if (owner[home] === supplier && trade.merchants[home]) homes.push(home);
+  if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
+  for (const home of homes.slice(0, HUB_CANDIDATES)) {
     for (const t of searchWays(sim, owner, home, MAX_TRIP_COST, -1)) {
       if (owner[t] === buyer && sim.cellPop[t] > 0 && trade.want[t * TRADE_GOODS + good] > 0 && wayCost[t] < hubCost) {
         hubCost = wayCost[t];

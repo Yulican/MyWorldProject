@@ -49,6 +49,7 @@ import {
   GRACE_YEARS,
   createDiplomacy,
   mayPass,
+  measureDistances,
   noteEmigration,
   payToll,
   resetCivRelations,
@@ -276,6 +277,7 @@ export function stepSimulation(sim: Simulation): void {
   else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, sim.world.owner);
   else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
   else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
+  measureDistances(sim, sim.world.owner);
   if (yearEnd) closeYear(sim);
 }
 
@@ -663,17 +665,33 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
  * soft cap MAX_CIVS (only new tribes respect it). Its people keep 60 % of their faith and no
  * longer worship the player (design doc, section 5).
  */
+/** Scratch for splitCutOffLand: group per hex (-1 between calls) and visit stamps. */
+let cutGroup = new Int32Array(0);
+let cutMarks = new Int32Array(0);
+let cutStamp = 0;
+
 export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
   const { world, pop } = sim;
   const n = world.cellCount;
   // Land is only cut off after a hex changed hands since the last snapshot
   // (`world.owner`); otherwise skip the search.
+  // A grace period running is checked again, but only for its people.
   const dip = sim.diplomacy;
   let changed = sim.bordersSeen !== dip.bordersVersion;
-  for (let c = 0; c < n && !changed; c++) changed = (owner[c] !== world.owner[c] && world.owner[c] !== 0) || dip.cutOffSince[c] >= 0;
-  if (!changed) return;
+  for (let c = 0; c < n && !changed; c++) changed = owner[c] !== world.owner[c] && world.owner[c] !== 0;
+  let pending: Set<number> | null = null;
+  if (!changed) {
+    for (let c = 0; c < n; c++) if (dip.cutOffSince[c] >= 0 && owner[c]) (pending ??= new Set()).add(owner[c]);
+    if (!pending) return;
+  }
   sim.bordersSeen = dip.bordersVersion;
+  if (cutGroup.length !== n) {
+    cutGroup = new Int32Array(n).fill(-1);
+    cutMarks = new Int32Array(n);
+  }
+  const group = cutGroup;
   for (const parent of livingCivilizations(sim)) {
+    if (pending && !pending.has(parent.id)) continue;
     if (owner[parent.capital] !== parent.id) {
       const capital = mostPopulousCell(sim, parent.id, null);
       if (capital < 0 || owner[capital] !== parent.id) continue;
@@ -681,11 +699,12 @@ export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
     }
     // Roads through its own land and land opened to it connect; foreign
     // land crossed this way doesn't join the group.
-    const group = new Int32Array(n).fill(-1);
+    const touched: number[] = [];
     const connect = (start: number, id: number, through: (o: number) => boolean): number[] => {
       const cells = [start];
       const queue = [start];
       group[start] = id;
+      touched.push(start);
       for (let k = 0; k < queue.length; k++) {
         const c = queue[k];
         for (let d = 0; d < DIRECTION_COUNT; d++) {
@@ -694,6 +713,7 @@ export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
           if (nb < 0 || group[nb] >= 0) continue;
           if (owner[nb] === parent.id) {
             group[nb] = id;
+            touched.push(nb);
             cells.push(nb);
             queue.push(nb);
           } else if (owner[nb] !== 0 && through(owner[nb]) && group[nb] !== id) {
@@ -713,18 +733,19 @@ export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
       const cells = connect(c, cutOff.length + 1, () => false);
       // Cut off only by a closed border (connected through any foreign
       // land): GRACE_YEARS to open it again before it breaks away.
-      const marks = new Int32Array(n).fill(-1);
+      const marks = cutMarks;
+      const stamp = ++cutStamp;
       let viaForeign = false;
       const queue = [parent.capital];
-      marks[parent.capital] = 1;
+      marks[parent.capital] = stamp;
       for (let k = 0; k < queue.length && !viaForeign; k++) {
         const q = queue[k];
         for (let d = 0; d < DIRECTION_COUNT; d++) {
           if (!hasRoad(world, q, d)) continue;
           const nb = world.neighbors[q * DIRECTION_COUNT + d];
-          if (nb < 0 || marks[nb] === 1 || owner[nb] === 0) continue;
+          if (nb < 0 || marks[nb] === stamp || owner[nb] === 0) continue;
           if (group[nb] === cutOff.length + 1) viaForeign = true;
-          marks[nb] = 1;
+          marks[nb] = stamp;
           queue.push(nb);
         }
       }
@@ -736,6 +757,7 @@ export function splitCutOffLand(sim: Simulation, owner: Uint8Array): void {
       if (viaForeign && sim.tick - since < GRACE_YEARS * TICKS_PER_YEAR) continue;
       cutOff.push(cells);
     }
+    for (const c of touched) group[c] = -1;
     // Largest groups first, while civilization slots last.
     const people = (cells: number[]) => cells.reduce((sum, c) => sum + sim.cellCivPop[c * sim.civSlots + parent.id], 0);
     cutOff.sort((a, b) => people(b) - people(a));

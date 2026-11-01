@@ -344,20 +344,30 @@ const reachHeap = new MinHeap(256);
 const reachTouched: number[] = [];
 
 /**
- * Travel cost between the nearest settlements of every pair of peoples
- * within CONTACT_REACH (over any land, roads cheaper), into `dip.distance`.
+ * Weekly: for the peoples whose id falls on this week of the year (id modulo
+ * the weeks), the travel cost from their settlements to the nearest
+ * settlement of every other people within CONTACT_REACH (over any land,
+ * roads cheaper), into `dip.distance` both ways. So every people is
+ * measured once a year and no single week carries them all; the yearly
+ * update uses what was measured last.
  */
-function measureDistances(sim: Simulation, owner: Uint8Array, living: number[]): void {
+export function measureDistances(sim: Simulation, owner: Uint8Array): void {
   const { world } = sim;
   const dip = sim.diplomacy;
   const n = world.cellCount;
   if (reach.length !== n) reach = new Float32Array(n).fill(Infinity);
-  for (const a of living) for (const b of living) dip.distance[pair(a, b)] = a === b ? 0 : Infinity;
-  // Every people's settlements, in one pass.
-  const settlements: number[][] = [];
-  for (let c = 0; c < n; c++) if (owner[c] && sim.cellPop[c] > 0) (settlements[owner[c]] ??= []).push(c);
-  for (const a of living) {
-    for (const c of settlements[a] ?? []) {
+  const week = sim.tick % TICKS_PER_YEAR;
+  const turn: number[] = [];
+  for (let id = week === 0 ? TICKS_PER_YEAR : week; id < sim.civs.length; id += TICKS_PER_YEAR) if (sim.civs[id]) turn.push(id);
+  if (turn.length === 0) return;
+  for (const a of turn) {
+    for (let b = 1; b < sim.civs.length; b++) {
+      if (b === a) continue;
+      dip.distance[pair(a, b)] = Infinity;
+      dip.distance[pair(b, a)] = Infinity;
+    }
+    for (let c = 0; c < n; c++) {
+      if (owner[c] !== a || sim.cellPop[c] === 0) continue;
       reach[c] = 0;
       reachTouched.push(c);
       reachHeap.push(c, 0);
@@ -402,7 +412,6 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   const goodName = (g: number) => TRADE_GOOD_NAMES[g];
   const living: number[] = [];
   for (let id = 1; id < sim.civs.length; id++) if (sim.civs[id]) living.push(id);
-  measureDistances(sim, owner, living);
   const name = (id: number) => sim.civs[id]!.name;
   const capital = (id: number) => sim.civs[id]!.capital;
 
