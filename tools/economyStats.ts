@@ -40,6 +40,8 @@ if (options.seatupkeep) GOV_TUNING.seatUpkeep = Number(options.seatupkeep);
 if (options.secure) GOV_TUNING.secureYears = Number(options.secure);
 // partners=1: government traders also buy from peoples whose merchants trade with theirs (free trade, trade agreements).
 if (options.partners === '1') GOV_TUNING.buyPartners = true;
+// district=1: one planned seat per government district instead of per people.
+if (options.district === '1') GOV_TUNING.seatPerDistrict = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;

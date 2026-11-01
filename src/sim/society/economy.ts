@@ -643,45 +643,53 @@ const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 export function planSeats(sim: Simulation, owner: Uint8Array): void {
   const { economy, world } = sim;
   const n = world.cellCount;
-  const busy = new Uint8Array(sim.civSlots);
+  // One planned seat per people, or with GOV_TUNING.seatPerDistrict one per government district (by its seat cell).
+  const perDistrict = GOV_TUNING.on && GOV_TUNING.seatPerDistrict;
+  const groups = perDistrict ? n : sim.civSlots;
+  const groupOf = (c: number) => (perDistrict ? sim.government.district[c] : owner[c]);
+  const busy = new Uint8Array(groups);
   const candidates: number[][] = [];
-  const again = new Int32Array(sim.civSlots).fill(-1);
+  const again = new Int32Array(groups).fill(-1);
+  const civOf = perDistrict ? new Uint8Array(groups) : null;
   const year = Math.floor(sim.tick / (STEPS_PER_YEAR * 13));
   for (let c = 0; c < n; c++) {
     const id = owner[c];
+    const g = groupOf(c);
     if (sim.seatSite[c] && (id === 0 || sim.cellPop[c] === 0)) sim.seatSite[c] = 0; // lost
     if (sim.seatSite[c] && year + 1 - sim.seatSite[c] > SAVE_UP_YEARS) {
       sim.seatSite[c] = 0;
       // Queued by the government: it competes again with the other sites (below).
-      if (GOV_TUNING.on && sim.government.seatQueued[c] && id) again[id] = c;
+      if (GOV_TUNING.on && sim.government.seatQueued[c] && id && g >= 0) again[g] = c;
       // Not built in time: try elsewhere, and this site again only later.
       else sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
     }
-    if (id === 0) continue;
-    if (sim.seatSite[c]) busy[id] = 1;
+    if (id === 0 || g < 0) continue;
+    if (civOf) civOf[g] = id;
+    if (sim.seatSite[c]) busy[g] = 1;
     if (sim.hasBuildings[c]) {
       for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
         const st = economy.state[s];
-        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[id] = 1;
+        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[g] = 1;
       }
     }
     if (sim.cellPop[c] < EXPANSION_GROUP || sim.seatCost[c] < SEAT_MIN_COST || hasGood(sim, c, Good.Seat)) continue;
     if (sim.seatRetry[c] > year + 1) continue;
-    (candidates[id] ??= []).push(c);
+    (candidates[g] ??= []).push(c);
   }
   const field = scratchField(n);
-  for (let id = 1; id < sim.civSlots; id++) {
-    const list = candidates[id];
+  for (let g = perDistrict ? 0 : 1; g < groups; g++) {
+    const id = civOf ? civOf[g] : g;
+    const list = candidates[g];
     // A queued site keeps its plan while another seat is being built.
-    if (again[id] >= 0 && busy[id]) sim.seatSite[again[id]] = year + 1;
-    if (!sim.civs[id] || busy[id] || !list) continue;
+    if (again[g] >= 0 && busy[g]) sim.seatSite[again[g]] = year + 1;
+    if (!sim.civs[id] || busy[g] || !list) continue;
     // Held back by the expansion stop first, then the worst connected.
     const held = (c: number) => (sim.frontierBlocked[c] && year + 1 - sim.frontierBlocked[c] <= 1 ? 1 : 0);
     list.sort((a, b) => held(b) - held(a) || sim.seatCost[b] - sim.seatCost[a] || a - b);
     let best = -1;
     let bestBenefit = SEAT_MIN_BENEFIT;
     const evaluate = list.slice(0, SEAT_CANDIDATES);
-    if (again[id] >= 0 && list.includes(again[id]) && !evaluate.includes(again[id])) evaluate.push(again[id]);
+    if (again[g] >= 0 && list.includes(again[g]) && !evaluate.includes(again[g])) evaluate.push(again[g]);
     for (const c of evaluate) {
       const reached = seatField(sim, owner, id, [c], field);
       let benefit = 0;
@@ -700,7 +708,7 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
       }
     }
     if (best >= 0) sim.seatSite[best] = year + 1;
-    if (again[id] >= 0 && best !== again[id]) sim.seatRetry[again[id]] = year + SEAT_RETRY_YEARS + 1;
+    if (again[g] >= 0 && best !== again[g]) sim.seatRetry[again[g]] = year + SEAT_RETRY_YEARS + 1;
   }
 }
 
