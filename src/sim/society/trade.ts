@@ -325,6 +325,15 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     if (othersSpare > 0) buy += Math.min(trade.want[t + g], othersSpare) * PRICE[g];
   }
   trade.interest[cell] = sell >= MIN_TRIP_VALUE || (buy >= MIN_TRIP_VALUE && economy.money[cell] >= MIN_TRIP_VALUE) ? 1 : 0;
+  // Goods its people owe under a trade agreement go out whether the buyer asks or not.
+  if (!trade.interest[cell]) {
+    for (const a of sim.diplomacy.legs) {
+      if (a.supplier === civ && stockOf(economy, cell, a.good) > 0 && legOwed(a, sim.tick) > 0) {
+        trade.interest[cell] = 1;
+        break;
+      }
+    }
+  }
   return changed;
 }
 
