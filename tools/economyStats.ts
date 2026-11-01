@@ -31,6 +31,11 @@ if (options.queue) GOV_TUNING.queue = Number(options.queue);
 if (options.minload) GOV_TUNING.minLoad = Number(options.minload);
 if (options.price) for (let g = 0; g < PRICE.length; g++) PRICE[g] *= Number(options.price);
 if (options.money) ECON_TUNING.money = Number(options.money);
+// seattax: while a seat is to be paid for, 1 = its district, 2 = its whole people taxes with seatmargin instead of margin; seatcost, seatupkeep: factors on a government seat's cost and upkeep.
+if (options.seattax) GOV_TUNING.seatTax = Number(options.seattax);
+if (options.seatmargin) GOV_TUNING.seatMargin = Number(options.seatmargin);
+if (options.seatcost) GOV_TUNING.seatCost = Number(options.seatcost);
+if (options.seatupkeep) GOV_TUNING.seatUpkeep = Number(options.seatupkeep);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -164,6 +169,9 @@ for (let seed = 1; seed <= worlds; seed++) {
       'trader home: no need': sim.government.stayNoNeed,
       'trader home: no seller': sim.government.stayNoSource,
       'trader home: no money': sim.government.stayNoMoney,
+      'money transfers': sim.government.transfers,
+      'money transferred': sim.government.transferred,
+      'no seat could help': sim.government.noRichSeat,
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);
