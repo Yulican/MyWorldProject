@@ -49,6 +49,7 @@ import {
   GRACE_YEARS,
   createDiplomacy,
   mayPass,
+  PAIRS,
   measureDistances,
   updateTransitHubs,
   noteEmigration,
@@ -672,16 +673,21 @@ let cutStamp = 0;
 function splitCutOffLandOnce(sim: Simulation, owner: Uint8Array): void {
   const { world, pop } = sim;
   const n = world.cellCount;
-  // Land is only cut off after a hex changed hands since the last check
-  // (`cutOwnerSeen`; uprisings and migration happen after it); otherwise
-  // skip the search.
-  // A grace period running is checked again, but only for its people.
+  // Land is only cut off after a border changed (every people is checked)
+  // or a hex changed hands since the last check (`cutOwnerSeen`; uprisings
+  // and migration happen after it): then the people that lost it is
+  // checked, and those that could pass through it. A grace period running
+  // is checked again, for its people.
   const dip = sim.diplomacy;
-  let changed = sim.bordersSeen !== dip.bordersVersion;
   const seen = sim.cutOwnerSeen;
-  for (let c = 0; c < n && !changed; c++) changed = owner[c] !== seen[c] && seen[c] !== 0;
   let pending: Set<number> | null = null;
-  if (!changed) {
+  if (sim.bordersSeen === dip.bordersVersion) {
+    for (let c = 0; c < n; c++) {
+      const lost = seen[c];
+      if (lost === 0 || owner[c] === lost) continue;
+      (pending ??= new Set()).add(lost);
+      for (let p = 1; p <= dip.maxId; p++) if (dip.open[lost * PAIRS + p]) pending.add(p);
+    }
     for (let c = 0; c < n; c++) if (dip.cutOffSince[c] >= 0 && owner[c]) (pending ??= new Set()).add(owner[c]);
     if (!pending) return;
   }
