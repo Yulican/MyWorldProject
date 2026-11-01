@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { generateWorld } from '../world/generate';
 import {
   CLOSED_TRUST,
-  CONTACT_REACH,
+  SIGHT_RANGE,
   EVENT_TRUST,
   GRACE_YEARS,
   MIGRATION_LOSS,
@@ -55,14 +55,14 @@ test('peoples meet within reach, and trust and danger come from their terms', ()
   const dip = sim.diplomacy;
   assert.equal(dip.known[pair(a, b)], 1);
   assert.equal(dip.known[pair(b, a)], 1);
-  assert.ok(dip.distance[pair(a, b)] <= CONTACT_REACH);
+  assert.ok(dip.distance[pair(a, b)] <= SIGHT_RANGE);
   const trust = trustTerms(sim, a, b);
   assert.equal(trust[0].value, TRUST_BASE);
   assert.ok(Math.abs(dip.trust[pair(a, b)] - Math.max(0, Math.min(100, sumTerms(trust)))) < 1e-4);
   const danger = sumTerms(dangerTerms(sim, a, b));
   assert.ok(Math.abs(dip.danger[pair(a, b)] - Math.max(0, Math.min(100, danger))) < 1e-4);
   assert.equal(nearness(0), 1);
-  assert.equal(nearness(CONTACT_REACH), 0);
+  assert.equal(nearness(SIGHT_RANGE), 0);
   assert.equal(nearness(Infinity), 0);
 });
 

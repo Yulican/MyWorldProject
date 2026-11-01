@@ -17,8 +17,13 @@ import { MONEY_PER_ADULT, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, ex
 
 /** Civilization ids are below this (MAX_CIV_ID + 1). */
 export const PAIRS = 256;
-/** Two peoples meet once two of their settlements are this close (travel cost over land). */
-export const CONTACT_REACH = 10;
+/**
+ * How far a people sees, in travel cost over land from its settlements: two
+ * peoples meet once two of their settlements are this close, and nearness
+ * (trust from peaceful neighborhood, danger) falls off over it. Later also
+ * the people's natural sight on the map.
+ */
+export const SIGHT_RANGE = 10;
 /** Trust: the base value, plus up to PEACE_MAX from years of peaceful neighborhood (PEACE_PER_YEAR × nearness). */
 export const TRUST_BASE = 20;
 export const PEACE_PER_YEAR = 1;
@@ -256,9 +261,9 @@ export function dangerTerms(sim: Simulation, a: number, b: number): Term[] {
   ];
 }
 
-/** 1 for neighbors, 0 at or beyond CONTACT_REACH. */
+/** 1 for neighbors, 0 at or beyond SIGHT_RANGE. */
 export function nearness(distance: number): number {
-  return Number.isFinite(distance) ? Math.max(0, 1 - distance / CONTACT_REACH) : 0;
+  return Number.isFinite(distance) ? Math.max(0, 1 - distance / SIGHT_RANGE) : 0;
 }
 
 const distanceText = (d: number) => (Number.isFinite(d) ? d.toFixed(1) : 'out of reach');
@@ -346,7 +351,7 @@ const reachTouched: number[] = [];
 /**
  * Weekly: for the peoples whose id falls on this week of the year (id modulo
  * the weeks), the travel cost from their settlements to the nearest
- * settlement of every other people within CONTACT_REACH (over any land,
+ * settlement of every other people within SIGHT_RANGE (over any land,
  * roads cheaper), into `dip.distance` both ways. So every people is
  * measured once a year and no single week carries them all; the yearly
  * update uses what was measured last.
@@ -393,7 +398,7 @@ export function measureDistances(sim: Simulation, owner: Uint8Array): void {
         const nb = world.neighbors[c * DIRECTION_COUNT + d];
         if (nb < 0 || owner[nb] === a || isWaterBiome(world.biome[nb])) continue;
         const next = here + stepCost(world, c, d);
-        if (next >= reach[nb] || next > CONTACT_REACH) continue;
+        if (next >= reach[nb] || next > SIGHT_RANGE) continue;
         if (reach[nb] === Infinity) reachTouched.push(nb);
         reach[nb] = next;
         reachHeap.push(nb, next);
@@ -429,7 +434,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     for (const b of living) {
       if (a >= b) continue;
       const k = pair(a, b);
-      if (!dip.known[k] && dip.distance[k] <= CONTACT_REACH) {
+      if (!dip.known[k] && dip.distance[k] <= SIGHT_RANGE) {
         dip.known[k] = 1;
         dip.known[pair(b, a)] = 1;
         record(`The ${name(a)} and the ${name(b)} met.`, capital(b));

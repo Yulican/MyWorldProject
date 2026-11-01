@@ -26,8 +26,10 @@ Stufen:
 
 **Kontakt**
 - Zwei Völker kennen sich, sobald zwei ihrer Siedlungen höchstens
-  **10 Reisekosten** voneinander entfernt sind (Startwert). Gemessen wird über
-  Land und Straßen, durch fremdes Land hindurch.
+  **10 Reisekosten** voneinander entfernt sind, die **Sichtweite** eines
+  Volks (nach Test bestätigt; 20 war die Alternative). Gemessen wird über
+  Land und Straßen, durch fremdes Land hindurch. Die Sichtweite wird später
+  auch die natürliche Sichtweite eines Volks.
 - Beim ersten Kontakt startet das Vertrauen bei **20**, und es gibt einen
   Chronik-Eintrag.
 
@@ -262,8 +264,8 @@ Kennzahlen aus 12 Testwelten (`npx tsx tools/diplomacyStats.ts`), nach
 | Diplomatische Chronik-Einträge | 0,03 pro Spieljahr |
 | Rechenzeit unter Node | 4,3 ms pro Jahr (ohne Diplomatie 3,4 ms, also 1,27-fach) |
 
-Zur Wahl: Mit 20 statt 10 Reisekosten Kontaktreichweite gibt es etwa
-doppelt so viel Diplomatie:
+Geprüft und verworfen (der Nutzer bleibt nach dem Test bei 10): Mit 20 statt
+10 Reisekosten Sichtweite gibt es etwa doppelt so viel Diplomatie:
 - 3,5 Begegnungen
 - 2,3 offene Grenzen
 - 0,4 Freihandel
