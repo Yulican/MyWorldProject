@@ -88,6 +88,9 @@ export type Government = {
   sent: number;
   /** Statistics: money sent between seats, how often, and how often no seat could help. */
   transfers: number;
+  /** Statistics: candidate projects turned down by the income check and by the money-in-hand check. */
+  rejectBudget: number;
+  rejectCash: number;
   transferred: number;
   noRichSeat: number;
 };
@@ -130,6 +133,8 @@ export function createGovernment(cellCount: number): Government {
     stayNoMoney: 0,
     sent: 0,
     transfers: 0,
+    rejectBudget: 0,
+    rejectCash: 0,
     transferred: 0,
     noRichSeat: 0,
   };
@@ -174,7 +179,7 @@ function districtUpkeep(sim: Simulation, seat: number, withQueue = true): number
 }
 
 /** Yearly upkeep in money of a seat's district's government seats, built, being built or queued. */
-function districtSeatUpkeep(sim: Simulation, seat: number): number {
+function districtSeatUpkeep(sim: Simulation, seat: number, withQueue = true): number {
   const { economy } = sim;
   const gov = sim.government;
   let sum = 0;
@@ -185,7 +190,7 @@ function districtSeatUpkeep(sim: Simulation, seat: number): number {
       if ((st === SlotState.Standing || st === SlotState.Construction) && economy.type[s] === SEAT_TYPE) sum += upkeepGold(SEAT_TYPE);
     }
   }
-  for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) if (gov.projectType[i] === SEAT_TYPE) sum += upkeepGold(SEAT_TYPE);
+  if (withQueue) for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) if (gov.projectType[i] === SEAT_TYPE) sum += upkeepGold(SEAT_TYPE);
   return sum;
 }
 
@@ -193,6 +198,9 @@ function districtSeatUpkeep(sim: Simulation, seat: number): number {
 function upkeepMoney(sim: Simulation, seat: number): number {
   return GOV_TUNING.reserveUpkeep ? districtUpkeep(sim, seat, false) * MONEY_RESERVE_YEARS : 0;
 }
+
+/** What a new government building costs the treasury up front: its materials and its first reserve of upkeep, at market prices. */
+const buildGold = (type: number) => costOf(type, 0) * PRICE[0] + costOf(type, 1) * PRICE[1] + UPKEEP_RESERVE_YEARS * upkeepGold(type);
 
 const goldCost = (type: number) => BUILDINGS[type].wood * PRICE[0] + BUILDINGS[type].stone * PRICE[1];
 
@@ -502,10 +510,35 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   // a seat only has to fit beside the district's other seats (seats first in the budget).
   const budget = GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[seat] : gov.income[seat]);
   const seatUpkeep = GOV_TUNING.incomeShare > 0 ? districtSeatUpkeep(sim, seat) : 0;
-  const secured = (t: number) =>
+  const fitsBudget = (t: number) =>
     GOV_TUNING.incomeShare > 0
       ? (t === SEAT_TYPE ? seatUpkeep : upkeep) + upkeepGold(t) <= budget
       : gov.treasury[seat] >= GOV_TUNING.secureYears * (upkeep + upkeepGold(t));
+  // cashCheck: the treasury and the seat's stock also pay for the building and its first reserve, besides what the
+  // queue still costs and MONEY_RESERVE_YEARS of upkeep for the buildings standing (for a seat: the seats standing).
+  let cash = 0;
+  let committed = 0;
+  let keepExisting = 0;
+  let keepSeats = 0;
+  if (GOV_TUNING.cashCheck) {
+    cash = gov.treasury[seat];
+    for (let m = 0; m < MATERIAL_COUNT; m++) cash += gov.stock[seat * MATERIAL_COUNT + m] * PRICE[m];
+    for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) committed += buildGold(gov.projectType[i]);
+    keepExisting = MONEY_RESERVE_YEARS * districtUpkeep(sim, seat, false);
+    keepSeats = MONEY_RESERVE_YEARS * districtSeatUpkeep(sim, seat, false);
+  }
+  const paid = (t: number) => !GOV_TUNING.cashCheck || cash - committed - (t === SEAT_TYPE ? keepSeats : keepExisting) >= buildGold(t);
+  const secured = (t: number) => {
+    if (!fitsBudget(t)) {
+      gov.rejectBudget++;
+      return false;
+    }
+    if (!paid(t)) {
+      gov.rejectCash++;
+      return false;
+    }
+    return true;
+  };
   for (let c = 0; c < n; c++) {
     if (gov.district[c] !== seat || queued(gov, seat, c)) continue;
     const slot = freeGovSlot(sim, c);

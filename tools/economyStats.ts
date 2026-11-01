@@ -57,6 +57,8 @@ if (options.goodsplus) GOV_TUNING.goodsPlus = Number(options.goodsplus);
 if (options.goodsminus) GOV_TUNING.goodsMinus = Number(options.goodsminus);
 // potential=1: the income check compares upkeep with what the district could raise at its loyalty limit instead of last year's taxes.
 if (options.potential === '1') GOV_TUNING.potentialIncome = true;
+// cash=1: a project also needs its construction and first reserve in hand (treasury and seat stock), besides the queue and 2 years of upkeep.
+if (options.cash === '1') GOV_TUNING.cashCheck = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -194,6 +196,8 @@ for (let seed = 1; seed <= worlds; seed++) {
       'trader home: no seller': sim.government.stayNoSource,
       'trader home: no money': sim.government.stayNoMoney,
       'money transfers': sim.government.transfers,
+      'rejected: income check': sim.government.rejectBudget,
+      'rejected: money in hand': sim.government.rejectCash,
       'money transferred': sim.government.transferred,
       'no seat could help': sim.government.noRichSeat,
       'starting money': sim.government.startMoney,
