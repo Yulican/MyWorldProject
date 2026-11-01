@@ -59,6 +59,14 @@ const FOCUS_UNHAPPY = 2;
 const MIN_TRIP_VALUE = 5;
 /** Wood and stone a settlement keeps for this many years of upkeep before it sells. */
 const RESERVE_YEARS = 2;
+/**
+ * Simulation phase (uprisings): `bulk` = a settlement whose upkeep its own
+ * harvest doesn't cover keeps BULK_YEARS of the shortfall and orders when it
+ * falls below half of that, at least half a merchant's load, first;
+ * `tradePost` = such a settlement without merchants builds a trade center.
+ */
+export const UPKEEP_TUNING = { bulk: false, tradePost: false };
+const BULK_YEARS = 10;
 const RESERVE_MIN = 10;
 /** Luxury goods a settlement keeps (and asks for): this many years of its need. */
 const LUXURY_YEARS = 2;
@@ -271,6 +279,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
 
   // Wood and stone: ask for what the next building lacks, spare what is
   // beyond it and a reserve for upkeep.
+  let upkeepFocus = 0;
   for (let m = 0; m < MATERIAL_COUNT; m++) {
     const stock = economy.stock[cell * MATERIAL_COUNT + m];
     const goal = economy.goal[cell * MATERIAL_COUNT + m];
@@ -280,7 +289,18 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     // supply route, it asks for RESERVE_YEARS of the shortfall.
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
-    const shortfall = Math.max(0, upkeep - harvest) * RESERVE_YEARS;
+    const yearly = Math.max(0, upkeep - harvest);
+    if (UPKEEP_TUNING.bulk && yearly > 0) {
+      // Upkeep by trade: keep BULK_YEARS of it, order in worthwhile lots, first.
+      const keep = yearly * BULK_YEARS;
+      const have = stock - goal + trade.incoming[t + m];
+      const order = have < keep / 2 ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
+      trade.want[t + m] = Math.max(0, goal - stock - trade.incoming[t + m]) + order;
+      trade.surplus[t + m] = Math.max(0, stock - goal - Math.max(reserve, keep));
+      if (order > 0) upkeepFocus |= 1 << m;
+      continue;
+    }
+    const shortfall = yearly * RESERVE_YEARS;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
   }
@@ -313,6 +333,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // that stock is its surplus for the buyers. The further behind its
   // deliveries, the more its people hurry to bring it.
   trade.hubFocus.fill(0, t, t + TRADE_GOODS);
+  for (let m = 0; m < MATERIAL_COUNT; m++) if (upkeepFocus & (1 << m)) trade.hubFocus[t + m] = FOCUS_AGREEMENT;
   if (isHub(sim, cell)) hubWants(sim, cell, t);
   // Only goods the rest of its people, or its people's trade partners, ask
   // for or spare count (totals from the last refresh).
@@ -1075,6 +1096,17 @@ export function isCoast(world: World, cell: number): boolean {
  * when the hex has 25 more food or water than it can use and its people ask
  * for more of that good than they spare and make.
  */
+/** Whether a settlement's own harvest leaves the upkeep of its buildings short in wood or stone. */
+function importsUpkeep(sim: Simulation, cell: number): boolean {
+  const economy = sim.economy;
+  for (let m = 0; m < MATERIAL_COUNT; m++) {
+    const good = m === 0 ? Good.Wood : Good.Stone;
+    const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
+    if (upkeepOf(economy, cell, m) > harvest) return true;
+  }
+  return false;
+}
+
 export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: number) => boolean): number {
   const { world, trade } = sim;
   const owner = world.owner;
@@ -1082,6 +1114,8 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
   if (!civ) return -1;
   const workshop = WORKSHOP_OF[world.deposit[cell]];
   if (workshop !== undefined && !has(BUILDINGS[workshop].good)) return workshop;
+  // A settlement that lives on imported upkeep gets merchants of its own.
+  if (UPKEEP_TUNING.tradePost && !has(Good.Merchants) && importsUpkeep(sim, cell)) return TYPE_OF[Good.Merchants];
   if (!trade.interest[cell]) return granaryOrBarrels(sim, cell, civ);
   if (!takeSearches(sim, 3)) return -1;
   if (!has(Good.Merchants)) {
