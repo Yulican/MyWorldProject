@@ -149,6 +149,8 @@ export const UPKEEP_GRACE_YEARS = 2;
 /** Harvest without buildings ("foraging") per year: a base, in woods (wood) and hills and mountains (stone) plus the hex's wood or stone (0..1) times this. */
 const FORAGE_BASE = 2;
 const FORAGE_PER_RESOURCE = 10;
+/** Simulation phase (Requirement Regionale Rohstoffe): the factor on the hex's wood or stone, 10 = FORAGE_PER_RESOURCE. */
+export const HARVEST_TUNING = { perResource: FORAGE_PER_RESOURCE };
 
 export const SlotState = { Empty: 0, Construction: 1, Standing: 2, Ruin: 3, Repair: 4 } as const;
 
@@ -193,7 +195,7 @@ export function createEconomy(cellCount: number): Economy {
 /** Wood or stone a hex yields per year by foraging alone. */
 export function forageYield(world: World, cell: number, good: number): number {
   if (!harvestsHere(world, cell, good)) return FORAGE_BASE;
-  return FORAGE_BASE + FORAGE_PER_RESOURCE * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
+  return FORAGE_BASE + HARVEST_TUNING.perResource * world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
 }
 
 /** Whether the hex's biome yields its wood (woods) or stone (hills, mountains) beyond foraging. */
@@ -252,7 +254,7 @@ export function harvestTerms(world: World, eco: Economy, cell: number, good: num
   const resource = world.resources[cell * RESOURCE_COUNT + resourceOf(good)];
   const terms: Term[] = [{ label: 'Foraging', value: FORAGE_BASE }];
   if (harvestsHere(world, cell, good)) {
-    terms.push({ label: `${GOOD_NAMES[good]} ${resource.toFixed(2)} × ${FORAGE_PER_RESOURCE}`, value: FORAGE_PER_RESOURCE * resource });
+    terms.push({ label: `${GOOD_NAMES[good]} ${resource.toFixed(2)} × ${HARVEST_TUNING.perResource}`, value: HARVEST_TUNING.perResource * resource });
   }
   let total = forageYield(world, cell, good);
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {

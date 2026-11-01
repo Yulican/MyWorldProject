@@ -30,6 +30,8 @@ const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
 export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
 export const MERCHANT_LOAD = 20;
+/** Simulation phase (Requirement Regionale Rohstoffe): a merchant's load, 20 = MERCHANT_LOAD. */
+export const LOAD_TUNING = { load: MERCHANT_LOAD };
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
 /** Merchants go at most this far (travel cost, about weeks) one way. */
@@ -358,7 +360,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
         if (g === TradeGood.Money) continue;
         const lack = trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g];
         if (lack <= 0) continue;
-        const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
+        const keep = Math.min(lack, LOAD_TUNING.load / WEIGHT[g]);
         const stock = stockOf(economy, cell, g);
         const more = Math.min(keep - stock - trade.incoming[t + g], room);
         if (more > trade.want[t + g]) room -= more - trade.want[t + g];
@@ -671,7 +673,7 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   const { trade, economy: eco } = sim;
   dealSell.fill(0);
   dealBuy.fill(0);
-  let load = MERCHANT_LOAD;
+  let load = LOAD_TUNING.load;
   let worth = 0;
   dealPriority = 0;
   dealOwed = false;
@@ -698,7 +700,7 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
   }
   let money = eco.money[home];
-  let backLoad = MERCHANT_LOAD;
+  let backLoad = LOAD_TUNING.load;
   for (const g of BY_VALUE) {
     if (g === TradeGood.Money || backLoad <= 0 || money <= 0) continue;
     const amount = Math.min(trade.want[home * TRADE_GOODS + g], trade.surplus[target * TRADE_GOODS + g], backLoad / WEIGHT[g], money / PRICE[g]);
@@ -973,7 +975,7 @@ export function advanceTrips(sim: Simulation): void {
         money += paid;
         owed -= paid;
         // Buy what home asked for with the money, or take it as payment for the rest.
-        let load = MERCHANT_LOAD;
+        let load = LOAD_TUNING.load;
         for (let g = 0; g < TRADE_GOODS; g++) load -= trade.tripCargo[cargo + g] * WEIGHT[g];
         for (const g of BY_VALUE) {
           if (g === TradeGood.Money || load <= 0) continue;

@@ -1,13 +1,15 @@
 // Settlement growth, trade and diplomacy over many worlds, to calibrate the
 // economy (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [capMode=spoil|stop] [merchants=4] [open=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [capMode=spoil|stop] [merchants=4] [load=20] [forage=10] [open=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import * as simulation from '../src/sim/society/simulation';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
+import * as buildings from '../src/sim/society/buildings';
 import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
+import * as trade from '../src/sim/society/trade';
 import * as diplomacy from '../src/sim/society/diplomacy';
 
 const worlds = Number(process.argv[2] ?? 12);
@@ -27,6 +29,12 @@ const open = options.open === '1';
 if (options.merchants) {
   for (const b of BUILDINGS as unknown as { name: string; amount: number }[]) if (b.name === 'Trade center' || b.name === 'Harbor') b.amount = Number(options.merchants);
 }
+
+// A merchant's load, and the factor on a hex's wood or stone (woods, hills, mountains).
+const load = (trade as unknown as { LOAD_TUNING?: { load: number } }).LOAD_TUNING;
+if (load && options.load) load.load = Number(options.load);
+const harvest = (buildings as unknown as { HARVEST_TUNING?: { perResource: number } }).HARVEST_TUNING;
+if (harvest && options.forage) harvest.perResource = Number(options.forage);
 
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
