@@ -7,18 +7,22 @@
  * simulated for 300 years first (many peoples, territories, roads and
  * cities), over such worlds where every settled hex is a big city and free
  * land next to them has ruins (the most icons the map can show, see
- * fillBuildings.ts), and over such worlds where every settlement but the
- * capitals rose up (the most peoples and borders, see stirUnrest.ts).
+ * fillBuildings.ts), over such worlds where every settlement but the
+ * capitals rose up (the most peoples and borders, see stirUnrest.ts), where
+ * every settlement trades (openTrade.ts), and where every people opened its
+ * borders to every other and trades freely (dashed borders, merchants
+ * abroad; openDiplomacy.ts).
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade',
-  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean }
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy',
+  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean; diplomacy?: boolean }
 > = {
   young: { years: 0 },
   aged: { years: 300 },
   cities: { years: 300, buildings: true },
   unrest: { years: 300, unrest: true },
   trade: { years: 300, trade: true },
+  diplomacy: { years: 300, diplomacy: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 

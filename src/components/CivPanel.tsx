@@ -20,10 +20,12 @@ const TREND_YEARS = 100;
 type Props = {
   sim: Simulation;
   onClose: () => void;
+  /** Opens the diplomacy panel. */
+  onDiplomacy: () => void;
 };
 
 /** Bottom panel listing the living peoples, how faith in the player develops, and the chronicle. */
-export function CivPanel({ sim, onClose }: Props) {
+export function CivPanel({ sim, onClose, onDiplomacy }: Props) {
   // The player's people first, then by size.
   const civs = livingCivilizations(sim).sort(
     (a, b) => Number(b.worshipsPlayer) - Number(a.worshipsPlayer) || b.population - a.population,
@@ -39,6 +41,9 @@ export function CivPanel({ sim, onClose }: Props) {
             Year {simulationYear(sim)} · {sim.pop.count} people · {sim.believers} believe in you
           </Text>
         </View>
+        <Pressable onPress={onDiplomacy} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
+          <Text style={styles.diplomacyText}>Diplomacy ›</Text>
+        </Pressable>
         <Pressable onPress={onClose} hitSlop={12} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
@@ -179,6 +184,17 @@ const styles = StyleSheet.create({
   title: { color: colors.panelText, fontSize: 20, fontWeight: '700' },
   subtitle: { color: colors.panelMuted, fontSize: 13, marginTop: 2 },
   close: { padding: spacing.xs },
+  diplomacy: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    paddingHorizontal: spacing.sm,
+    height: 32,
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  diplomacyText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  pressed: { opacity: 0.7 },
   closeText: { color: colors.panelMuted, fontSize: 18 },
   scroll: { marginTop: spacing.sm },
   trend: { marginBottom: spacing.sm },

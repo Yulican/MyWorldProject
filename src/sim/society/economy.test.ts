@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sumTerms } from '../terms';
 import { yieldFactor } from './satisfaction';
-import { isWaterBiome } from '../world/biomes';
+import { Biome, isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import {
   BUILDINGS,
@@ -16,7 +16,10 @@ import {
   harvestTerms,
   withBuildings,
 } from './buildings';
-import { EXPANSION_GROUP, capacityAfterRepair, isSettlementTarget, runEconomy, updateCellSupply } from './economy';
+import { EXPANSION_GROUP, buildingFits, capacityAfterRepair, isSettlementTarget, runEconomy, updateCellSupply, usableSlots } from './economy';
+import { Deposit } from '../world/deposits';
+import { PAIRS } from './diplomacy';
+import { MERCHANT_LOAD, TRADE_GOODS, TradeGood, updateTradeNeeds } from './trade';
 import { TICKS_PER_YEAR, createSimulation, hexSupplyTerms, stepSimulation, type Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, supplyTerms } from './supply';
 
@@ -196,4 +199,128 @@ test('buildings and stock are the same for the same seed', () => {
     return [Array.from(sim.economy.type), Array.from(sim.economy.state), Array.from(sim.economy.stock)];
   };
   assert.deepEqual(run(), run());
+});
+
+test('wood grows in woods and stone in hills and mountains; elsewhere only foraging, and no lumber camp or quarry', () => {
+  const sim = createSimulation(generateWorld({ seed: 3 }));
+  const first = (biome: number) => {
+    for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.biome[c] === biome) return c;
+    throw new Error(`no biome ${biome}`);
+  };
+  const plains = first(Biome.Plains);
+  const forest = first(Biome.Forest);
+  const mountains = first(Biome.Mountains);
+  const base = forageYield(sim.world, plains, Good.Wood);
+  assert.equal(forageYield(sim.world, plains, Good.Stone), base, 'plains forage the same of both');
+  assert.ok(forageYield(sim.world, forest, Good.Wood) > base * 3, 'woods give far more wood');
+  assert.equal(forageYield(sim.world, forest, Good.Stone), base);
+  assert.ok(forageYield(sim.world, mountains, Good.Stone) > base * 3, 'mountains give far more stone');
+  assert.deepEqual(
+    harvestTerms(sim.world, sim.economy, plains, Good.Wood).map((t) => t.label),
+    ['Foraging'],
+  );
+  assert.ok(Math.abs(sumTerms(harvestTerms(sim.world, sim.economy, forest, Good.Wood)) - forageYield(sim.world, forest, Good.Wood)) < 1e-4);
+  for (const name of ['Lumber camp', 'Sawmill']) {
+    assert.equal(buildingFits(sim, plains, typeOf(name)), false, `${name} on plains`);
+    assert.equal(buildingFits(sim, forest, typeOf(name)), true, `${name} in woods`);
+  }
+  for (const name of ['Quarry', 'Stonemason']) {
+    assert.equal(buildingFits(sim, plains, typeOf(name)), false, `${name} on plains`);
+    assert.equal(buildingFits(sim, mountains, typeOf(name)), true, `${name} in mountains`);
+  }
+});
+
+test('plains have more building slots than other land', () => {
+  const sim = createSimulation(generateWorld({ seed: 3 }));
+  const first = (biome: number) => {
+    for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.biome[c] === biome) return c;
+    throw new Error(`no biome ${biome}`);
+  };
+  assert.equal(usableSlots(sim, first(Biome.Plains)), SLOTS);
+  assert.equal(usableSlots(sim, first(Biome.Forest)), 4);
+  assert.ok(SLOTS > 4);
+});
+
+/** A settled hex of the first people after some years, cleared of buildings, with a happy population. */
+function settledHex(seed: number): { sim: Simulation; cell: number; civ: number } {
+  const sim = createSimulation(generateWorld({ seed }));
+  runYears(sim, 40);
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (sim.cellPop[c] < 5 || !sim.world.owner[c]) continue;
+    for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) {
+      sim.economy.state[s] = SlotState.Empty;
+      sim.economy.type[s] = -1;
+    }
+    sim.satisfaction[c] = 10;
+    return { sim, cell: c, civ: sim.world.owner[c] };
+  }
+  throw new Error('no settlement');
+}
+
+test('a settlement on a luxury deposit mines it when its people lack the good, even if it is happy itself', () => {
+  const { sim, cell, civ } = settledHex(3);
+  sim.world.deposit[cell] = Deposit.Gold;
+  const gold = TradeGood.Luxury + 3;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 500;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 500;
+  sim.trade.civWant[civ * TRADE_GOODS + gold] = 0;
+  sim.trade.civSpare[civ * TRADE_GOODS + gold] = 0;
+  const mine = typeOf('Gold mine');
+  const building = () => {
+    for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) if (sim.economy.type[s] === mine && sim.economy.state[s] !== SlotState.Empty) return true;
+    return false;
+  };
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  assert.equal(building(), false, 'nobody lacks gold: no mine');
+  sim.trade.civWant[civ * TRADE_GOODS + gold] = 10;
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  assert.equal(building(), true, 'its people lack gold: the mine goes up');
+});
+
+test('a settlement trading in transit asks for what its partner lacks, up to a load, and does not use it up itself', () => {
+  const { sim, cell, civ } = settledHex(3);
+  const partner = civ === 1 ? 2 : 1;
+  const salt = TradeGood.Luxury;
+  sim.diplomacy.partners[civ] = [partner];
+  sim.diplomacy.transitHub[civ * PAIRS + partner] = cell;
+  sim.trade.civWant[partner * TRADE_GOODS + salt] = 100;
+  sim.trade.civSpare[partner * TRADE_GOODS + salt] = 0;
+  updateTradeNeeds(sim, cell, sim.cellAdults[cell], false, 4);
+  const keep = MERCHANT_LOAD / 0.5;
+  assert.equal(sim.trade.transitFor[cell * TRADE_GOODS + salt], 1);
+  assert.equal(sim.trade.transitKeep[cell * TRADE_GOODS + salt], keep, 'a merchant load of salt');
+  assert.ok(sim.trade.want[cell * TRADE_GOODS + salt] >= keep - 1e-3, 'asks for it');
+  // Its people need salt too (luxury goods are used up where buildings stand), but the partner's stays.
+  place(sim, cell, typeOf('Hut'));
+  sim.economy.luxury[cell * 6] = keep;
+  runEconomy(sim, true, cell, sim.world.cellCount);
+  assert.ok(sim.economy.luxury[cell * 6] >= keep - 1e-3, `held for the partner: ${sim.economy.luxury[cell * 6]}`);
+});
+
+test('a planned seat of government comes first: its site starts nothing else', () => {
+  const { sim, cell } = settledHex(3);
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 1000;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 1000;
+  sim.satisfaction[cell] = -5; // would build comfort first otherwise
+  sim.seatSite[cell] = 1;
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  const started: string[] = [];
+  for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) {
+    if (sim.economy.state[s] === SlotState.Construction) started.push(BUILDINGS[sim.economy.type[s]].name);
+  }
+  assert.ok(started.every((name) => name === 'Seat of government'), started.join(', '));
+});
+
+test('a seat of government whose harvest lacks its upkeep orders ten years of it, before all other trips', () => {
+  const { sim, cell } = settledHex(3);
+  place(sim, cell, typeOf('Seat of government'));
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 0;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 0;
+  updateTradeNeeds(sim, cell, sim.cellAdults[cell], false, 4);
+  const seat = BUILDINGS[typeOf('Seat of government')];
+  for (const m of [Material.Wood, Material.Stone]) {
+    const g = m === Material.Wood ? TradeGood.Wood : TradeGood.Stone;
+    assert.ok(sim.trade.want[cell * TRADE_GOODS + g] >= 10 * (m === Material.Wood ? seat.upkeepWood - 2 : seat.upkeepStone - 2) - 1e-3, `asks for ${m}`);
+    assert.ok(sim.trade.hubFocus[cell * TRADE_GOODS + g] > 3, 'those trips come first');
+  }
 });

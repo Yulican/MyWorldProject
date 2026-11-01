@@ -1,18 +1,22 @@
-import { DIRECTION_COUNT } from '../hex';
+import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
-import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
+import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
+import { LUXURY_PER_PERSON, hasSeat, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
-// Internal trade (design doc, section 5; agreed requirement: "Design
-// Documents/Requirement Handel.md"). Settlements with a trade center or a
-// harbor send merchants with what they can spare to settlements of their own
-// people that need it, paid in money, and bring back what home needs.
+// Trade (design doc, section 5; agreed requirements: "Design
+// Documents/Requirement Handel.md" and "Requirement Diplomatie.md").
+// Settlements with a trade center or a harbor send merchants with what they
+// can spare to settlements of their own people (and of free trade partners,
+// and buyers of their people's trade agreements) that need it, paid in money,
+// and bring back what home needs. Crossing foreign land opened to them, they
+// pay toll to the settlements on the way (diplomacy.ts).
 // Merchants only travel on ways: roads, rivers (and their banks) and the
 // water between two harbors. Part of a load can get lost on the way.
 // Merchants are trips, not inhabitants: flat arrays, no per-tick movement.
@@ -24,8 +28,8 @@ export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Sa
 /** Weight of one unit; a merchant carries MERCHANT_LOAD. */
 const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
-const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
-export const MERCHANT_LOAD = 20;
+export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
+export const MERCHANT_LOAD = 40;
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
 /** Merchants go at most this far (travel cost, about weeks) one way. */
@@ -55,6 +59,8 @@ const FOCUS_UNHAPPY = 2;
 const MIN_TRIP_VALUE = 5;
 /** Wood and stone a settlement keeps for this many years of upkeep before it sells. */
 const RESERVE_YEARS = 2;
+/** A settlement with a seat of government whose harvest doesn't cover its upkeep keeps this many years of the shortfall. */
+const SEAT_UPKEEP_YEARS = 10;
 const RESERVE_MIN = 10;
 /** Luxury goods a settlement keeps (and asks for): this many years of its need. */
 const LUXURY_YEARS = 2;
@@ -74,6 +80,12 @@ const SEARCHES_PER_TICK = 3;
 const ROAD_RECHECK_YEARS = 4;
 /** A trade center needs a trip worth this much (money) in reach. */
 const CENTER_MIN_VALUE = 15;
+/** Goods a trade agreement owes count this many times when a merchant picks a trip. */
+const FOCUS_AGREEMENT = 3;
+/** Priority of bringing a seat of government the upkeep it lacks: before everything else. */
+const FOCUS_SEAT_UPKEEP = 3 * FOCUS_AGREEMENT;
+/** Settlements with merchants (nearest the buyer) an export hub is searched among. */
+const HUB_CANDIDATES = 3;
 
 /** Merchants on their way, as flat arrays per trip slot. */
 export type Trade = {
@@ -83,6 +95,20 @@ export type Trade = {
   surplus: Float32Array;
   /** Ordered and on its way: cell * TRADE_GOODS + good. */
   incoming: Float32Array;
+  /** 1 where a settlement trades this good in transit for a partner (cell * TRADE_GOODS + good). */
+  transitFor: Uint8Array;
+  /** Goods sold abroad in transit so far (statistics). */
+  transit: number;
+  /** Per people: bit per good it still owes under trade agreements (see owedGoods), valid for tick `owedTick`. */
+  owedMask: Uint16Array;
+  owedTick: number;
+  /** 1 for the export hubs of trade agreements (see isHub), valid for tick `hubTick`. */
+  hubMark: Uint8Array;
+  hubTick: number;
+  /** Per cell and good: what the settlement holds for a partner in transit (its own people don't use it up). */
+  transitKeep: Float32Array;
+  /** Per cell and good: priority factor for bringing an export hub goods it still lacks for a trade agreement, 0 = none. */
+  hubFocus: Float32Array;
   /** Merchants per hex from its standing trade buildings, and how many are away. */
   merchants: Uint8Array;
   away: Uint8Array;
@@ -121,6 +147,8 @@ export type Trade = {
   tripEnd: number;
   /** Totals since the start, for the hex info and tests: delivered and lost per good, trips and road segments. */
   delivered: Float64Array;
+  /** Of that, delivered to another people's settlements. */
+  abroad: Float64Array;
   lost: Float64Array;
   trips: number;
   roads: number;
@@ -133,6 +161,14 @@ export function createTrade(seed: number, cellCount: number): Trade {
     want: new Float32Array(cellCount * TRADE_GOODS),
     surplus: new Float32Array(cellCount * TRADE_GOODS),
     incoming: new Float32Array(cellCount * TRADE_GOODS),
+    transitFor: new Uint8Array(cellCount * TRADE_GOODS),
+    transit: 0,
+    owedMask: new Uint16Array(PAIRS),
+    owedTick: -1,
+    hubMark: new Uint8Array(cellCount),
+    hubTick: -1,
+    transitKeep: new Float32Array(cellCount * TRADE_GOODS),
+    hubFocus: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     harbor: new Uint8Array(cellCount),
@@ -158,6 +194,7 @@ export function createTrade(seed: number, cellCount: number): Trade {
     tripKeepBack: new Float32Array(trips),
     tripEnd: 0,
     delivered: new Float64Array(TRADE_GOODS),
+    abroad: new Float64Array(TRADE_GOODS),
     lost: new Float64Array(TRADE_GOODS),
     trips: 0,
     roads: 0,
@@ -238,6 +275,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
 
   // Wood and stone: ask for what the next building lacks, spare what is
   // beyond it and a reserve for upkeep.
+  let seatOrders = 0;
   for (let m = 0; m < MATERIAL_COUNT; m++) {
     const stock = economy.stock[cell * MATERIAL_COUNT + m];
     const goal = economy.goal[cell * MATERIAL_COUNT + m];
@@ -247,7 +285,20 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     // supply route, it asks for RESERVE_YEARS of the shortfall.
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
-    const shortfall = Math.max(0, upkeep - harvest) * RESERVE_YEARS;
+    const yearly = Math.max(0, upkeep - harvest);
+    if (yearly > 0 && hasSeat(economy, cell)) {
+      // A seat of government's upkeep comes first: it keeps SEAT_UPKEEP_YEARS
+      // of what its harvest lacks, orders in worthwhile lots before it runs
+      // out, and those trips go before all others.
+      const keep = yearly * SEAT_UPKEEP_YEARS;
+      const have = stock - goal + trade.incoming[t + m];
+      const order = have < keep ? Math.max(keep - have, MERCHANT_LOAD / 2 / WEIGHT[m]) : 0;
+      trade.want[t + m] = Math.max(0, goal - stock - trade.incoming[t + m]) + order;
+      trade.surplus[t + m] = Math.max(0, stock - goal - Math.max(reserve, keep));
+      if (order > 0) seatOrders |= 1 << m;
+      continue;
+    }
+    const shortfall = yearly * RESERVE_YEARS;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
   }
@@ -276,20 +327,42 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     trade.want[t + g] = Math.max(0, keep - stock - trade.incoming[t + g]);
     trade.surplus[t + g] = Math.max(0, stock - keep);
   }
-  // Only goods the rest of its people ask for or spare count (totals from the last refresh).
+  // An export hub asks its people for what its trade agreements still owe;
+  // that stock is its surplus for the buyers. The further behind its
+  // deliveries, the more its people hurry to bring it.
+  trade.hubFocus.fill(0, t, t + TRADE_GOODS);
+  for (let m = 0; m < MATERIAL_COUNT; m++) if (seatOrders & (1 << m)) trade.hubFocus[t + m] = FOCUS_SEAT_UPKEEP;
+  if (isHub(sim, cell)) hubWants(sim, cell, t);
+  // Only goods the rest of its people, or its people's trade partners, ask
+  // for or spare count (totals from the last refresh).
   const civ = sim.world.owner[cell];
   const c = civ * TRADE_GOODS;
   const known = c + TRADE_GOODS <= trade.civWant.length;
+  const partners = sim.diplomacy.partners[civ];
+  // Zwischenhandel: the settlement that trades in transit for a partner asks
+  // for what that partner lacks, up to a merchant's load of each good, and
+  // spares that stock for it.
+  transitWants(sim, cell, t, civ, known);
   let sell = 0;
   let buy = 0;
   for (let g = 0; g < TRADE_GOODS; g++) {
     if (!known) break;
-    const othersWant = trade.civWant[c + g] - trade.want[t + g];
-    const othersSpare = trade.civSpare[c + g] - trade.surplus[t + g];
+    let othersWant = trade.civWant[c + g] - trade.want[t + g];
+    let othersSpare = trade.civSpare[c + g] - trade.surplus[t + g];
+    if (partners) {
+      for (let i = 0; i < partners.length; i++) {
+        const p = partners[i];
+        if (p * TRADE_GOODS + g >= trade.civWant.length) continue;
+        othersWant += trade.civWant[p * TRADE_GOODS + g];
+        othersSpare += trade.civSpare[p * TRADE_GOODS + g];
+      }
+    }
     if (othersWant > 0) sell += Math.min(trade.surplus[t + g], othersWant) * PRICE[g];
     if (othersSpare > 0) buy += Math.min(trade.want[t + g], othersSpare) * PRICE[g];
   }
   trade.interest[cell] = sell >= MIN_TRIP_VALUE || (buy >= MIN_TRIP_VALUE && economy.money[cell] >= MIN_TRIP_VALUE) ? 1 : 0;
+  // Goods its people owe under a trade agreement go out whether the buyer asks or not.
+  if (!trade.interest[cell] && owesFrom(sim, cell, civ)) trade.interest[cell] = 1;
   return changed;
 }
 
@@ -368,6 +441,8 @@ function water(world: World): Uint8Array {
 let wayCost = new Float32Array(0);
 let wayPrev = new Int32Array(0);
 let waySea = new Uint8Array(0);
+/** Toll (money value, one way) for the foreign settlements crossed on the way to a hex, the hex itself not included. */
+let wayToll = new Float32Array(0);
 const wayHeap = new MinHeap(256);
 const wayReached: number[] = [];
 
@@ -383,11 +458,71 @@ function isHarbor(sim: Simulation, owner: Uint8Array, civ: number, assume: numbe
 }
 
 /**
+ * Whether merchants of `civ` may enter land of `other`: it opened its
+ * borders to them, it is a free trade partner, or it buys from them under a
+ * trade agreement.
+ */
+function mayTrade(sim: Simulation, civ: number, other: number): boolean {
+  const dip = sim.diplomacy;
+  return mayPass(dip, civ, other) || hasFreeTrade(dip, civ, other) || suppliesTo(dip, civ, other) || (civ === trialSupplier && other === trialBuyer);
+}
+
+/** Whether a settlement of `other` is a trade partner for merchants of `civ` (own people, free trade, or a trade agreement's buyer). */
+function isPartner(sim: Simulation, civ: number, other: number): boolean {
+  if (other === 0) return false;
+  return other === civ || hasFreeTrade(sim.diplomacy, civ, other) || suppliesTo(sim.diplomacy, civ, other) || (civ === trialSupplier && other === trialBuyer);
+}
+
+/** A trade agreement being considered (canDeliver): its supplier may already enter the buyer's land. */
+let trialSupplier = -1;
+let trialBuyer = -1;
+
+/**
+ * The export hub for a trade agreement: the settlement of `supplier` with
+ * merchants that reaches a settlement of `buyer` soonest on ways (as under
+ * the agreement); -1 if none does. The people's internal trade brings the
+ * goods there (it asks for what the agreement still owes). With `stocked`,
+ * only settlements that have at least that much of the good in stock are
+ * candidates (another settlement takes over a delivery the hub couldn't make).
+ */
+export function exportHub(sim: Simulation, supplier: number, buyer: number, good: number, stocked = 0): number {
+  const { trade, world, economy } = sim;
+  const owner = world.owner;
+  trialSupplier = supplier;
+  trialBuyer = buyer;
+  let hub = -1;
+  let hubCost = Infinity;
+  // Only HUB_CANDIDATES settlements with merchants are searched from: the
+  // nearest to the buyer's capital, or those with the most in stock.
+  const capital = sim.civs[buyer]?.capital ?? -1;
+  const homes: number[] = [];
+  for (let home = 0; home < world.cellCount; home++) {
+    if (owner[home] === supplier && trade.merchants[home] && (stocked <= 0 || stockOf(economy, home, good) >= stocked)) homes.push(home);
+  }
+  if (stocked > 0) homes.sort((a, b) => stockOf(economy, b, good) - stockOf(economy, a, good) || a - b);
+  else if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
+  for (const home of homes.slice(0, HUB_CANDIDATES)) {
+    let nearest = Infinity;
+    for (const t of searchWays(sim, owner, home, MAX_TRIP_COST, -1)) {
+      if (owner[t] === buyer && sim.cellPop[t] > 0) nearest = Math.min(nearest, wayCost[t]);
+    }
+    resetWays();
+    if (nearest < hubCost) {
+      hubCost = nearest;
+      hub = home;
+    }
+  }
+  trialSupplier = -1;
+  trialBuyer = -1;
+  return hub;
+}
+
+/**
  * Cost of a merchant's step from `cell` to its neighbor in direction `dir`
  * for the people `civ`, Infinity if there is no way: roads, rivers along
  * their course (down faster than up) and from either bank, water from and
  * to a harbor of the people (see isHarbor for `assume`).
- * Merchants never enter another people's land.
+ * Merchants enter another people's land only where it lets them (mayTrade).
  */
 function wayStep(sim: Simulation, owner: Uint8Array, civ: number, assume: number, cell: number, dir: number): number {
   const { world } = sim;
@@ -397,7 +532,7 @@ function wayStep(sim: Simulation, owner: Uint8Array, civ: number, assume: number
   const fromWater = wet[cell] === 1;
   const toWater = wet[nb] === 1;
   if (toWater) return fromWater || isHarbor(sim, owner, civ, assume, cell) ? SEA_STEP : Infinity;
-  if (owner[nb] !== civ && owner[nb] !== 0) return Infinity;
+  if (owner[nb] !== civ && owner[nb] !== 0 && !mayTrade(sim, civ, owner[nb])) return Infinity;
   if (fromWater) return owner[nb] === civ && isHarbor(sim, owner, civ, assume, nb) ? SEA_STEP : Infinity;
   const terrain = (world.moveCost[cell] + world.moveCost[nb]) / 2;
   let factor = Infinity;
@@ -422,6 +557,7 @@ function searchWays(sim: Simulation, owner: Uint8Array, from: number, maxCost: n
     wayCost = new Float32Array(n).fill(Infinity);
     wayPrev = new Int32Array(n).fill(-1);
     waySea = new Uint8Array(n);
+    wayToll = new Float32Array(n);
   }
   const civ = owner[from];
   wayReached.length = 0;
@@ -431,6 +567,9 @@ function searchWays(sim: Simulation, owner: Uint8Array, from: number, maxCost: n
   while (wayHeap.size > 0) {
     const c = wayHeap.pop();
     const here = wayCost[c];
+    // Leaving a foreign settlement on the way costs its toll.
+    const o = owner[c];
+    const toll = c !== from && o !== civ && o !== 0 && sim.cellPop[c] > 0 ? crossingToll(sim, c, o, civ) : 0;
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const step = wayStep(sim, owner, civ, assume, c, d);
       if (step === Infinity) continue;
@@ -443,6 +582,7 @@ function searchWays(sim: Simulation, owner: Uint8Array, from: number, maxCost: n
       wayCost[nb] = next;
       wayPrev[nb] = c;
       waySea[nb] = sea;
+      wayToll[nb] = wayToll[c] + toll;
       wayHeap.push(nb, next);
     }
   }
@@ -454,8 +594,16 @@ function resetWays(): void {
     wayCost[c] = Infinity;
     wayPrev[c] = -1;
     waySea[c] = 0;
+    wayToll[c] = 0;
   }
   wayReached.length = 0;
+}
+
+/** Toll a foreign settlement asks of merchants of `civ` (half for free trade partners and agreement deliveries). */
+function crossingToll(sim: Simulation, cell: number, owner: number, civ: number): number {
+  const dip = sim.diplomacy;
+  const reduced = hasFreeTrade(dip, civ, owner) || suppliesTo(dip, civ, owner);
+  return tollValue(sim, cell, owner, civ, reduced);
 }
 
 /** Share of a load that survives the way to `to` (from the last search), rolling the loss of every hex entered. */
@@ -494,16 +642,28 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   let load = MERCHANT_LOAD;
   let worth = 0;
   dealPriority = 0;
+  dealOwed = false;
   const unhappyTarget = sim.satisfaction[target] < 0 ? FOCUS_UNHAPPY : 1;
   const unhappyHome = sim.satisfaction[home] < 0 ? FOCUS_UNHAPPY : 1;
-  for (const g of BY_VALUE) {
+  const homeCiv = sim.world.owner[home];
+  const targetCiv = sim.world.owner[target];
+  const abroad = homeCiv !== targetCiv;
+  // Goods a trade agreement owes go first.
+  const order = abroad ? agreementFirst(sim, homeCiv, targetCiv) : BY_VALUE;
+  for (const g of order) {
     if (g === TradeGood.Money || load <= 0) continue;
-    const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], trade.want[target * TRADE_GOODS + g], load / WEIGHT[g]);
+    const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
+    // The buyer takes what the agreement still owes, asked for or not.
+    const owed = agreement ? legOwed(agreement, sim.tick) : 0;
+    const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g]);
     if (amount <= 0) continue;
     dealSell[g] = amount;
     load -= amount * WEIGHT[g];
     worth += amount * PRICE[g];
-    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g);
+    if (owed > 0) dealOwed = true;
+    // Agreement deliveries, and goods that the export hub still needs for them, go first.
+    const focus = agreement ? FOCUS_AGREEMENT : abroad ? 0 : trade.hubFocus[target * TRADE_GOODS + g];
+    dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
   }
   let money = eco.money[home];
   let backLoad = MERCHANT_LOAD;
@@ -522,6 +682,89 @@ function planDeal(sim: Simulation, home: number, target: number): number {
 
 /** How much a deal matters, from the last planDeal: its worth, more for luxury goods a settlement lacks and for unhappy settlements. */
 let dealPriority = 0;
+/** Whether the last planDeal carries goods a trade agreement still owes this year. */
+let dealOwed = false;
+
+/** An export hub's wants and surplus for what its trade agreements still owe (see updateTradeNeeds). */
+function hubWants(sim: Simulation, cell: number, t: number): void {
+  const { trade, economy } = sim;
+  const legs = sim.diplomacy.legs;
+  for (let i = 0; i < legs.length; i++) {
+    const a = legs[i];
+    if (a.hub !== cell) continue;
+    const owed = legOwed(a, sim.tick);
+    const stock = stockOf(economy, cell, a.good);
+    if (owed > stock) trade.hubFocus[t + a.good] = Math.max(trade.hubFocus[t + a.good], FOCUS_AGREEMENT * (1 + a.behind));
+    trade.want[t + a.good] += Math.max(0, owed - stock - trade.incoming[t + a.good]);
+    trade.surplus[t + a.good] = Math.max(trade.surplus[t + a.good], Math.min(stock, owed));
+  }
+}
+
+/** The transit wants and surplus of a settlement that trades for its people's partners (see updateTradeNeeds). */
+function transitWants(sim: Simulation, cell: number, t: number, civ: number, known: boolean): void {
+  const { trade, economy } = sim;
+  const partners = sim.diplomacy.partners[civ];
+  trade.transitFor.fill(0, t, t + TRADE_GOODS);
+  trade.transitKeep.fill(0, t, t + TRADE_GOODS);
+  if (partners && known) {
+    for (let i = 0; i < partners.length; i++) {
+      const p = partners[i];
+      if (sim.diplomacy.transitHub[civ * PAIRS + p] !== cell || (p + 1) * TRADE_GOODS > trade.civWant.length) continue;
+      for (let g = 0; g < TRADE_GOODS; g++) {
+        if (g === TradeGood.Money) continue;
+        const lack = trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g];
+        if (lack <= 0) continue;
+        const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
+        const stock = stockOf(economy, cell, g);
+        trade.want[t + g] = Math.max(trade.want[t + g], keep - stock - trade.incoming[t + g]);
+        trade.transitKeep[t + g] = Math.max(trade.transitKeep[t + g], keep);
+        trade.surplus[t + g] = Math.max(trade.surplus[t + g], Math.min(stock, keep));
+        trade.transitFor[t + g] = 1;
+      }
+    }
+  }
+}
+
+/** Whether the settlement holds goods its people still owe under a trade agreement. */
+function owesFrom(sim: Simulation, cell: number, civ: number): boolean {
+  const owed = owedGoods(sim, civ);
+  for (let g = 0; owed && g < TRADE_GOODS; g++) if (owed & (1 << g) && stockOf(sim.economy, cell, g) > 0) return true;
+  return false;
+}
+
+/** Whether a settlement is the export hub of a trade agreement (marked once per tick, so other settlements skip the agreements). */
+function isHub(sim: Simulation, cell: number): boolean {
+  const trade = sim.trade;
+  if (trade.hubTick !== sim.tick) {
+    trade.hubMark.fill(0);
+    const legs = sim.diplomacy.legs;
+    for (let i = 0; i < legs.length; i++) if (legs[i].hub >= 0) trade.hubMark[legs[i].hub] = 1;
+    trade.hubTick = sim.tick;
+  }
+  return trade.hubMark[cell] === 1;
+}
+
+/** Bits of the goods `civ` still owes under trade agreements this tick (computed once per tick for all peoples). */
+function owedGoods(sim: Simulation, civ: number): number {
+  const trade = sim.trade;
+  if (trade.owedTick !== sim.tick) {
+    trade.owedMask.fill(0);
+    const legs = sim.diplomacy.legs;
+    for (let i = 0; i < legs.length; i++) if (legOwed(legs[i], sim.tick) > 0) trade.owedMask[legs[i].supplier] |= 1 << legs[i].good;
+    trade.owedTick = sim.tick;
+  }
+  return trade.owedMask[civ];
+}
+
+/** Whether `supplier` still owes `buyer` deliveries in the running period. */
+function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean {
+  const legs = sim.diplomacy.legs;
+  for (let i = 0; i < legs.length; i++) {
+    const a = legs[i];
+    if (a.supplier === supplier && a.buyer === buyer && legOwed(a, sim.tick) > 0) return true;
+  }
+  return false;
+}
 
 /** FOCUS_LUXURY for a luxury good the settlement's stock didn't cover last year, else 1. */
 function lacking(eco: Economy, cell: number, good: number): number {
@@ -532,34 +775,63 @@ function lacking(eco: Economy, cell: number, good: number): number {
 /** Trade goods by price per weight, dearest first. */
 const BY_VALUE = Array.from({ length: TRADE_GOODS }, (_, g) => g).sort((a, b) => PRICE[b] / WEIGHT[b] - PRICE[a] / WEIGHT[a] || a - b);
 
+/** BY_VALUE with the goods `supplier` owes `buyer` under trade agreements first. */
+function agreementFirst(sim: Simulation, supplier: number, buyer: number): number[] {
+  if (!suppliesTo(sim.diplomacy, supplier, buyer)) return BY_VALUE;
+  const owed = BY_VALUE.filter((g) => agreementFor(sim.diplomacy, supplier, buyer, g));
+  return [...owed, ...BY_VALUE.filter((g) => !owed.includes(g))];
+}
+
 /**
  * The best trip from `home` among the settlements of its people in reach:
  * most worth per week of the round trip. Leaves its deal in dealSell and
  * dealBuy; returns the target (-1 = none) and its travel cost in `out`.
  */
-function bestTrip(sim: Simulation, owner: Uint8Array, home: number, assume: number, out: { cost: number; rate: number }): number {
+function bestTrip(sim: Simulation, owner: Uint8Array, home: number, assume: number, out: TripChoice): number {
   const { trade, economy } = sim;
   const civ = owner[home];
   const reached = searchWays(sim, owner, home, MAX_TRIP_COST, assume);
   let best = -1;
   let bestRate = 0;
+  // Deliveries a trade agreement still owes this year come before any other trip.
+  let owedBest = -1;
+  let owedRate = 0;
   for (const t of reached) {
-    if (t === home || owner[t] !== civ || sim.cellPop[t] === 0) continue;
+    if (t === home || sim.cellPop[t] === 0 || !isPartner(sim, civ, owner[t])) continue;
     const worth = planDeal(sim, home, t);
-    if (worth < MIN_TRIP_VALUE) continue;
-    const rate = dealPriority / (2 * wayCost[t] + 1);
+    // Toll both ways comes off the trip's worth.
+    const toll = 2 * wayToll[t];
+    const owes = owner[t] !== civ && owesDelivery(sim, civ, owner[t]);
+    if (worth - toll < MIN_TRIP_VALUE && !owes) continue;
+    const rate = (dealPriority - toll) / (2 * wayCost[t] + 1);
+    if (owes && dealOwed) {
+      if (owedBest < 0 || rate > owedRate) {
+        owedRate = rate;
+        owedBest = t;
+      }
+      continue;
+    }
+    if (rate <= 0) continue;
     if (rate > bestRate || (rate === bestRate && t < best)) {
       bestRate = rate;
       best = t;
     }
   }
+  if (owedBest >= 0) {
+    best = owedBest;
+    bestRate = Math.max(owedRate, 1e-6);
+  }
   out.cost = best >= 0 ? wayCost[best] : Infinity;
   out.rate = bestRate;
+  out.toll = best >= 0 ? 2 * wayToll[best] : 0;
   if (best >= 0) planDeal(sim, home, best);
   return best;
 }
 
-const tripOut = { cost: 0, rate: 0 };
+type TripChoice = { cost: number; rate: number; toll: number };
+const tripOut: TripChoice = { cost: 0, rate: 0, toll: 0 };
+/** The foreign settlements a merchant crosses on its way (from the last search), for paying toll. */
+const crossed: number[] = [];
 
 /** Quarterly per hex with merchants at home: each goes on the best trip there is. */
 export function sendMerchants(sim: Simulation, home: number): void {
@@ -569,6 +841,17 @@ export function sendMerchants(sim: Simulation, home: number): void {
   while (trade.away[home] < trade.merchants[home] && takeSearches(sim, 1)) {
     const target = bestTrip(sim, owner, home, -1, tripOut);
     if (target < 0) {
+      resetWays();
+      return;
+    }
+    // Toll for both ways is paid when the merchant sets out: in goods the
+    // settlements on the way ask for (from the load, then from home's
+    // stock), the rest in home's money. Without enough, it stays home.
+    crossed.length = 0;
+    for (let c = wayPrev[target]; c >= 0 && c !== home; c = wayPrev[c]) {
+      if (owner[c] !== owner[home] && owner[c] !== 0 && sim.cellPop[c] > 0) crossed.push(c);
+    }
+    if (!payCrossings(sim, home, owner[home])) {
       resetWays();
       return;
     }
@@ -588,6 +871,15 @@ export function sendMerchants(sim: Simulation, home: number): void {
       trade.tripCargo[trip * TRADE_GOODS + g] = dealSell[g];
       if (dealSell[g] > 0) {
         addStock(economy, home, g, -dealSell[g]);
+        // A trade agreement counts what sets out (the way takes time).
+        if (sim.world.owner[home] !== sim.world.owner[target]) {
+          const leg = agreementFor(sim.diplomacy, sim.world.owner[home], sim.world.owner[target], g);
+          if (leg) {
+            leg.delivered += dealSell[g];
+            trade.owedTick = -1;
+          }
+          if (trade.transitFor[home * TRADE_GOODS + g]) trade.transit += dealSell[g];
+        }
         trade.incoming[target * TRADE_GOODS + g] += dealSell[g];
         trade.want[target * TRADE_GOODS + g] = Math.max(0, trade.want[target * TRADE_GOODS + g] - dealSell[g]);
         trade.surplus[home * TRADE_GOODS + g] -= dealSell[g];
@@ -605,6 +897,47 @@ export function sendMerchants(sim: Simulation, home: number): void {
     trade.partner[home] = target;
     trade.trips++;
   }
+}
+
+/**
+ * Pays the toll of every settlement in `crossed`, both ways, first in goods
+ * it asks for from what the merchant is about to load (dealSell) and from
+ * home's stock, then in home's money. Returns false (nothing paid) when
+ * that doesn't cover it.
+ */
+function payCrossings(sim: Simulation, home: number, civ: number): boolean {
+  if (crossed.length === 0) return true;
+  const { economy } = sim;
+  let total = 0;
+  for (const c of crossed) total += 2 * crossingToll(sim, c, sim.world.owner[c], civ);
+  if (economy.money[home] < total) {
+    // Goods could pay part of it: count what the settlements on the way ask for.
+    let goods = 0;
+    for (const c of crossed) {
+      for (let g = 0; g < TRADE_GOODS; g++) {
+        if (g !== TradeGood.Money) goods += Math.min(sim.trade.want[c * TRADE_GOODS + g], stockOf(economy, home, g)) * PRICE[g];
+      }
+    }
+    if (goods + economy.money[home] < total) return false;
+  }
+  for (const c of crossed) {
+    const value = 2 * crossingToll(sim, c, sim.world.owner[c], civ);
+    // From the load first: what it would sell anyway is then not sold at the target.
+    payToll(
+      sim,
+      c,
+      value,
+      (g) => stockOf(economy, home, g),
+      (g, units) => {
+        // Taken from home's stock; what came off the load isn't loaded later.
+        dealSell[g] -= Math.min(units, dealSell[g]);
+        addStock(economy, home, g, -units);
+      },
+      PRICE,
+      home,
+    );
+  }
+  return true;
 }
 
 function markSupply(trade: Trade, cell: number): void {
@@ -657,7 +990,8 @@ export function advanceTrips(sim: Simulation): void {
     const cargo = trip * TRADE_GOODS;
     if (leg === 1) {
       const keep = trade.tripKeepOut[trip];
-      const open = owner[target] !== 0 && owner[target] === owner[home];
+      const open = isPartner(sim, owner[home], owner[target]);
+      const deal = open && owner[target] !== owner[home];
       let owed = 0;
       let provisions = false;
       for (let g = 0; g < TRADE_GOODS; g++) {
@@ -669,6 +1003,9 @@ export function advanceTrips(sim: Simulation): void {
         trade.lost[g] += amount - arrived;
         trade.delivered[g] += arrived;
         addStock(economy, target, g, arrived);
+        if (deal) {
+          trade.abroad[g] += arrived;
+        }
         owed += arrived * PRICE[g];
         trade.tripCargo[cargo + g] = 0;
         if (g === TradeGood.Grain || g === TradeGood.Water) provisions = true;
@@ -933,4 +1270,11 @@ export function travelOnWays(sim: Simulation, from: number, to: number): number 
   const cost = wayCost[to];
   resetWays();
   return cost;
+}
+
+/** The trip a hex's merchants would take now (target, -1 = none), and its toll; for tests and tools. */
+export function plannedTrip(sim: Simulation, home: number): { target: number; toll: number; sell: number[] } {
+  const target = bestTrip(sim, sim.world.owner, home, -1, tripOut);
+  resetWays();
+  return { target, toll: tripOut.toll, sell: Array.from(dealSell) };
 }

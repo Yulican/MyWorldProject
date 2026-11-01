@@ -15,6 +15,7 @@ export { SUPPLY_KINDS, SUPPLY_NAMES, SupplyKind, type SupplyModifier } from './s
 export { sumTerms, type Term } from './terms';
 export { BUILDINGS, GOOD_NAMES, Good, SLOTS, isLuxury, type BuildingType } from './society/buildings';
 export { hexSatisfaction, type HexSatisfaction } from './society/satisfaction';
+export { relationsOf, type Relation } from './society/diplomacy';
 export { hexEconomy, type BuildingInfo, type HexEconomy, type HexTrade } from './society/economy';
 export { resourceCapacityTerms } from './world/features';
 export {

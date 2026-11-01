@@ -110,6 +110,7 @@ export function territoryTileSignature(
       }
       mix(dotSize(world.population[c]));
       mix(cityLevel(world.buildings[c]));
+      mix(openEdges(world, c, owner));
       mix(world.harbors[c]);
       const color = colorOf(owner);
       for (let k = 1; k < color.length; k++) mix(color.charCodeAt(k));
@@ -117,6 +118,21 @@ export function territoryTileSignature(
   }
   return h >>> 0;
 }
+
+/** Bit d set when the hex's border towards direction d is dashed: its people opened their borders to the neighbor's. */
+function openEdges(world: World, c: number, owner: number): number {
+  let mask = 0;
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = world.neighbors[c * DIRECTION_COUNT + d];
+    if (nb < 0) continue;
+    const other = world.owner[nb];
+    if (other !== 0 && other !== owner && world.openBorders[owner * 256 + other]) mask |= 1 << d;
+  }
+  return mask;
+}
+
+/** Dashes along a border edge that is open: start and end as shares of the edge, flat so drawing allocates nothing. */
+const DASHES = [0, 0.3, 0.45, 0.55, 0.7, 1];
 
 /** One territory detail tile as a transparent image; null where nobody lives. */
 export function renderTerritoryTile(
@@ -183,15 +199,28 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     addHex(pathFor(tints, owner), x, y, HEX_PX + 0.5);
 
     // Border on every edge towards a hex that isn't ours, slightly inset so
-    // two neighboring civilizations both show their line.
+    // two neighboring civilizations both show their line; dashed where we
+    // opened our borders to them.
     const r = HEX_PX * 0.88;
+    const open = openEdges(world, c, owner);
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
       if (nb >= 0 && world.owner[nb] === owner) continue;
       const [ax, ay, bx, by] = EDGE_CORNERS[d];
       const border = pathFor(borders, owner);
-      border.moveTo(x + ax * r, y + ay * r);
-      border.lineTo(x + bx * r, y + by * r);
+      const x0 = x + ax * r;
+      const y0 = y + ay * r;
+      const dx = (bx - ax) * r;
+      const dy = (by - ay) * r;
+      if (open & (1 << d)) {
+        for (let k = 0; k < DASHES.length; k += 2) {
+          border.moveTo(x0 + dx * DASHES[k], y0 + dy * DASHES[k]);
+          border.lineTo(x0 + dx * DASHES[k + 1], y0 + dy * DASHES[k + 1]);
+        }
+      } else {
+        border.moveTo(x0, y0);
+        border.lineTo(x0 + dx, y0 + dy);
+      }
     }
 
     if (world.harbors[c]) addAnchor(anchors, world, c, x, y);

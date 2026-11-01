@@ -1,6 +1,6 @@
 import { DIRECTION_COUNT } from '../hex';
 import { sumTerms, type Term } from '../terms';
-import { isWaterBiome } from '../world/biomes';
+import { Biome, isWaterBiome } from '../world/biomes';
 import {
   BUILDINGS,
   FIRST_LUXURY,
@@ -34,7 +34,7 @@ import {
 } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
-import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -55,6 +55,16 @@ const STEPS_PER_YEAR = 4;
 const BUILD_FROM_CROWDING = 0.5;
 /** A settlement saves up for a building its harvest pays for within this many years. */
 export const SAVE_UP_YEARS = 5;
+
+/** Building slots of a hex on plains and elsewhere: plains build up, woods and mountains supply them. */
+const PLAINS_SLOTS = SLOTS;
+const OTHER_SLOTS = 4;
+
+/** Building slots a hex can use. */
+export function usableSlots(sim: Simulation, cell: number): number {
+  return sim.world.biome[cell] === Biome.Plains ? PLAINS_SLOTS : OTHER_SLOTS;
+}
+
 /** Smallest capacity gain (people) worth a building. */
 const MIN_GAIN = 0.5;
 /** Smallest satisfaction gain worth a comfort or luxury building. */
@@ -191,13 +201,43 @@ function harvestWith(sim: Simulation, cell: number, good: number, extraA: number
 function upkeepWith(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
   const { economy } = sim;
   let sum = 0;
-  const of = (t: number) => (material === Material.Wood ? BUILDINGS[t].upkeepWood : BUILDINGS[t].upkeepStone);
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
-    if (economy.state[s] === SlotState.Standing) sum += of(economy.type[s]);
+    if (economy.state[s] === SlotState.Standing) sum += upkeepOfType(economy.type[s], material);
   }
-  if (extraA >= 0) sum += of(extraA);
-  if (extraB >= 0) sum += of(extraB);
+  if (extraA >= 0) sum += upkeepOfType(extraA, material);
+  if (extraB >= 0) sum += upkeepOfType(extraB, material);
   return sum;
+}
+
+const upkeepOfType = (type: number, material: number) => (material === Material.Wood ? BUILDINGS[type].upkeepWood : BUILDINGS[type].upkeepStone);
+
+/**
+ * Wood and stone harvest and upkeep of `netCell` as it stands, from
+ * prepareNet: the building plans weigh many types, and most don't change the
+ * harvest, so netFast only adds their upkeep (the same result as netWith,
+ * without recounting the slots).
+ */
+const netBase = new Float64Array(4);
+let netCell = -1;
+
+function prepareNet(sim: Simulation, cell: number): void {
+  netBase[0] = harvestWith(sim, cell, Good.Wood, -1, -1);
+  netBase[1] = harvestWith(sim, cell, Good.Stone, -1, -1);
+  netBase[2] = upkeepWith(sim, cell, Material.Wood, -1, -1);
+  netBase[3] = upkeepWith(sim, cell, Material.Stone, -1, -1);
+  netCell = cell;
+}
+
+/** netWith for the cell of the last prepareNet. */
+function netFast(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
+  const good = material === Material.Wood ? Good.Wood : Good.Stone;
+  if (cell !== netCell || (extraA >= 0 && BUILDINGS[extraA].good === good) || (extraB >= 0 && BUILDINGS[extraB].good === good)) {
+    return netWith(sim, cell, material, extraA, extraB);
+  }
+  let upkeep = netBase[2 + material];
+  if (extraA >= 0) upkeep += upkeepOfType(extraA, material);
+  if (extraB >= 0) upkeep += upkeepOfType(extraB, material);
+  return netBase[material] - upkeep;
 }
 
 /** Yearly wood and stone left after upkeep, with up to two extra standing types. */
@@ -229,7 +269,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
     if (people > 0) {
       economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
       economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
-      if (sim.hasBuildings[c]) harvestLuxury(sim, c, yearEnd);
+      harvestLuxury(sim, c, yearEnd);
     }
     let busy = false;
     let supplyChanged = false;
@@ -276,10 +316,14 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       economy.goal[stock + Material.Stone] = 0;
       // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
       const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
+      // A planned seat of government comes first: nothing new, only repairs, until it stands.
+      const seatFirst = sim.seatSite[c] > 0;
       const started =
         !busy &&
-        (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c));
-      if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
+        (seatFirst
+          ? planBuilding(sim, c, true)
+          : planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
+      if (started || (!busy && !seatFirst && yearEnd && planTrade(sim, c))) supplyChanged = true;
       if (sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
@@ -313,22 +357,23 @@ function canExpand(sim: Simulation, cell: number): boolean {
  *   and when nothing is in reach, people move out once the hex is full.
  * Returns whether construction started.
  */
-function planBuilding(sim: Simulation, cell: number): boolean {
+function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boolean {
   const { economy } = sim;
   const capacity = sim.cellCapacity[cell];
   if (sim.cellPop[cell] < BUILD_FROM_CROWDING * capacity) return false;
   let free = 0;
   let ruins = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Empty) free++;
     else if (economy.state[s] === SlotState.Ruin) ruins++;
   }
-  const newAllowed = free > 0 && !canExpand(sim, cell);
+  const newAllowed = !repairsOnly && free > 0 && !canExpand(sim, cell);
   if (!newAllowed && ruins === 0) return false;
+  prepareNet(sim, cell);
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
   const stone = economy.stock[cell * MATERIAL_COUNT + Material.Stone];
-  const netWood = netWith(sim, cell, Material.Wood, -1, -1);
-  const netStone = netWith(sim, cell, Material.Stone, -1, -1);
+  const netWood = netFast(sim, cell, Material.Wood, -1, -1);
+  const netStone = netFast(sim, cell, Material.Stone, -1, -1);
 
   let bestGain = 0;
   let bestTime = Infinity;
@@ -358,7 +403,7 @@ function planBuilding(sim: Simulation, cell: number): boolean {
     const costStone = b.stone * share;
 
     // Directly, if the harvest keeps paying its upkeep.
-    if (netWith(sim, cell, Material.Wood, type, -1) >= 0 && netWith(sim, cell, Material.Stone, type, -1) >= 0) {
+    if (netFast(sim, cell, Material.Wood, type, -1) >= 0 && netFast(sim, cell, Material.Stone, type, -1) >= 0) {
       const wait = Math.max(yearsUntil(wood, costWood, netWood), yearsUntil(stone, costStone, netStone));
       if (wait <= SAVE_UP_YEARS && (gain > bestGain || wait < bestTime)) {
         bestGain = gain;
@@ -385,10 +430,10 @@ function planBuilding(sim: Simulation, cell: number): boolean {
       if (!isMaterial(p.good)) continue;
       const pshare = pslot >= 0 ? REPAIR_SHARE : 1;
       if (wood < p.wood * pshare || stone < p.stone * pshare) continue;
-      const netWood2 = netWith(sim, cell, Material.Wood, ptype, -1);
-      const netStone2 = netWith(sim, cell, Material.Stone, ptype, -1);
+      const netWood2 = netFast(sim, cell, Material.Wood, ptype, -1);
+      const netStone2 = netFast(sim, cell, Material.Stone, ptype, -1);
       if (netWood2 < 0 || netStone2 < 0) continue;
-      if (netWith(sim, cell, Material.Wood, ptype, type) < 0 || netWith(sim, cell, Material.Stone, ptype, type) < 0) continue;
+      if (netFast(sim, cell, Material.Wood, ptype, type) < 0 || netFast(sim, cell, Material.Stone, ptype, type) < 0) continue;
       const build = p.years * pshare;
       const wait =
         build +
@@ -429,7 +474,7 @@ function planTrade(sim: Simulation, cell: number): boolean {
   if (type < 0 || !buildingFits(sim, cell, type)) return false;
   const { economy } = sim;
   let free = false;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (economy.state[s] === SlotState.Empty) free = true;
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free = true;
   if (!free) return false;
   const b = BUILDINGS[type];
   if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone) return false;
@@ -439,7 +484,8 @@ function planTrade(sim: Simulation, cell: number): boolean {
 
 /**
  * A quarter of the luxury goods the hex's standing buildings harvest from
- * its deposit; at the year's end its people use their yearly need of each,
+ * its deposit; at the year's end its people use their yearly need of each
+ * (with buildings or without),
  * and the goods whose need the stock covered count for their satisfaction.
  */
 function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
@@ -457,18 +503,22 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
   for (let k = 0; k < LUXURY_COUNT; k++) {
     const i = cell * LUXURY_COUNT + k;
     if (economy.luxury[i] <= 0) continue;
-    if (economy.luxury[i] >= need) covered |= 1 << k;
-    economy.luxury[i] = Math.max(0, economy.luxury[i] - need);
+    // Goods held for a trade partner in transit aren't the settlement's own.
+    const held = Math.min(economy.luxury[i], sim.trade.transitKeep[cell * TRADE_GOODS + TradeGood.Luxury + k]);
+    const own = economy.luxury[i] - held;
+    if (own >= need) covered |= 1 << k;
+    economy.luxury[i] = held + Math.max(0, own - need);
   }
   economy.luxuryCovered[cell] = covered;
 }
 
-/** Whether a hex can have a building of this type at all (deposit, water). */
-function buildingFits(sim: Simulation, cell: number, type: number): boolean {
+/** Whether a hex can have a building of this type at all (deposit, water, coast, biome). */
+export function buildingFits(sim: Simulation, cell: number, type: number): boolean {
   const b = BUILDINGS[type];
   if (b.deposit !== undefined && sim.world.deposit[cell] !== b.deposit) return false;
   if (b.waterSurplus !== undefined && sim.cellSupply[cell * SUPPLY_KINDS + 1] - sim.cellPop[cell] < b.waterSurplus) return false;
   if (b.coast && !isCoast(sim.world, cell)) return false;
+  if (b.biomes && !b.biomes.includes(sim.world.biome[cell])) return false;
   return true;
 }
 
@@ -483,6 +533,37 @@ function hasGood(sim: Simulation, cell: number, good: number): boolean {
 }
 
 /**
+ * A settlement on a luxury deposit mines it as soon as its people or one of
+ * their trade partners lack the good in total, happy or not (luxury goods
+ * are strategic). Upkeep its harvest doesn't cover comes by trade if its
+ * people spare the wood and stone. Starts when affordable, else saves up.
+ */
+function planDeposit(sim: Simulation, cell: number): boolean {
+  const type = WORKSHOP_OF[sim.world.deposit[cell]];
+  if (type === undefined || hasGood(sim, cell, BUILDINGS[type].good) || !buildingFits(sim, cell, type)) return false;
+  const { economy, trade } = sim;
+  const civ = sim.world.owner[cell];
+  const g = TradeGood.Luxury + BUILDINGS[type].good - FIRST_LUXURY;
+  const lacks = (p: number) => (p + 1) * TRADE_GOODS <= trade.civWant.length && trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g] > 0;
+  if (!lacks(civ) && !(sim.diplomacy.partners[civ] ?? []).some(lacks)) return false;
+  let slot = -1;
+  let free = false;
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
+    if (economy.state[s] === SlotState.Ruin && economy.type[s] === type) slot = s;
+    if (economy.state[s] === SlotState.Empty) free = true;
+  }
+  if (slot < 0 && !free) return false;
+  // Upkeep: from its own harvest, or brought by its people.
+  const spares = (m: number) => (civ + 1) * TRADE_GOODS <= trade.civSpare.length && trade.civSpare[civ * TRADE_GOODS + m] - trade.civWant[civ * TRADE_GOODS + m] > 0;
+  if (netWith(sim, cell, Material.Wood, type, -1) < 0 && !spares(TradeGood.Wood)) return false;
+  if (netWith(sim, cell, Material.Stone, type, -1) < 0 && !spares(TradeGood.Stone)) return false;
+  const b = BUILDINGS[type];
+  const share = slot >= 0 ? REPAIR_SHARE : 1;
+  const ready = economy.stock[cell * MATERIAL_COUNT + Material.Wood] >= b.wood * share && economy.stock[cell * MATERIAL_COUNT + Material.Stone] >= b.stone * share;
+  return ready ? startConstruction(sim, cell, slot, type) : saveUp(sim, cell, slot, type);
+}
+
+/**
  * When a settlement is unhappy but has the food, water and space it needs
  * (and nothing to build for its growth): the comfort building or luxury
  * workshop that raises its satisfaction most among those it pays for within
@@ -493,12 +574,13 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
   const { economy } = sim;
   const people = sim.cellPop[cell];
   if (sim.satisfaction[cell] >= SATISFACTION_FIRST_BELOW || people > sim.cellCapacity[cell]) return false;
+  prepareNet(sim, cell);
   let free = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
   const stone = economy.stock[cell * MATERIAL_COUNT + Material.Stone];
-  const netWood = netWith(sim, cell, Material.Wood, -1, -1);
-  const netStone = netWith(sim, cell, Material.Stone, -1, -1);
+  const netWood = netFast(sim, cell, Material.Wood, -1, -1);
+  const netStone = netFast(sim, cell, Material.Stone, -1, -1);
   const served = comfortServed(economy, cell);
   const luxuryNow = luxuryValue(economy.luxuryCovered[cell]);
 
@@ -523,7 +605,7 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
     else if (isLuxury(b.good) && !hasGood(sim, cell, b.good)) gain = Math.min(LUXURY_EACH, LUXURY_MAX - luxuryNow);
     else continue;
     if (gain < bestGain || !buildingFits(sim, cell, type)) continue;
-    if (netWith(sim, cell, Material.Wood, type, -1) < 0 || netWith(sim, cell, Material.Stone, type, -1) < 0) continue;
+    if (netFast(sim, cell, Material.Wood, type, -1) < 0 || netFast(sim, cell, Material.Stone, type, -1) < 0) continue;
     const share = slot >= 0 ? REPAIR_SHARE : 1;
     const wait = Math.max(yearsUntil(wood, b.wood * share, netWood), yearsUntil(stone, b.stone * share, netStone));
     if (wait > SAVE_UP_YEARS || (gain === bestGain && wait >= bestTime)) continue;
@@ -590,9 +672,12 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
       const reached = seatField(sim, owner, id, [c], field);
       let benefit = 0;
       for (const k of reached) {
-        benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
-        // A settlement held back whose next step would pass the stop with this seat.
-        if (held(k) && connectionValue(field[k] + 1) >= EXPAND_MIN_CONNECTION) benefit += FRONTIER_BONUS;
+        // Only its own settlements count (the way may cross land opened to it).
+        if (owner[k] === id) {
+          benefit += Math.max(0, connectionValue(field[k]) - connectionValue(sim.seatCost[k]));
+          // A settlement held back whose next step would pass the stop with this seat.
+          if (held(k) && connectionValue(field[k] + 1) >= EXPAND_MIN_CONNECTION) benefit += FRONTIER_BONUS;
+        }
         field[k] = Infinity;
       }
       if (benefit > bestBenefit) {
@@ -685,7 +770,7 @@ function scratchField(n: number): Float32Array {
 function seatSlot(sim: Simulation, cell: number): number | null {
   const { economy } = sim;
   let free = false;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Ruin && economy.type[s] === SEAT_TYPE) return s;
     if (economy.state[s] === SlotState.Empty) free = true;
     if (economy.state[s] !== SlotState.Empty && economy.state[s] !== SlotState.Ruin && economy.type[s] === SEAT_TYPE) return null;
@@ -699,14 +784,15 @@ function startConstruction(sim: Simulation, cell: number, slot: number, type: nu
   const b = BUILDINGS[type];
   const share = slot >= 0 ? REPAIR_SHARE : 1;
   if (slot < 0) {
-    for (let s = cell * SLOTS, end = s + SLOTS; s < end && slot < 0; s++) if (economy.state[s] === SlotState.Empty) slot = s;
+    for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end && slot < 0; s++) if (economy.state[s] === SlotState.Empty) slot = s;
     if (slot < 0) return false;
     economy.type[slot] = type;
   }
   economy.stock[cell * MATERIAL_COUNT + Material.Wood] -= b.wood * share;
   economy.stock[cell * MATERIAL_COUNT + Material.Stone] -= b.stone * share;
-  economy.state[slot] = share < 1 ? SlotState.Repair : SlotState.Construction;
-  economy.work[slot] = b.years * share;
+  const repair = economy.state[slot] === SlotState.Ruin;
+  economy.state[slot] = repair ? SlotState.Repair : SlotState.Construction;
+  economy.work[slot] = b.years * (repair ? REPAIR_SHARE : 1);
   economy.unpaid[slot] = 0;
   sim.hasBuildings[cell] = 1;
   return true;

@@ -5,6 +5,7 @@ import { perfEvents } from '../state/perfStats';
 import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
+import { openDiplomacy } from './openDiplomacy';
 import { stirUnrest } from './stirUnrest';
 import {
   BENCHMARK,
@@ -52,7 +53,15 @@ export function useBenchmark(controller: { current: MapController | null }) {
       const seed = randomSeed();
       createNewWorld(seed);
       const setup = SCENARIOS[scenario];
-      const prepare = setup.buildings ? fillWithBuildings : setup.unrest ? stirUnrest : setup.trade ? openTrade : undefined;
+      const prepare = setup.buildings
+        ? fillWithBuildings
+        : setup.unrest
+          ? stirUnrest
+          : setup.trade
+            ? openTrade
+            : setup.diplomacy
+              ? openDiplomacy
+              : undefined;
       advanceYears(setup.years, prepare);
       setStatus({ running: true, scenario, world, swipe: 0, failed: results.filter((r) => !r.pass).length });
       await delay(WORLD_SETTLE_MS);

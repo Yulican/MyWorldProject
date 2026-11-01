@@ -4,6 +4,7 @@ import { sumTerms, type Term } from '../terms';
 import { stepCost } from '../world/roads';
 import { GOOD_NAMES, FIRST_LUXURY, Good, LUXURY_COUNT, SLOTS, SlotState, BUILDINGS, type Economy } from './buildings';
 import type { Civilization } from './civilizations';
+import { mayPass } from './diplomacy';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SUPPLY_NAMES } from './supply';
 
@@ -214,9 +215,10 @@ const fieldHeap = new MinHeap(64);
 
 /**
  * Travel cost from the nearest of `seats` to every hex of civilization `civ`
- * (Dijkstra through its own hexes only; roads make steps cheaper), at most
- * CONNECTION_FAR, written into `out` (which must hold Infinity elsewhere).
- * Returns the hexes it reached.
+ * (Dijkstra through its own hexes and the land of peoples that opened their
+ * borders to it; roads make steps cheaper), at most CONNECTION_FAR, written
+ * into `out` (which must hold Infinity elsewhere). Returns the hexes it
+ * reached, foreign ones included.
  */
 export function seatField(sim: Simulation, owner: Uint8Array, civ: number, seats: readonly number[], out: Float32Array): number[] {
   const { world } = sim;
@@ -233,7 +235,7 @@ export function seatField(sim: Simulation, owner: Uint8Array, civ: number, seats
     const here = out[c];
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
-      if (nb < 0 || owner[nb] !== civ) continue;
+      if (nb < 0 || owner[nb] === 0 || !mayPass(sim.diplomacy, civ, owner[nb])) continue;
       const next = here + stepCost(world, c, d);
       if (next < out[nb] && next <= CONNECTION_FAR) {
         if (out[nb] === Infinity) reached.push(nb);
@@ -260,11 +262,21 @@ export function seatsOf(sim: Simulation, owner: Uint8Array): number[][] {
  * target per year (a new settlement starts at its target), and the quarters
  * in a row it spent below zero. Also each people's mean satisfaction.
  */
+let seatScratch = new Float32Array(0);
+
 export function updateSatisfaction(sim: Simulation, owner: Uint8Array): void {
   const n = sim.world.cellCount;
   sim.seatCost.fill(Infinity);
   const seats = seatsOf(sim, owner);
-  for (let id = 1; id < sim.civSlots; id++) if (sim.civs[id]) seatField(sim, owner, id, seats[id], sim.seatCost);
+  // Each people's field in a scratch array: only its own hexes keep their cost.
+  if (seatScratch.length !== n) seatScratch = new Float32Array(n).fill(Infinity);
+  for (let id = 1; id < sim.civSlots; id++) {
+    if (!sim.civs[id]) continue;
+    for (const c of seatField(sim, owner, id, seats[id], seatScratch)) {
+      if (owner[c] === id) sim.seatCost[c] = seatScratch[c];
+      seatScratch[c] = Infinity;
+    }
+  }
 
   const sum = new Float64Array(sim.civSlots);
   const people = new Float64Array(sim.civSlots);

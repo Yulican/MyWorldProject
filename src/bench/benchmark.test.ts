@@ -49,6 +49,7 @@ test('the benchmark link picks the scenario, young by default', () => {
 test('the cities scenario fills every settled hex with buildings and puts ruins beside them', async () => {
   const { createSimulation, generateWorld, TICKS_PER_YEAR, stepSimulation } = await import('../sim');
   const { fillWithBuildings } = await import('./fillBuildings');
+  const { usableSlots } = await import('../sim/society/economy');
   const sim = createSimulation(generateWorld({ seed: 5 }));
   for (let t = 0; t < 60 * TICKS_PER_YEAR; t++) stepSimulation(sim);
   fillWithBuildings(sim);
@@ -57,7 +58,7 @@ test('the cities scenario fills every settled hex with buildings and puts ruins 
   let ruins = 0;
   for (let c = 0; c < world.cellCount; c++) {
     if (sim.cellPop[c] > 0) {
-      assert.equal(world.buildings[c], 4);
+      assert.equal(world.buildings[c], usableSlots(sim, c), 'every slot the hex has');
       cities++;
     }
     if (world.ruins[c] > 0) ruins++;
@@ -93,4 +94,17 @@ test('the trade scenario opens trade everywhere and merchants set out', async ()
   }
   assert.ok(sim.trade.trips > before, 'merchants set out');
   assert.equal(SCENARIOS.trade.trade, true);
+});
+
+test('the diplomacy scenario opens every border and merchants travel abroad', async () => {
+  const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { openDiplomacy } = await import('./openDiplomacy');
+  const { PAIRS } = await import('../sim/society/diplomacy');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  openDiplomacy(sim);
+  const ids = livingCivilizations(sim).map((c) => c.id);
+  assert.ok(ids.length > 1);
+  for (const a of ids) for (const b of ids) if (a !== b) assert.equal(sim.world.openBorders[a * PAIRS + b], 1);
+  assert.equal(SCENARIOS.diplomacy.diplomacy, true);
 });

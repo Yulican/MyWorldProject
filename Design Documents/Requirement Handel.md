@@ -22,7 +22,7 @@ anderen Völkern gehört zur späteren Außenpolitik.
 | Wasser (Fässer) | 1 | 1 | Wasserträger |
 | Luxusgüter (6) | 0,5 | 5 | Abbaugebäude (Zufriedenheit) |
 
-- Ein Händler trägt 20 Gewichtseinheiten.
+- Ein Händler trägt 40 Gewichtseinheiten (bis „Regionale Rohstoffe“, Schritt 2: 20).
 - Feste Preise; Preise nach Knappheit kommen mit dem Außenhandel.
 - Geld für Unterhalt, Steuern und Tribut kommt später.
 

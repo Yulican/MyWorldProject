@@ -1,6 +1,6 @@
 import { DIRECTION_COUNT, isWaterBiome, type Simulation } from '../sim';
 import { BUILDINGS, SLOTS, SlotState } from '../sim/society/buildings';
-import { updateCellSupply } from '../sim/society/economy';
+import { updateCellSupply, usableSlots } from '../sim/society/economy';
 
 // The "cities" benchmark scenario: the busiest map the building feature can
 // draw. Every settled hex becomes a big city and free land next to any
@@ -22,15 +22,16 @@ export function fillWithBuildings(sim: Simulation): void {
       }
       if (!ruin) continue;
     }
+    const slots = usableSlots(sim, c);
     for (let s = c * SLOTS, k = 0; k < SLOTS; s++, k++) {
       economy.type[s] = k % BUILDINGS.length;
-      economy.state[s] = ruin ? (k === 0 ? SlotState.Ruin : SlotState.Empty) : SlotState.Standing;
+      economy.state[s] = ruin || k >= slots ? (k === 0 ? SlotState.Ruin : SlotState.Empty) : SlotState.Standing;
       economy.work[s] = 0;
       economy.unpaid[s] = 0;
       if (economy.state[s] === SlotState.Empty) economy.type[s] = -1;
     }
     sim.hasBuildings[c] = 1;
-    world.buildings[c] = ruin ? 0 : SLOTS;
+    world.buildings[c] = ruin ? 0 : slots;
     world.ruins[c] = ruin ? 1 : 0;
     updateCellSupply(sim, c);
   }
