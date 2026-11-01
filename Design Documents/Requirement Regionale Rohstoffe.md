@@ -219,3 +219,22 @@ belegt weniger Speicher als vorher (aged 13,8 statt 14,6 KB, diplomacy
 20,0 statt 21,6 KB), der Median ist durch mehr Siedlungen und Gebäude etwa
 25 % langsamer, der langsamste Tick 4,2 ms (aged) bzw. 6,3 ms (diplomacy).
 
+
+**Korrekturen danach** (24 Welten, 500 Jahre):
+- Luxusgüter verbraucht jetzt jede Siedlung, auch ohne Gebäude (vorher nur,
+  wo ein Gebäude stand; sonst kein Luxus-Bonus).
+- Land, das ein Aufstand oder eine Abwanderung abschneidet, spaltet sich
+  jetzt ab (die Prüfung lief nur nach einem Besitzwechsel vor dem
+  Kartenstand, Aufstände kommen danach).
+
+| | Schritt 2 | + Luxus für alle | + Abspaltung nach Aufstand |
+|---|---|---|---|
+| Menschen | 16.793 | 16.989 | 16.824 |
+| Völker | 13,4 | 11,9 | 12,2 |
+| Aufstände je Welt | 5,3 | 4,4 | 4,4 |
+| Ins Ausland (davon Zwischenhandel) | 7.652 (3.044) | 9.153 (4.260) | 6.379 (2.293) |
+| Abkommen einseitig / zweiseitig | 47 / 9,3 | 53 / 14,6 | 35 / 7,3 |
+
+Die Handelszahlen schwanken stark mit dem Weltverlauf: Mehr Abspaltungen
+ändern, wer wen kennt. Rechenzeit (Node, langsamster Tick): aged 2,5 ms,
+unrest 3,9 ms, diplomacy 3,9 ms.
