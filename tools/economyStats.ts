@@ -1,6 +1,6 @@
 // Settlement growth, trade and diplomacy over many worlds, to calibrate the
 // economy (see "Design Documents/Requirement Regionale Rohstoffe.md").
-// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [open=0]
+// Usage: npx tsx tools/economyStats.ts [worlds=12] [years=300,500] [transit=1] [counterVia=1] [reserve=0] [storeCap=0] [open=0]
 //   open=1: from year 300 every people knows, trusts and trades freely with every other (the diplomacy benchmark scenario)
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
@@ -12,10 +12,12 @@ const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 // Simulation phase of the transit trade (older code has no switches).
-const tuning = (diplomacy as unknown as { TRANSIT_TUNING?: { on: boolean; counterVia: boolean } }).TRANSIT_TUNING;
+const tuning = (diplomacy as unknown as { TRANSIT_TUNING?: { on: boolean; counterVia: boolean; reserve: boolean; storeCap: number } }).TRANSIT_TUNING;
 if (tuning) {
   tuning.on = (options.transit ?? '1') === '1';
   tuning.counterVia = (options.counterVia ?? '1') === '1';
+  tuning.reserve = options.reserve === '1';
+  tuning.storeCap = Number(options.storeCap ?? 0);
 }
 const open = options.open === '1';
 
@@ -65,6 +67,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0),
       deliveredAbroad: abroad,
       transit: (sim.trade as { transit?: number }).transit ?? 0,
+      spoiled: (sim.trade as { spoiled?: number }).spoiled ?? 0,
       freeTrade: countFreeTrade(sim),
       money,
       known: sim.chronicle.filter((e) => e.text.endsWith(' met.')).length,

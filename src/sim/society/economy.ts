@@ -32,9 +32,10 @@ import {
   seatField,
   yieldFactor,
 } from './satisfaction';
+import { TRANSIT_TUNING } from './diplomacy';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
-import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
+import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
 
 // The quarterly economy of every settled hex: harvest, construction, upkeep
 // and what to build next (design doc, section 5). No randomness, so it keeps
@@ -457,8 +458,11 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
   for (let k = 0; k < LUXURY_COUNT; k++) {
     const i = cell * LUXURY_COUNT + k;
     if (economy.luxury[i] <= 0) continue;
-    if (economy.luxury[i] >= need) covered |= 1 << k;
-    economy.luxury[i] = Math.max(0, economy.luxury[i] - need);
+    // Goods held for a trade partner in transit aren't the settlement's own.
+    const held = TRANSIT_TUNING.reserve ? Math.min(economy.luxury[i], sim.trade.transitKeep[cell * TRADE_GOODS + TradeGood.Luxury + k]) : 0;
+    const own = economy.luxury[i] - held;
+    if (own >= need) covered |= 1 << k;
+    economy.luxury[i] = held + Math.max(0, own - need);
   }
   economy.luxuryCovered[cell] = covered;
 }

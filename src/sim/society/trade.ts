@@ -95,6 +95,10 @@ export type Trade = {
   transitFor: Uint8Array;
   /** Goods sold abroad in transit so far (statistics). */
   transit: number;
+  /** Per cell and good: what the settlement holds for a partner in transit (its own people don't use it up). */
+  transitKeep: Float32Array;
+  /** Stock spoiled above the storage limit so far (statistics). */
+  spoiled: number;
   /** Per cell and good: priority factor for bringing an export hub goods it still lacks for a trade agreement, 0 = none. */
   hubFocus: Float32Array;
   /** Merchants per hex from its standing trade buildings, and how many are away. */
@@ -151,6 +155,8 @@ export function createTrade(seed: number, cellCount: number): Trade {
     incoming: new Float32Array(cellCount * TRADE_GOODS),
     transitFor: new Uint8Array(cellCount * TRADE_GOODS),
     transit: 0,
+    transitKeep: new Float32Array(cellCount * TRADE_GOODS),
+    spoiled: 0,
     hubFocus: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -318,6 +324,24 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   // for what that partner lacks, up to a merchant's load of each good, and
   // spares that stock for it.
   trade.transitFor.fill(0, t, t + TRADE_GOODS);
+  trade.transitKeep.fill(0, t, t + TRADE_GOODS);
+  let room = Infinity;
+  if (TRANSIT_TUNING.storeCap > 0) {
+    // The storage limit: what lies above it spoils, and transit buys no more than fits.
+    let total = 0;
+    for (let g = 0; g < TRADE_GOODS; g++) if (g !== TradeGood.Money) total += stockOf(economy, cell, g);
+    if (total > TRANSIT_TUNING.storeCap) {
+      const keepShare = TRANSIT_TUNING.storeCap / total;
+      for (let g = 0; g < TRADE_GOODS; g++) {
+        if (g === TradeGood.Money) continue;
+        const stock = stockOf(economy, cell, g);
+        trade.spoiled += stock * (1 - keepShare);
+        addStock(economy, cell, g, -stock * (1 - keepShare));
+      }
+      total = TRANSIT_TUNING.storeCap;
+    }
+    room = TRANSIT_TUNING.storeCap - total;
+  }
   if (TRANSIT_TUNING.on && partners && known) {
     for (const p of partners) {
       if (sim.diplomacy.transitHub[civ * PAIRS + p] !== cell || (p + 1) * TRADE_GOODS > trade.civWant.length) continue;
@@ -327,7 +351,10 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
         if (lack <= 0) continue;
         const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
         const stock = stockOf(economy, cell, g);
-        trade.want[t + g] = Math.max(trade.want[t + g], keep - stock - trade.incoming[t + g]);
+        const more = Math.min(keep - stock - trade.incoming[t + g], room);
+        if (more > trade.want[t + g]) room -= more - trade.want[t + g];
+        trade.want[t + g] = Math.max(trade.want[t + g], more);
+        trade.transitKeep[t + g] = Math.max(trade.transitKeep[t + g], keep);
         trade.surplus[t + g] = Math.max(trade.surplus[t + g], Math.min(stock, keep));
         trade.transitFor[t + g] = 1;
       }

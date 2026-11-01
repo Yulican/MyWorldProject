@@ -157,7 +157,14 @@ export type Diplomacy = {
 };
 
 /** Simulation-phase tuning (Requirement Regionale Rohstoffe, Zwischenhandel): transit trade, and counter goods a buyer gets from third peoples. */
-export const TRANSIT_TUNING = { on: true, counterVia: true };
+export const TRANSIT_TUNING = {
+  on: true,
+  counterVia: true,
+  /** Luxury goods held for a partner are not used up by the settlement's own people. */
+  reserve: false,
+  /** At most this much stock (all goods but money) per settlement, the rest spoils; 0 = no limit. */
+  storeCap: 0,
+};
 
 export function createDiplomacy(cellCount: number): Diplomacy {
   const pairs = PAIRS * PAIRS;
