@@ -24,6 +24,11 @@ const WEEKS_PER_HEX = 1;
 /** Years of upkeep a government building keeps in stock at its site. */
 const UPKEEP_RESERVE_YEARS = 2;
 const UPKEEP_GRACE_YEARS = 2;
+/** Years a project may wait for its materials before the government drops it. */
+const PROJECT_YEARS = 5;
+const WEEKS_PER_YEAR = 52;
+/** Smallest load a government trader sets out with. */
+const MIN_LOAD = 5;
 const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 const COMFORT_TYPES = BUILDINGS.map((b, i) => (b.good === Good.Comfort ? i : -1)).filter((i) => i >= 0);
 const GROWTH_TYPES = BUILDINGS.map((b, i) => (b.good <= Good.Space && !b.deposit ? i : -1)).filter((i) => i >= 0);
@@ -44,6 +49,8 @@ export type Government = {
   projectSite: Int32Array;
   projectSlot: Int32Array;
   projectType: Int16Array;
+  /** Year the project was chosen. */
+  projectYear: Int32Array;
   /** Per seat cell: its traders and how many are away. */
   traders: Uint8Array;
   away: Uint8Array;
@@ -70,6 +77,7 @@ export function createGovernment(cellCount: number): Government {
     projectSite: new Int32Array(cellCount).fill(-1),
     projectSlot: new Int32Array(cellCount).fill(-1),
     projectType: new Int16Array(cellCount).fill(-1),
+    projectYear: new Int32Array(cellCount),
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     incoming: new Float32Array(cellCount * MATERIAL_COUNT),
@@ -215,7 +223,11 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         gov.projectSite[s] = -1;
       }
     }
-    if (gov.projectSite[s] < 0) chooseProject(sim, s);
+    // A planned seat goes before any other project; a project not started in time is dropped.
+    const year = Math.floor(sim.tick / WEEKS_PER_YEAR);
+    if (gov.projectSite[s] >= 0 && gov.projectType[s] !== SEAT_TYPE && year - gov.projectYear[s] >= PROJECT_YEARS) gov.projectSite[s] = -1;
+    if (gov.projectSite[s] < 0) chooseProject(sim, s, false, year);
+    else if (gov.projectType[s] !== SEAT_TYPE) chooseProject(sim, s, true, year);
   }
 }
 
@@ -226,7 +238,7 @@ function freeGovSlot(sim: Simulation, cell: number): number {
 }
 
 /** The next project of a seat's district: a planned seat, comfort for the restless, growth for the crowded. */
-function chooseProject(sim: Simulation, seat: number): void {
+function chooseProject(sim: Simulation, seat: number, seatOnly: boolean, year: number): void {
   const gov = sim.government;
   const n = sim.world.cellCount;
   let bestSite = -1;
@@ -243,6 +255,7 @@ function chooseProject(sim: Simulation, seat: number): void {
       if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, SEAT_TYPE, score];
       continue;
     }
+    if (seatOnly) continue;
     const people = sim.cellPop[c];
     // 2. Comfort where a settlement threatens to break away.
     if (sim.satisfaction[c] < GOV_TUNING.margin) {
@@ -264,9 +277,11 @@ function chooseProject(sim: Simulation, seat: number): void {
       }
     }
   }
+  if (seatOnly && bestSite < 0) return;
   gov.projectSite[seat] = bestSite;
   gov.projectSlot[seat] = bestSlot;
   gov.projectType[seat] = bestType;
+  gov.projectYear[seat] = year;
 }
 
 /**
@@ -331,7 +346,7 @@ export function advanceGovernment(sim: Simulation): void {
       }
     }
     if (need < 0) continue;
-    const amount = Math.min(needAmount, TRADER_LOAD);
+    let amount = Math.min(needAmount, TRADER_LOAD);
     // From the seat's own stock, else bought.
     let source = -1;
     if (need !== seat && gov.stock[seat * MATERIAL_COUNT + needM] >= amount) source = seat;
@@ -341,11 +356,12 @@ export function advanceGovernment(sim: Simulation): void {
       for (let c = 0; c < n; c++) {
         if (owner[c] !== civ || sim.cellPop[c] === 0) continue;
         const spare = trade.surplus[c * TRADE_GOODS + needM];
-        if (spare >= amount && spare > best) {
+        if (spare >= MIN_LOAD && spare > best) {
           best = spare;
           source = c;
         }
       }
+      if (source >= 0) amount = Math.min(amount, best);
       price = amount * PRICE[needM];
       if (source >= 0 && gov.treasury[seat] < price) {
         // Ask the richest seat of the people for the money.
