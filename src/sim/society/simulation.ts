@@ -50,6 +50,7 @@ import {
   createDiplomacy,
   mayPass,
   measureDistances,
+  updateTransitHubs,
   noteEmigration,
   payToll,
   resetCivRelations,
@@ -278,6 +279,7 @@ export function stepSimulation(sim: Simulation): void {
   else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
   else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
   measureDistances(sim, sim.world.owner);
+  updateTransitHubs(sim);
   if (yearEnd) closeYear(sim);
 }
 

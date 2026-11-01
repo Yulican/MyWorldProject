@@ -5,7 +5,7 @@ import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
-import { agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
+import { PAIRS, TRANSIT_TUNING, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
@@ -91,6 +91,10 @@ export type Trade = {
   surplus: Float32Array;
   /** Ordered and on its way: cell * TRADE_GOODS + good. */
   incoming: Float32Array;
+  /** 1 where a settlement trades this good in transit for a partner (cell * TRADE_GOODS + good). */
+  transitFor: Uint8Array;
+  /** Goods sold abroad in transit so far (statistics). */
+  transit: number;
   /** Per cell and good: priority factor for bringing an export hub goods it still lacks for a trade agreement, 0 = none. */
   hubFocus: Float32Array;
   /** Merchants per hex from its standing trade buildings, and how many are away. */
@@ -145,6 +149,8 @@ export function createTrade(seed: number, cellCount: number): Trade {
     want: new Float32Array(cellCount * TRADE_GOODS),
     surplus: new Float32Array(cellCount * TRADE_GOODS),
     incoming: new Float32Array(cellCount * TRADE_GOODS),
+    transitFor: new Uint8Array(cellCount * TRADE_GOODS),
+    transit: 0,
     hubFocus: new Float32Array(cellCount * TRADE_GOODS),
     merchants: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -308,6 +314,25 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   const c = civ * TRADE_GOODS;
   const known = c + TRADE_GOODS <= trade.civWant.length;
   const partners = sim.diplomacy.partners[civ];
+  // Zwischenhandel: the settlement that trades in transit for a partner asks
+  // for what that partner lacks, up to a merchant's load of each good, and
+  // spares that stock for it.
+  trade.transitFor.fill(0, t, t + TRADE_GOODS);
+  if (TRANSIT_TUNING.on && partners && known) {
+    for (const p of partners) {
+      if (sim.diplomacy.transitHub[civ * PAIRS + p] !== cell || (p + 1) * TRADE_GOODS > trade.civWant.length) continue;
+      for (let g = 0; g < TRADE_GOODS; g++) {
+        if (g === TradeGood.Money) continue;
+        const lack = trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g];
+        if (lack <= 0) continue;
+        const keep = Math.min(lack, MERCHANT_LOAD / WEIGHT[g]);
+        const stock = stockOf(economy, cell, g);
+        trade.want[t + g] = Math.max(trade.want[t + g], keep - stock - trade.incoming[t + g]);
+        trade.surplus[t + g] = Math.max(trade.surplus[t + g], Math.min(stock, keep));
+        trade.transitFor[t + g] = 1;
+      }
+    }
+  }
   let sell = 0;
   let buy = 0;
   for (let g = 0; g < TRADE_GOODS; g++) {
@@ -771,6 +796,7 @@ export function sendMerchants(sim: Simulation, home: number): void {
         if (sim.world.owner[home] !== sim.world.owner[target]) {
           const leg = agreementFor(sim.diplomacy, sim.world.owner[home], sim.world.owner[target], g);
           if (leg) leg.delivered += dealSell[g];
+          if (trade.transitFor[home * TRADE_GOODS + g]) trade.transit += dealSell[g];
         }
         trade.incoming[target * TRADE_GOODS + g] += dealSell[g];
         trade.want[target * TRADE_GOODS + g] = Math.max(0, trade.want[target * TRADE_GOODS + g] - dealSell[g]);

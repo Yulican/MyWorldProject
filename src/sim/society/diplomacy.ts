@@ -152,7 +152,12 @@ export type Diplomacy = {
   agreementPause: Map<number, number>;
   /** Highest civilization id used so far: pair loops stop there. */
   maxId: number;
+  /** Per people and trade partner (a * PAIRS + b): a's settlement that trades in transit for b (the one reaching it soonest), -1 = none. */
+  transitHub: Int32Array;
 };
+
+/** Simulation-phase tuning (Requirement Regionale Rohstoffe, Zwischenhandel): transit trade, and counter goods a buyer gets from third peoples. */
+export const TRANSIT_TUNING = { on: true, counterVia: true };
 
 export function createDiplomacy(cellCount: number): Diplomacy {
   const pairs = PAIRS * PAIRS;
@@ -174,6 +179,7 @@ export function createDiplomacy(cellCount: number): Diplomacy {
     partners: [],
     agreementPause: new Map(),
     maxId: 0,
+    transitHub: new Int32Array(pairs).fill(-1),
   };
 }
 
@@ -413,6 +419,22 @@ const reachTouched: number[] = [];
  * measured once a year and no single week carries them all; the yearly
  * update uses what was measured last.
  */
+/**
+ * Weekly, for the peoples whose id falls on this week: the settlement that
+ * trades in transit for each trade partner (Zwischenhandel), found like an
+ * export hub.
+ */
+export function updateTransitHubs(sim: Simulation): void {
+  const dip = sim.diplomacy;
+  if (!TRANSIT_TUNING.on) return;
+  const week = sim.tick % TICKS_PER_YEAR;
+  for (let a = week === 0 ? TICKS_PER_YEAR : week; a < sim.civs.length; a += TICKS_PER_YEAR) {
+    if (!sim.civs[a]) continue;
+    for (let b = 1; b <= dip.maxId; b++) dip.transitHub[pair(a, b)] = -1;
+    for (const b of dip.partners[a] ?? []) dip.transitHub[pair(a, b)] = exportHub(sim, a, b, 0);
+  }
+}
+
 export function measureDistances(sim: Simulation, owner: Uint8Array): void {
   const { world } = sim;
   const dip = sim.diplomacy;
@@ -618,7 +640,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       // Renegotiated, from the hubs that suit best now.
       for (const l of t.legs) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
       const amounts = second
-        ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good)
+        ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier))
         : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
       const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
       if (!ok || !mutual(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
@@ -677,7 +699,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           let amounts0: [number, number] | null = null;
           for (let h = 0; h < goods; h++) {
             if (h === g || triedGoods & (1 << h) || !free(a, b, h)) continue;
-            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h);
+            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h, spareVia(dip, civWant, civSpare, a, h, b));
             if (amounts && (!amounts0 || amounts[0] > amounts0[0])) {
               h0 = h;
               amounts0 = amounts;
@@ -687,7 +709,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           tried++;
           triedGoods |= 1 << h0;
           counterHub = exportHub(sim, a, b, h0);
-          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0) : null;
+          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, spareVia(dip, civWant, civSpare, a, h0, b)) : null;
           if (balanced) {
             best = h0;
             bestAmounts = balanced;
@@ -735,11 +757,34 @@ function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, su
  * of equal value at PRICE. Null if either leg would be below
  * AGREEMENT_MIN_AMOUNT.
  */
-export function exchangeAmounts(want: Float32Array, spare: Float32Array, supplier: number, buyer: number, good: number, counter: number): [number, number] | null {
+/**
+ * What `buyer` can get of `good` from its other trade partners (not
+ * `except`): what they spare in total (Zwischenhandel: a counter good may
+ * come from a third people).
+ */
+function spareVia(dip: Diplomacy, want: Float32Array, spare: Float32Array, buyer: number, good: number, except: number): number {
+  if (!TRANSIT_TUNING.counterVia) return 0;
+  let sum = 0;
+  for (const p of dip.partners[buyer] ?? []) {
+    if (p === except || p * TRADE_GOODS + good >= want.length) continue;
+    sum += Math.max(0, spare[p * TRADE_GOODS + good] - want[p * TRADE_GOODS + good]);
+  }
+  return sum;
+}
+
+export function exchangeAmounts(
+  want: Float32Array,
+  spare: Float32Array,
+  supplier: number,
+  buyer: number,
+  good: number,
+  counter: number,
+  fromThird = 0,
+): [number, number] | null {
   const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good);
   // The supplier needs only to ask for the counter good somewhere (most
   // peoples lack the same luxuries and spare the same wood and stone).
-  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter], AGREEMENT_MAX_AMOUNT);
+  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter] + fromThird, AGREEMENT_MAX_AMOUNT);
   if (there < AGREEMENT_MIN_AMOUNT || back < AGREEMENT_MIN_AMOUNT) return null;
   const value = Math.min(there * PRICE[good], back * PRICE[counter]);
   const a = value / PRICE[good];
