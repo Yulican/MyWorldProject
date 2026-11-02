@@ -61,6 +61,14 @@ export type Government = {
   income: Float32Array;
   /** Per seat cell: what its district could raise in a year at its loyalty limit (potentialIncome). */
   potential: Float32Array;
+  /** Per seat cell and material (debtYears): what finished buildings still owe, and the yearly installment the goods tax adds. */
+  buildDebt: Float32Array;
+  debtRate: Float32Array;
+  /** Per slot: 1 once a finished government building's cost is booked as debt. */
+  booked: Uint8Array;
+  /** Statistics: building cost booked as debt and repaid by the goods tax, in units. */
+  debtBooked: number;
+  debtRepaid: number;
   /** Per cell: money the government owes the settlement for materials taken for a seat (seatLoan), and the seat that owes it. */
   debt: Float32Array;
   debtSeat: Int32Array;
@@ -114,6 +122,11 @@ export function createGovernment(cellCount: number): Government {
     seatQueued: new Uint8Array(cellCount),
     income: new Float32Array(cellCount),
     potential: new Float32Array(cellCount),
+    buildDebt: new Float32Array(cellCount * MATERIAL_COUNT),
+    debtRate: new Float32Array(cellCount * MATERIAL_COUNT),
+    booked: new Uint8Array(cellCount * SLOTS),
+    debtBooked: 0,
+    debtRepaid: 0,
     debt: new Float32Array(cellCount),
     debtSeat: new Int32Array(cellCount).fill(-1),
     funded: new WeakSet(),
@@ -271,6 +284,8 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   // goodsByNeed: what each district needs in wood and stone this year (its buildings' upkeep, its queued
   // projects' missing materials, less what its seat holds) and what its settlements spare.
   const goodsNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
+  const baseNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
+  const goodsGot = new Float32Array(n * MATERIAL_COUNT);
   const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed || GOV_TUNING.potentialIncome ? n * MATERIAL_COUNT : 0);
   const moneyBase = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
   // The district's yearly wood and stone to spare in money: harvest less the settlements' own upkeep (not their stock).
@@ -305,7 +320,13 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
           goodsNeed[s * MATERIAL_COUNT + m] += Math.max(0, costOf(gov.projectType[i], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m]);
         }
       }
-      for (let m = 0; m < MATERIAL_COUNT; m++) goodsNeed[s * MATERIAL_COUNT + m] = Math.max(0, goodsNeed[s * MATERIAL_COUNT + m] - gov.stock[s * MATERIAL_COUNT + m]);
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        const i = s * MATERIAL_COUNT + m;
+        goodsNeed[i] = Math.max(0, goodsNeed[i] - gov.stock[i]);
+        // debtYears: the installment on finished buildings' cost comes on top.
+        baseNeed[i] = goodsNeed[i];
+        goodsNeed[i] += Math.min(gov.buildDebt[i], gov.debtRate[i]);
+      }
     }
   }
   for (let s = 0; s < n; s++) {
@@ -364,6 +385,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         const take = Math.min(economy.stock[c * MATERIAL_COUNT + m], gov.goodsRate[s] * Math.max(0, spare));
         economy.stock[c * MATERIAL_COUNT + m] -= take;
         gov.stock[s * MATERIAL_COUNT + m] += take;
+        goodsGot[s * MATERIAL_COUNT + m] += take;
         gov.collectedGoods += take;
         gov.income[s] += take * PRICE[m];
       }
@@ -381,6 +403,43 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     if (gov.debt[c] <= 1e-3 || sim.cellPop[c] === 0 || owner[c] !== owner[s]) {
       gov.debt[c] = 0;
       gov.debtSeat[c] = -1;
+    }
+  }
+  // debtYears: what the goods tax brought beyond the other needs repays the debt; newly finished buildings book theirs.
+  if (GOV_TUNING.debtYears > 0) {
+    for (let s = 0; s < n; s++) {
+      if (!isSeat[s]) {
+        for (let m = 0; m < MATERIAL_COUNT; m++) gov.buildDebt[s * MATERIAL_COUNT + m] = gov.debtRate[s * MATERIAL_COUNT + m] = 0;
+        continue;
+      }
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        const i = s * MATERIAL_COUNT + m;
+        if (gov.buildDebt[i] <= 0) continue;
+        const paid = Math.min(gov.buildDebt[i], gov.debtRate[i], Math.max(0, goodsGot[i] - (GOV_TUNING.goodsByNeed ? baseNeed[i] : 0)));
+        gov.buildDebt[i] -= paid;
+        gov.debtRepaid += paid;
+        if (gov.buildDebt[i] <= 1e-3) gov.buildDebt[i] = gov.debtRate[i] = 0;
+      }
+    }
+    for (let c = 0; c < n; c++) {
+      if (!sim.hasBuildings[c]) continue;
+      for (let x = c * SLOTS + GOV_SLOT, end = c * SLOTS + SLOTS; x < end; x++) {
+        const st = economy.state[x];
+        if (st !== SlotState.Standing) {
+          if (st === SlotState.Empty || st === SlotState.Ruin) gov.booked[x] = 0;
+          continue;
+        }
+        if (gov.booked[x]) continue;
+        gov.booked[x] = 1;
+        const s = gov.district[c];
+        if (s < 0) continue;
+        for (let m = 0; m < MATERIAL_COUNT; m++) {
+          const owed = costOf(economy.type[x], m) + UPKEEP_RESERVE_YEARS * upkeepOf(economy.type[x], m);
+          gov.buildDebt[s * MATERIAL_COUNT + m] += owed;
+          gov.debtRate[s * MATERIAL_COUNT + m] += owed / GOV_TUNING.debtYears;
+          gov.debtBooked += owed;
+        }
+      }
     }
   }
   // Upkeep of government buildings, from the government's stock at their site.

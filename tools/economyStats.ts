@@ -62,6 +62,8 @@ if (options.cash === '1') GOV_TUNING.cashCheck = true;
 // seatbudget=1: a seat's income check uses the whole people's income and seats; zeroprio: factor on a seat candidate's benefit in a district at 0 % tax.
 if (options.seatbudget) GOV_TUNING.seatPeopleBudget = options.seatbudget === '1';
 if (options.zeroprio) GOV_TUNING.zeroPriority = Number(options.zeroprio);
+// debtyears: a finished building's cost and first reserve become a debt the goods tax repays over that many years (0 = off).
+if (options.debtyears) GOV_TUNING.debtYears = Number(options.debtyears);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -199,6 +201,8 @@ for (let seed = 1; seed <= worlds; seed++) {
       'trader home: no seller': sim.government.stayNoSource,
       'trader home: no money': sim.government.stayNoMoney,
       'money transfers': sim.government.transfers,
+      'debt booked': sim.government.debtBooked,
+      'debt repaid': sim.government.debtRepaid,
       'rejected: income check': sim.government.rejectBudget,
       'rejected: money in hand': sim.government.rejectCash,
       'money transferred': sim.government.transferred,
