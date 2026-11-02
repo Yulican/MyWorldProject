@@ -23,7 +23,8 @@ export const GOV_TUNING = {
   minLoad: 5,
   // Baseline of the simulation phase (agreed so far): the people taxes without the safety margin while a seat is
   // financed, seats at half cost and upkeep, one seat plan per district, starting money for new peoples, goods tax
-  // by need with its own term, the income check on 40 % of the potential (yearly) income, all free traders set out.
+  // by need with its own term, the income check on 40 % of the potential (yearly) income, all free traders set out,
+  // seats checked against the whole people's budget and planned first (benefit x2) in districts at 0 % tax.
   seatTax: 2,
   seatMargin: 0,
   seatCost: 0.5,
@@ -42,8 +43,8 @@ export const GOV_TUNING = {
   goodsMinus: 10,
   potentialIncome: true,
   cashCheck: false,
-  seatPeopleBudget: false,
-  zeroPriority: 1,
+  seatPeopleBudget: true,
+  zeroPriority: 2,
 };
 /** Economy variants for the simulation: money earned per adult, as a factor (1 = today). */
 export const ECON_TUNING = { money: 1 };
