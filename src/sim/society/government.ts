@@ -84,6 +84,8 @@ export type Government = {
   seatKeep: Float32Array;
   /** Per seat cell: last year's goods tax in money (for the money balancing). */
   goodsIncome: Float32Array;
+  /** Statistics (localLevy): wood and stone taken on site for upkeep. */
+  levied: number;
   /** Statistics (moneyBalanceWeeks): money sent between seats by the balancing, and its trips. */
   balancedMoney: number;
   balanceTrips: number;
@@ -152,6 +154,7 @@ export function createGovernment(cellCount: number): Government {
     seatKeep: new Float32Array(cellCount * MATERIAL_COUNT),
     goodsIncome: new Float32Array(cellCount),
     balancedMoney: 0,
+    levied: 0,
     balanceTrips: 0,
     fromSeats: 0,
     maintShort: new Uint8Array(cellCount),
@@ -483,6 +486,39 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     if (gov.debt[c] <= 1e-3 || sim.cellPop[c] === 0 || owner[c] !== owner[s]) {
       gov.debt[c] = 0;
       gov.debtSeat[c] = -1;
+    }
+  }
+  // localLevy: each site takes what its government buildings lack for a year's upkeep from its own settlement's
+  // surplus, as a goods tax there, as far as that settlement stays above the safety margin.
+  if (GOV_TUNING.localLevy) {
+    for (let c = 0; c < n; c++) {
+      const s = gov.district[c];
+      if (s < 0 || !sim.hasBuildings[c] || sim.cellPop[c] === 0 || owner[c] !== owner[s]) continue;
+      const lack = [0, 0];
+      let any = false;
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        lack[m] = Math.max(0, upkeepReserve(sim, c, m, 1) - gov.stock[c * MATERIAL_COUNT + m]);
+        if (lack[m] > 1e-3) any = true;
+      }
+      if (!any) continue;
+      // The highest goods rate this settlement bears: its own satisfaction stays at the margin.
+      const headroom = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - GOV_TUNING.margin;
+      if (headroom <= 0) continue;
+      const g0 = gov.cellGoodsRate[c];
+      const extra = Math.max(0, goodsRateFor(goodsTaxValue(g0) - headroom) - g0);
+      let rate = 0;
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        const spare = Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
+        if (lack[m] <= 1e-3 || spare <= 0) continue;
+        const take = Math.min(lack[m], spare * extra, economy.stock[c * MATERIAL_COUNT + m]);
+        if (take <= 0) continue;
+        economy.stock[c * MATERIAL_COUNT + m] -= take;
+        sim.trade.surplus[c * TRADE_GOODS + m] -= take;
+        gov.stock[c * MATERIAL_COUNT + m] += take;
+        gov.levied += take;
+        rate = Math.max(rate, take / spare);
+      }
+      gov.cellGoodsRate[c] = g0 + rate;
     }
   }
   // debtYears: what the goods tax brought beyond the other needs repays the debt; newly finished buildings book theirs.

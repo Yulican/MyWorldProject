@@ -74,6 +74,8 @@ if (options.balance === '1') GOV_TUNING.seatBalance = true;
 if (options.moneybal) GOV_TUNING.moneyBalanceWeeks = Number(options.moneybal);
 // actual: also keep the upkeep within that share of last year's actual taxes (0 = off).
 if (options.actual) GOV_TUNING.actualShare = Number(options.actual);
+// levy=1: each site takes a year's upkeep of its government buildings from its own settlement's surplus as a goods tax there.
+if (options.levy === '1') GOV_TUNING.localLevy = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -215,6 +217,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       'bundled deliveries': sim.government.bundled,
       'units from other seats': sim.government.fromSeats,
       'money balanced': sim.government.balancedMoney,
+      'levied on site': sim.government.levied,
       'balancing trips': sim.government.balanceTrips,
       'debt repaid': sim.government.debtRepaid,
       'rejected: income check': sim.government.rejectBudget,
