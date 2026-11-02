@@ -517,10 +517,24 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   // With GOV_TUNING.incomeShare instead: the yearly upkeep stays within that share of last year's taxes;
   // a seat only has to fit beside the district's other seats (seats first in the budget).
   const budget = GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[seat] : gov.income[seat]);
-  const seatUpkeep = GOV_TUNING.incomeShare > 0 ? districtSeatUpkeep(sim, seat) : 0;
+  let seatUpkeep = GOV_TUNING.incomeShare > 0 ? districtSeatUpkeep(sim, seat) : 0;
+  let seatBudget = budget;
+  if (GOV_TUNING.seatPeopleBudget && GOV_TUNING.incomeShare > 0) {
+    // seatPeopleBudget: a seat is checked against the whole people's income and seats, not its district's.
+    const civ = sim.world.owner[seat];
+    seatUpkeep = 0;
+    seatBudget = 0;
+    for (let s = 0; s < n; s++) {
+      if (!gov.traders[s] || sim.world.owner[s] !== civ) continue;
+      seatUpkeep += districtSeatUpkeep(sim, s);
+      seatBudget += GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[s] : gov.income[s]);
+    }
+  }
   const fitsBudget = (t: number) =>
     GOV_TUNING.incomeShare > 0
-      ? (t === SEAT_TYPE ? seatUpkeep : upkeep) + upkeepGold(t) <= budget
+      ? t === SEAT_TYPE
+        ? seatUpkeep + upkeepGold(t) <= seatBudget
+        : upkeep + upkeepGold(t) <= budget
       : gov.treasury[seat] >= GOV_TUNING.secureYears * (upkeep + upkeepGold(t));
   // cashCheck: the treasury and the seat's stock also pay for the building and its first reserve, besides what the
   // queue still costs and MONEY_RESERVE_YEARS of upkeep for the buildings standing (for a seat: the seats standing).

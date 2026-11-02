@@ -59,6 +59,9 @@ if (options.goodsminus) GOV_TUNING.goodsMinus = Number(options.goodsminus);
 if (options.potential) GOV_TUNING.potentialIncome = options.potential === '1';
 // cash=1: a project also needs its construction and first reserve in hand (treasury and seat stock), besides the queue and 2 years of upkeep.
 if (options.cash === '1') GOV_TUNING.cashCheck = true;
+// seatbudget=1: a seat's income check uses the whole people's income and seats; zeroprio: factor on a seat candidate's benefit in a district at 0 % tax.
+if (options.seatbudget === '1') GOV_TUNING.seatPeopleBudget = true;
+if (options.zeroprio) GOV_TUNING.zeroPriority = Number(options.zeroprio);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;

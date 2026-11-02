@@ -702,6 +702,11 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
         }
         field[k] = Infinity;
       }
+      // A district its government cannot tax (0 %) needs the seat most (GOV_TUNING.zeroPriority).
+      if (GOV_TUNING.on && GOV_TUNING.zeroPriority !== 1) {
+        const d = sim.government.district[c];
+        if (d >= 0 && sim.government.rate[d] === 0) benefit *= GOV_TUNING.zeroPriority;
+      }
       if (benefit > bestBenefit) {
         bestBenefit = benefit;
         best = c;
