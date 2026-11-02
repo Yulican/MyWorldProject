@@ -50,6 +50,7 @@ export const GOV_TUNING = {
   bundle: false,
   centralGoods: false,
   seatBalance: false,
+  moneyBalanceWeeks: 0,
 };
 /** Economy variants for the simulation: money earned per adult, as a factor (1 = today). */
 export const ECON_TUNING = { money: 1 };

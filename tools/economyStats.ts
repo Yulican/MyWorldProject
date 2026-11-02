@@ -70,6 +70,8 @@ if (options.bundle === '1') GOV_TUNING.bundle = true;
 // central=1: one goods rate per people covering its whole need, districts up to their loyalty limit; balance=1: traders also draw from other seats' stock above 2 years of their district's need.
 if (options.central === '1') GOV_TUNING.centralGoods = true;
 if (options.balance === '1') GOV_TUNING.seatBalance = true;
+// moneybal: every so many weeks (52 yearly, 13 quarterly) seats short of money get it from seats with money to spare (0 = off).
+if (options.moneybal) GOV_TUNING.moneyBalanceWeeks = Number(options.moneybal);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -210,6 +212,8 @@ for (let seed = 1; seed <= worlds; seed++) {
       'debt booked': sim.government.debtBooked,
       'bundled deliveries': sim.government.bundled,
       'units from other seats': sim.government.fromSeats,
+      'money balanced': sim.government.balancedMoney,
+      'balancing trips': sim.government.balanceTrips,
       'debt repaid': sim.government.debtRepaid,
       'rejected: income check': sim.government.rejectBudget,
       'rejected: money in hand': sim.government.rejectCash,

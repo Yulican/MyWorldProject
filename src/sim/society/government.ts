@@ -82,6 +82,11 @@ export type Government = {
   repaid: number;
   /** Per seat cell and material (seatBalance): what the seat keeps for its own district; stock above it serves other districts. */
   seatKeep: Float32Array;
+  /** Per seat cell: last year's goods tax in money (for the money balancing). */
+  goodsIncome: Float32Array;
+  /** Statistics (moneyBalanceWeeks): money sent between seats by the balancing, and its trips. */
+  balancedMoney: number;
+  balanceTrips: number;
   /** Statistics (seatBalance): units drawn from other seats' stock. */
   fromSeats: number;
   /** Per seat cell (maintenanceFirst): 1 if a government building of its district is short of a year's upkeep. */
@@ -145,6 +150,9 @@ export function createGovernment(cellCount: number): Government {
     loaned: 0,
     repaid: 0,
     seatKeep: new Float32Array(cellCount * MATERIAL_COUNT),
+    goodsIncome: new Float32Array(cellCount),
+    balancedMoney: 0,
+    balanceTrips: 0,
     fromSeats: 0,
     maintShort: new Uint8Array(cellCount),
     traders: new Uint8Array(cellCount),
@@ -439,6 +447,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   }
   // Taxes.
   gov.income.fill(0);
+  gov.goodsIncome.fill(0);
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
     gov.cellRate[c] = s >= 0 ? gov.rate[s] : 0;
@@ -458,6 +467,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         goodsGot[s * MATERIAL_COUNT + m] += take;
         gov.collectedGoods += take;
         gov.income[s] += take * PRICE[m];
+        gov.goodsIncome[s] += take * PRICE[m];
       }
     }
   }
@@ -766,6 +776,10 @@ export function advanceGovernment(sim: Simulation): void {
     } else keep.push(t);
   }
   gov.trips = keep;
+  // moneyBalanceWeeks: from a few weeks after the yearly update on, every so many weeks the seats short of money get
+  // it from the nearest seats with money to spare, carried by a free trader of the sender.
+  const every = GOV_TUNING.moneyBalanceWeeks;
+  if (every > 0 && ((now % WEEKS_PER_YEAR) - 32 + WEEKS_PER_YEAR) % every === 0) balanceMoney(sim);
   if (now % 4 !== 0) return;
   const owner = world.owner;
   const n = world.cellCount;
@@ -943,6 +957,55 @@ export function advanceGovernment(sim: Simulation): void {
       }
       first.back = now + Math.max(2, weeks + hexDistance(world, at, seat) * WEEKS_PER_HEX);
       gov.away[seat]++;
+    }
+  }
+}
+
+/** Money a seat keeps for MONEY_RESERVE_YEARS: its buildings' upkeep its goods tax doesn't cover, and what its queued projects still cost. */
+function moneyNeed(sim: Simulation, seat: number): number {
+  const gov = sim.government;
+  let need = MONEY_RESERVE_YEARS * Math.max(0, districtUpkeep(sim, seat, false) - gov.goodsIncome[seat]);
+  for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) {
+    const site = gov.projectSite[i];
+    for (let m = 0; m < MATERIAL_COUNT; m++) {
+      const lack = costOf(gov.projectType[i], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m] - gov.stock[seat * MATERIAL_COUNT + m];
+      if (lack > 0) need += lack * PRICE[m];
+    }
+  }
+  return need;
+}
+
+/** Balancing (moneyBalanceWeeks): seats short of money, largest shortfall first, get it from the nearest seats with money to spare. */
+function balanceMoney(sim: Simulation): void {
+  const gov = sim.government;
+  const { world } = sim;
+  const n = world.cellCount;
+  const owner = world.owner;
+  const seats: number[] = [];
+  for (let s = 0; s < n; s++) if (gov.traders[s]) seats.push(s);
+  const spare = new Map<number, number>();
+  const short: { s: number; lack: number }[] = [];
+  for (const s of seats) {
+    const left = gov.treasury[s] - moneyNeed(sim, s);
+    if (left > 0) spare.set(s, left);
+    else if (left < 0) short.push({ s, lack: -left });
+  }
+  short.sort((a, b) => b.lack - a.lack || a.s - b.s);
+  for (const { s, lack } of short) {
+    let still = lack;
+    const donors = seats.filter((d) => d !== s && owner[d] === owner[s] && (spare.get(d) ?? 0) > 1).sort((a, b) => hexDistance(world, s, a) - hexDistance(world, s, b) || a - b);
+    for (const d of donors) {
+      if (still <= 1) break;
+      if (gov.away[d] >= gov.traders[d]) continue;
+      const send = Math.min(still, spare.get(d)!);
+      spare.set(d, spare.get(d)! - send);
+      gov.treasury[d] -= send;
+      still -= send;
+      const weeks = Math.max(1, hexDistance(world, d, s) * WEEKS_PER_HEX);
+      gov.away[d]++;
+      gov.trips.push({ seat: d, site: s, material: 0, amount: 0, money: send, arrive: sim.tick + weeks, back: sim.tick + 2 * weeks });
+      gov.balancedMoney += send;
+      gov.balanceTrips++;
     }
   }
 }
