@@ -26,6 +26,8 @@ const UPKEEP_RESERVE_YEARS = 3;
 /** Years of upkeep money a seat keeps back with reserveUpkeep. */
 const MONEY_RESERVE_YEARS = 2;
 const UPKEEP_GRACE_YEARS = 2;
+/** Years of its district's need a seat keeps before its stock serves other districts (seatBalance). */
+const SEAT_KEEP_YEARS = 2;
 /** Years a project may wait for its materials before the government drops it. */
 const PROJECT_YEARS = 5;
 const WEEKS_PER_YEAR = 52;
@@ -78,6 +80,10 @@ export type Government = {
   startMoney: number;
   loaned: number;
   repaid: number;
+  /** Per seat cell and material (seatBalance): what the seat keeps for its own district; stock above it serves other districts. */
+  seatKeep: Float32Array;
+  /** Statistics (seatBalance): units drawn from other seats' stock. */
+  fromSeats: number;
   /** Per seat cell (maintenanceFirst): 1 if a government building of its district is short of a year's upkeep. */
   maintShort: Uint8Array;
   /** Per seat cell: its traders and how many are away. */
@@ -138,6 +144,8 @@ export function createGovernment(cellCount: number): Government {
     startMoney: 0,
     loaned: 0,
     repaid: 0,
+    seatKeep: new Float32Array(cellCount * MATERIAL_COUNT),
+    fromSeats: 0,
     maintShort: new Uint8Array(cellCount),
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -295,6 +303,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   // projects' missing materials, less what its seat holds) and what its settlements spare.
   const goodsNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
   const baseNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
+  const netNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
   const goodsGot = new Float32Array(n * MATERIAL_COUNT);
   const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed || GOV_TUNING.potentialIncome ? n * MATERIAL_COUNT : 0);
   const moneyBase = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
@@ -332,11 +341,63 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       }
       for (let m = 0; m < MATERIAL_COUNT; m++) {
         const i = s * MATERIAL_COUNT + m;
+        // seatBalance: a seat keeps SEAT_KEEP_YEARS of its district's yearly need; the rest may go to other districts.
+        gov.seatKeep[i] = SEAT_KEEP_YEARS * goodsNeed[i];
+        netNeed[i] = goodsNeed[i] - gov.stock[i];
         goodsNeed[i] = Math.max(0, goodsNeed[i] - gov.stock[i]);
         // debtYears: the installment on finished buildings' cost comes on top.
         baseNeed[i] = goodsNeed[i];
         goodsNeed[i] += Math.min(gov.buildDebt[i], gov.debtRate[i]);
       }
+    }
+  }
+  // The room the taxes have at a seat: down to the safety margin for its weakest settlement (or its mean);
+  // while a seat is to be paid for, its district (seatTax 1) or its whole people (2) taxes without the margin.
+  const roomOf = (s: number) => {
+    const base = GOV_TUNING.weakest ? low[s] : sum[s] / count[s];
+    const financing = (GOV_TUNING.seatTax === 1 && seatQueued(gov, s)) || (GOV_TUNING.seatTax === 2 && civFinancing[owner[s]] === 1);
+    return (financing ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - base;
+  };
+  // centralGoods: the people's goods rate covers its whole need (all districts, less all seats' stock); districts at
+  // their loyalty limit pay only that, the others make up for them.
+  const civGoodsRate = new Float32Array(GOV_TUNING.centralGoods ? sim.civSlots : 0);
+  if (GOV_TUNING.centralGoods && GOV_TUNING.goodsByNeed) {
+    const cap = new Float32Array(n);
+    const civSeats: number[][] = [];
+    for (let s = 0; s < n; s++) {
+      if (!isSeat[s] || count[s] === 0) continue;
+      cap[s] = Math.min(TAX_MAX, goodsRateFor(roomOf(s) - GOV_TUNING.taxPlus));
+      (civSeats[owner[s]] ??= []).push(s);
+    }
+    for (let civ = 1; civ < civSeats.length; civ++) {
+      const list = civSeats[civ];
+      if (!list) continue;
+      let rate = 0;
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        let need = 0;
+        let most = 0;
+        for (const s of list) {
+          need += netNeed[s * MATERIAL_COUNT + m];
+          most += cap[s] * goodsSpare[s * MATERIAL_COUNT + m];
+        }
+        if (need <= 0) continue;
+        if (most <= need) {
+          rate = TAX_MAX;
+          break;
+        }
+        // The lowest common rate r with sum of min(r, cap) x spare >= need.
+        let lo = 0;
+        let hi = TAX_MAX;
+        for (let k = 0; k < 24; k++) {
+          const r = (lo + hi) / 2;
+          let got = 0;
+          for (const s of list) got += Math.min(r, cap[s]) * goodsSpare[s * MATERIAL_COUNT + m];
+          if (got >= need) hi = r;
+          else lo = r;
+        }
+        rate = Math.max(rate, hi);
+      }
+      civGoodsRate[civ] = rate;
     }
   }
   for (let s = 0; s < n; s++) {
@@ -347,10 +408,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       continue;
     }
     if (count[s] === 0) continue;
-    const base = GOV_TUNING.weakest ? low[s] : sum[s] / count[s];
-    // While a seat is to be paid for, its district (seatTax 1) or its whole people (2) taxes without the safety margin.
-    const financing = (GOV_TUNING.seatTax === 1 && seatQueued(gov, s)) || (GOV_TUNING.seatTax === 2 && civFinancing[owner[s]] === 1);
-    const room = (financing ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - base;
+    const room = roomOf(s);
     let goodsRate = GOV_TUNING.goodsTax ? -1 : 0;
     if (GOV_TUNING.goodsByNeed) {
       // As much as the district needs, as far as the money tax at 0 % still keeps it loyal; the money tax takes the rest.
@@ -360,6 +418,8 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         if (spare > 0) goodsRate = Math.max(goodsRate, goodsNeed[s * MATERIAL_COUNT + m] / spare);
       }
       goodsRate = Math.min(goodsRate, TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
+      // centralGoods: one goods rate for the whole people, each district up to its own loyalty limit.
+      if (GOV_TUNING.centralGoods) goodsRate = Math.min(civGoodsRate[owner[s]], TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
     }
     const rate = rateFor(room - goodsTaxValue(Math.max(0, goodsRate)));
     if (GOV_TUNING.potentialIncome) {
@@ -766,6 +826,20 @@ export function advanceGovernment(sim: Simulation): void {
       // From the seat's own stock, else bought.
       let source = -1;
       if (need !== seat && gov.stock[seat * MATERIAL_COUNT + needM] >= amount) source = seat;
+      // seatBalance: else the nearest other seat of the people with stock above what it keeps, free of charge.
+      if (source < 0 && GOV_TUNING.seatBalance) {
+        let bestD = Infinity;
+        let bestSpare = 0;
+        for (let x = 0; x < n; x++) {
+          if (x === seat || x === need || !gov.traders[x] || owner[x] !== civ) continue;
+          const spare = gov.stock[x * MATERIAL_COUNT + needM] - gov.seatKeep[x * MATERIAL_COUNT + needM];
+          if (spare < Math.min(amount, GOV_TUNING.minLoad)) continue;
+          const d = hexDistance(world, seat, x);
+          if (d < bestD) [source, bestD, bestSpare] = [x, d, spare];
+        }
+        if (source >= 0) amount = Math.min(amount, bestSpare);
+      }
+      const fromSeat = source >= 0;
       let price = 0;
       if (source < 0) {
         let best = 0;
@@ -807,8 +881,10 @@ export function advanceGovernment(sim: Simulation): void {
         break;
       }
       gov.sent++;
-      if (source === seat) gov.stock[seat * MATERIAL_COUNT + needM] -= amount;
-      else {
+      if (fromSeat) {
+        gov.stock[source * MATERIAL_COUNT + needM] -= amount;
+        if (source !== seat) gov.fromSeats += amount;
+      } else {
         economy.stock[source * MATERIAL_COUNT + needM] -= amount;
         trade.surplus[source * TRADE_GOODS + needM] -= amount;
         economy.money[source] += price;
