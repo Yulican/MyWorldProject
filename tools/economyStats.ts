@@ -72,6 +72,8 @@ if (options.central === '1') GOV_TUNING.centralGoods = true;
 if (options.balance === '1') GOV_TUNING.seatBalance = true;
 // moneybal: every so many weeks (52 yearly, 13 quarterly) seats short of money get it from seats with money to spare (0 = off).
 if (options.moneybal) GOV_TUNING.moneyBalanceWeeks = Number(options.moneybal);
+// actual: also keep the upkeep within that share of last year's actual taxes (0 = off).
+if (options.actual) GOV_TUNING.actualShare = Number(options.actual);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;

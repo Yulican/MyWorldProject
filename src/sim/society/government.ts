@@ -668,7 +668,12 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   const upkeep = districtUpkeep(sim, seat);
   // With GOV_TUNING.incomeShare instead: the yearly upkeep stays within that share of last year's taxes;
   // a seat only has to fit beside the district's other seats (seats first in the budget).
-  const budget = GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[seat] : gov.income[seat]);
+  // actualShare: besides, the upkeep stays within that share of last year's actual taxes.
+  const limit = (s: number) => {
+    const b = GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[s] : gov.income[s]);
+    return GOV_TUNING.actualShare > 0 ? Math.min(b, GOV_TUNING.actualShare * gov.income[s]) : b;
+  };
+  const budget = limit(seat);
   let seatUpkeep = GOV_TUNING.incomeShare > 0 ? districtSeatUpkeep(sim, seat) : 0;
   let seatBudget = budget;
   if (GOV_TUNING.seatPeopleBudget && GOV_TUNING.incomeShare > 0) {
@@ -679,7 +684,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
     for (let s = 0; s < n; s++) {
       if (!gov.traders[s] || sim.world.owner[s] !== civ) continue;
       seatUpkeep += districtSeatUpkeep(sim, s);
-      seatBudget += GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[s] : gov.income[s]);
+      seatBudget += limit(s);
     }
   }
   const fitsBudget = (t: number) =>
