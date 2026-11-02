@@ -46,6 +46,8 @@ export const GOV_TUNING = {
   seatPeopleBudget: true,
   zeroPriority: 2,
   debtYears: 0,
+  maintenanceFirst: false,
+  bundle: false,
 };
 /** Economy variants for the simulation: money earned per adult, as a factor (1 = today). */
 export const ECON_TUNING = { money: 1 };
