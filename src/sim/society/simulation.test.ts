@@ -16,6 +16,8 @@ import {
   hexSupplyTerms,
   livingCivilizations,
   stepSimulation,
+  stepSimulationPart,
+  TickPart,
   type Simulation,
 } from './simulation';
 import { EXPAND_MIN_CONNECTION } from './economy';
@@ -334,4 +336,29 @@ test('a people of 100 lacking a luxury good settles a free deposit of it nearby'
   assert.ok(settled.length > 0, 'a deposit was settled');
   const cell = settled[0].cell!;
   assert.ok(sim.world.deposit[cell] !== 0);
+});
+
+test('a tick run in parts (as the game clock does) gives the same world as whole ticks', () => {
+  const whole = createSimulation(generateWorld({ seed: 7 }));
+  const parts = createSimulation(generateWorld({ seed: 7 }));
+  let maxParts = 0;
+  for (let t = 0; t < 60 * TICKS_PER_YEAR; t++) {
+    stepSimulation(whole);
+    let n = 1;
+    while (!stepSimulationPart(parts)) n++;
+    maxParts = Math.max(maxParts, n);
+    assert.equal(parts.part, TickPart.Start);
+  }
+  // A quarterly refresh alone takes two parts of its own.
+  assert.ok(maxParts >= 6, `at most ${maxParts} parts per tick`);
+  assert.equal(parts.tick, whole.tick);
+  assert.equal(parts.pop.count, whole.pop.count);
+  assert.deepEqual(parts.world.owner, whole.world.owner);
+  assert.deepEqual(parts.world.population, whole.world.population);
+  assert.deepEqual(parts.satisfaction, whole.satisfaction);
+  assert.deepEqual(parts.seatSite, whole.seatSite);
+  assert.deepEqual(parts.economy.stock, whole.economy.stock);
+  assert.deepEqual(parts.government.treasury, whole.government.treasury);
+  assert.deepEqual(parts.chronicle, whole.chronicle);
+  assert.equal(parts.rng(), whole.rng());
 });
