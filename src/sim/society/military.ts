@@ -32,6 +32,10 @@ import type { Simulation } from './simulation';
  * - `reserveSlots`: free building slots a settlement keeps for its growth buildings when it builds a military building.
  * - `pool`: 1 = a district short of money gets it from the people's richest other seats before soldiers desert (0 = district treasury only, as designed).
  * - `captureStrategic`: 1 = peoples also settle free iron and flint deposits (like luxury deposits, simulation.ts: captureDeposits).
+ * - `mineAlways`: 1 = a settlement on an iron or flint deposit always mines it (economy.ts: planDeposit).
+ * - `govBuild`: 1 = seats build military buildings as government projects (government.ts: chooseProject), priority loyalty > military > growth.
+ * - `threatDanger`: a people feels threatened (arms) when another's danger for it is at least this (50 = equal strength at nearness 1).
+ * - `spareYears`: a seat with this many years of one building's pay in its treasury counts as having resources to spare.
  * - `build`: 1 = settlements build military buildings (placeholder rule), 0 = only what a test sets up.
  */
 export const MIL = {
@@ -40,7 +44,7 @@ export const MIL = {
   trainShare: 0.25,
   sold: 0.1,
   factor: 1.5,
-  perN: 5,
+  perN: 20,
   keepYears: 2,
   saleDanger: 40,
   goldRate: 5,
@@ -48,11 +52,15 @@ export const MIL = {
   floor: 20,
   minPop: 40,
   maxPopShare: 0.1,
-  treasuryShare: 0.5,
-  pool: 0,
+  treasuryShare: 1,
+  pool: 1,
   captureStrategic: 0,
   reserveSlots: 2,
-  build: 1,
+  build: 0,
+  mineAlways: 0,
+  govBuild: 1,
+  threatDanger: 50,
+  spareYears: 5,
 };
 
 export const TROOP_TYPES = 3;
@@ -164,7 +172,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     const base = c * TROOP_TYPES;
     for (let t = 0; t < TROOP_TYPES; t++) m.cap[base + t] = 0;
     if (sim.hasBuildings[c]) {
-      for (let s = c * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
+      for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
         const st = eco.state[s];
         if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
         const good = BUILDINGS[eco.type[s]].good;
@@ -241,6 +249,16 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     if (d === c) afford[d] += Math.floor(gov.treasury[d] / MIL.sold) * MIL.treasuryShare;
   }
 
+  // Pooled: the people's seats together pay for next year's soldiers.
+  const civAfford = new Float32Array(sim.civSlots);
+  if (MIL.pool) {
+    for (let c = 0; c < n; c++) {
+      const civ = owner[c];
+      if (civ === 0) continue;
+      for (let t = 0; t < TROOP_TYPES; t++) civAfford[civ] -= m.soldiers[c * TROOP_TYPES + t];
+      if (gov.traders[c] > 0) civAfford[civ] += Math.floor(gov.treasury[c] / MIL.sold) * MIL.treasuryShare;
+    }
+  }
   // Training: each building trains MIL.trainShare of its capacity a year, within the settlement's people, its
   // share of soldiers and the district's room (soldiers + free capacity cost pay; buildings were only built within it).
   for (let c = 0; c < n; c++) {
@@ -257,9 +275,10 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       if (cap <= 0 || m.soldiers[base + t] >= cap) continue;
       // Stables need horses at hand.
       if (t === Troop.Shock && eco.luxury[c * STORED_COUNT + TROOP_GOOD[t]] < 1) continue;
-      const add = Math.min(cap - m.soldiers[base + t], Math.ceil(MIL.trainShare * cap), room, Math.floor(afford[dist]));
+      const add = Math.min(cap - m.soldiers[base + t], Math.ceil(MIL.trainShare * cap), room, Math.floor(MIL.pool ? civAfford[owner[c]] : afford[dist]));
       if (add <= 0) continue;
-      afford[dist] -= add;
+      if (MIL.pool) civAfford[owner[c]] -= add;
+      else afford[dist] -= add;
       m.soldiers[base + t] += add;
       m.train[c] += add;
       m.trained += add;
@@ -297,4 +316,40 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
 export function soldiersAt(sim: Simulation, cell: number): number {
   const base = cell * TROOP_TYPES;
   return sim.military.soldiers[base] + sim.military.soldiers[base + 1] + sim.military.soldiers[base + 2];
+}
+
+/**
+ * Whether the seat's people arms (government.ts: chooseProject): a stronger
+ * people is near (danger for us at least MIL.threatDanger, the strength ratio
+ * weighted by nearness), settlements of the district are dissatisfied
+ * (satisfaction < 0), or the seat has resources to spare (treasury of
+ * MIL.spareYears years of one building's pay). Always within the income check.
+ */
+export function armingWanted(sim: Simulation, seat: number, pairs: number): boolean {
+  const civ = sim.world.owner[seat];
+  if (civ === 0 || districtRoom(sim, seat) < MIL.capacity) return false;
+  if (sim.government.treasury[seat] >= MIL.spareYears * MIL.capacity * MIL.sold) return true;
+  const d = sim.diplomacy.danger;
+  for (let b = 1; b < pairs; b++) if (b !== civ && d[civ * pairs + b] >= MIL.threatDanger) return true;
+  const gov = sim.government;
+  for (let c = 0; c < sim.world.cellCount; c++) if (gov.district[c] === seat && sim.cellPop[c] > 0 && sim.satisfaction[c] < 0) return true;
+  return false;
+}
+
+/** The troop type the people has the least of and the cell can host (-1 = none); ties go by cell. */
+export function pickTroopType(sim: Simulation, cell: number, has: (good: number) => boolean): number {
+  const civ = sim.world.owner[cell];
+  let best = -1;
+  let bestN = Infinity;
+  for (let k = 0; k < TROOP_TYPES; k++) {
+    const t = (k + cell) % TROOP_TYPES;
+    if (has(TROOP_BUILDING[t])) continue;
+    if (t === Troop.Shock && sim.economy.luxury[cell * STORED_COUNT + TROOP_GOOD[t]] < 1) continue;
+    const have = civ * TROOP_TYPES + t < sim.military.soldiersOf.length ? sim.military.soldiersOf[civ * TROOP_TYPES + t] : 0;
+    if (have < bestN) {
+      bestN = have;
+      best = t;
+    }
+  }
+  return best;
 }

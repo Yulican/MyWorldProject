@@ -76,7 +76,7 @@ Sicherheitsabstand im ganzen Volk.
 - **Bauliste:** ein Vorhaben je Sitz. Reihenfolge:
   1. ein geplanter **Regierungssitz** (er verdrängt ein anderes Vorhaben),
   2. **Komfort** für Siedlungen unter dem Sicherheitsabstand,
-  (Krieg: Priorität der Vorhaben insgesamt Loyalität der Siedlungen > **Militär** > Wachstum; Militärgebäude baut der Sitz, wenn ein stärkeres Volk existiert, das Reich unzufriedene Siedlungen (Zufriedenheit < 0) hat oder Ressourcen frei sind, `Requirement Krieg.md`, Abschnitt 2.)
+  (Krieg, entschieden: Reihenfolge Regierungssitz > Komfort > **Militär** > Wachstum; Sitz und Komfort zählen als Loyalität der Siedlungen. Militärgebäude baut der Sitz, wenn ein stärkeres Volk existiert, das Reich unzufriedene Siedlungen (Zufriedenheit < 0) hat oder Ressourcen frei sind, `Requirement Krieg.md`, Abschnitt 2.)
   3. **Wachstum** für Siedlungen ab 80 % ihrer Kapazität (Gewinn an
      Kapazität je Kosten).
 - Ein Vorhaben, das 5 Jahre nicht beginnen konnte, wird gestrichen (Sitze

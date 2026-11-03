@@ -1,7 +1,8 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
-import { districtPay } from './military';
+import { MIL, TROOP_TYPE_OF_BUILDING, TROOP_BUILDING, armingWanted, districtPay, pickTroopType } from './military';
+import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { GOV_TUNING, TAX_MAX, goodsRateFor, goodsTaxValue, rateFor, taxValue } from './taxes';
@@ -31,6 +32,8 @@ const UPKEEP_GRACE_YEARS = 2;
 /** Years a project may wait for its materials before the government drops it (seats excepted). */
 const PROJECT_YEARS = 5;
 const WEEKS_PER_YEAR = 52;
+/** Project score of a military building: below loyalty (seats 1000, comfort 100+), above growth (capped below it). */
+const MILITARY_SCORE = 50;
 const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 const COMFORT_TYPES = BUILDINGS.map((b, i) => (b.good === Good.Comfort ? i : -1)).filter((i) => i >= 0);
 const GROWTH_TYPES = BUILDINGS.map((b, i) => (b.good <= Good.Space && !b.deposit ? i : -1)).filter((i) => i >= 0);
@@ -498,6 +501,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   let bestSlot = -1;
   let bestType = -1;
   let bestScore = 0;
+  const arm = !seatOnly && MIL.enabled && MIL.govBuild && armingWanted(sim, seat, PAIRS);
   for (let c = 0; c < n; c++) {
     if (gov.district[c] !== seat || gov.projectSite[seat] === c) continue;
     const slot = freeGovSlot(sim, c);
@@ -519,13 +523,31 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
         break;
       }
     }
-    // 3. Growth where it is crowded (more people pay more taxes).
+    // 3. Military (below loyalty, above growth): one building of each type per settlement.
+    if (arm && people >= MIL.minPop && bestScore < MILITARY_SCORE) {
+      const has = (good: number) => {
+        for (let q = c * SLOTS, end = q + SLOTS; q < end; q++) {
+          const st = sim.economy.state[q];
+          if (st !== SlotState.Empty && st !== SlotState.Ruin && BUILDINGS[sim.economy.type[q]].good === good) return true;
+        }
+        return false;
+      };
+      const k = pickTroopType(sim, c, has);
+      if (k >= 0) {
+        bestSite = c;
+        bestSlot = slot;
+        bestType = TROOP_TYPE_OF_BUILDING[k];
+        bestScore = MILITARY_SCORE;
+        continue;
+      }
+    }
+    // 4. Growth where it is crowded (more people pay more taxes).
     if (people >= 0.8 * sim.cellCapacity[c]) {
       for (const t of GROWTH_TYPES) {
         if (!buildingFits(sim, c, t) || !fits(t)) continue;
         const gain = capacityWith(sim, c, t, -1) - sim.cellCapacity[c];
         if (gain < 1) continue;
-        const score = (gain / Math.max(1, goldCost(t))) * 10;
+        const score = Math.min(MILITARY_SCORE - 1, (gain / Math.max(1, goldCost(t))) * 10);
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
       }
     }

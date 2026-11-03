@@ -594,7 +594,7 @@ function planDeposit(sim: Simulation, cell: number): boolean {
   const { economy, trade } = sim;
   const civ = sim.world.owner[cell];
   // Gold is mined for its money, wanted or not; the other goods when the people or a partner lacks them.
-  if (BUILDINGS[type].good !== Good.Gold) {
+  if (BUILDINGS[type].good !== Good.Gold && !(MIL.mineAlways && (BUILDINGS[type].good === Good.Iron || BUILDINGS[type].good === Good.Flint))) {
     const g = TradeGood.Luxury + BUILDINGS[type].good - FIRST_LUXURY;
     const lacks = (p: number) => (p + 1) * TRADE_GOODS <= trade.civWant.length && trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g] > 0;
     if (!lacks(civ) && !(sim.diplomacy.partners[civ] ?? []).some(lacks)) return false;
