@@ -99,9 +99,11 @@ Grundlage für den späteren Handel.
 | Salt | Saline | 6 | Salz |
 | Spices | Gewürzgarten | 5 | Gewürze |
 | Gems | Edelsteinmine | 3 | Edelsteine |
-| Gold | Goldmine | 3 | Gold (Schmuck) |
+| Gold | Goldmine | 3 | Gold (Schmuck); **ab Krieg Phase 0 kein Luxusgut mehr** (siehe unten) |
 | Marble | Marmorbruch | 4 | Marmor |
 | Wild horses | Pferdezucht | 6 | Pferde |
+
+**Ab Krieg Phase 0 (Entscheidung, Code hat bis dahin noch 6 Luxusgüter):** Gold ist kein Luxusgut mehr und gibt keinen Komfort (+5 entfällt). Beim Abbau wird es direkt zu Geld der Siedlung (`Requirement Regionale Rohstoffe.md`, Abschnitt 10). Es bleiben 5 Luxusgüter; der Komfort-Teilwert („+5 je abgedecktem Gut, bis +15“) bleibt, die Auswirkung auf die Zufriedenheit wird in der Simulation geprüft.
 
 \* gezählt in 8 erzeugten Welten mit je etwa 2.000 Landhexes.
 
