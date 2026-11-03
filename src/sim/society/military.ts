@@ -249,6 +249,13 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     if (d === c) afford[d] += Math.floor(gov.treasury[d] / MIL.sold) * MIL.treasuryShare;
   }
 
+  // The government keeps next year's pay of the soldiers that stay (and the new ones below) out of its spending.
+  gov.reserve.fill(0);
+  for (let c = 0; c < n; c++) {
+    const d = gov.district[c];
+    if (d < 0) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) gov.reserve[d] += m.soldiers[c * TROOP_TYPES + t] * MIL.sold;
+  }
   // Pooled: the people's seats together pay for next year's soldiers.
   const civAfford = new Float32Array(sim.civSlots);
   if (MIL.pool) {
@@ -282,6 +289,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       m.soldiers[base + t] += add;
       m.train[c] += add;
       m.trained += add;
+      if (dist >= 0) gov.reserve[dist] += add * MIL.sold;
       room -= add;
     }
   }

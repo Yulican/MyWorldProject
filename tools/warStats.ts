@@ -102,6 +102,20 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     }
     for (const v of mil.strength) strengthSum += v;
   }
+  // Soldiers per 1000 people of peoples with a standing gold mine and of those without.
+  const goldCiv = new Set<number>();
+  for (let c = 0; c < w.cellCount; c++) {
+    if (!sim.hasBuildings[c] || !w.owner[c]) continue;
+    for (let q = c * SLOTS; q < (c + 1) * SLOTS; q++) if (sim.economy.state[q] === SlotState.Standing && BUILDINGS[sim.economy.type[q]].name === 'Gold mine') goldCiv.add(w.owner[c]);
+  }
+  const grp = [[0, 0], [0, 0]];
+  if (mil) {
+    for (const id of living) {
+      const g = goldCiv.has(id) ? 1 : 0;
+      grp[g][0] += (mil.soldiersOf[id * TROOP_TYPES] ?? 0) + (mil.soldiersOf[id * TROOP_TYPES + 1] ?? 0) + (mil.soldiersOf[id * TROOP_TYPES + 2] ?? 0);
+      grp[g][1] += sim.civs[id]!.population;
+    }
+  }
   let money = 0;
   for (const v of sim.economy.money) money += v;
   const del = sim.trade.delivered;
@@ -123,6 +137,10 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     ranges: built['Shooting range'] ?? 0,
     stables: built['Stable'] ?? 0,
     'iron/flint/gold mines': mines,
+    'desertion % of trained': mil?.trained ? (100 * mil.deserted) / mil.trained : 0,
+    'soldiers/1000 gold peoples': (1000 * grp[1][0]) / Math.max(1, grp[1][1]),
+    'soldiers/1000 other peoples': (1000 * grp[0][0]) / Math.max(1, grp[0][1]),
+    'gold peoples': goldCiv.size,
     trained: mil?.trained ?? 0,
     deserted: mil?.deserted ?? 0,
     disbanded: mil?.disbanded ?? 0,

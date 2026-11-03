@@ -1,7 +1,7 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
-import { MIL, TROOP_TYPE_OF_BUILDING, TROOP_BUILDING, armingWanted, districtPay, pickTroopType } from './military';
+import { MIL, TROOP_TYPE_OF_BUILDING, armingWanted, districtPay, pickTroopType } from './military';
 import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -62,6 +62,8 @@ export type Government = {
   potential: Float32Array;
   /** Per seat cell: yearly upkeep in money of its district's government buildings (standing or being built), as of the last projects update (military.ts reads it). */
   upkeep: Float32Array;
+  /** Per seat cell: money kept back for next year's soldiers' pay (military.ts); the government doesn't spend it. */
+  reserve: Float32Array;
   /** Per civilization id: its founding tick + 1 once its government got its starting money. */
   funded: number[];
   /** Per seat cell: its traders and how many are away. */
@@ -107,6 +109,7 @@ export function createGovernment(cellCount: number): Government {
     seatQueued: new Uint8Array(cellCount),
     potential: new Float32Array(cellCount),
     upkeep: new Float32Array(cellCount),
+    reserve: new Float32Array(cellCount),
     funded: [],
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -678,12 +681,12 @@ export function advanceGovernment(sim: Simulation): void {
         if (source < 0) break;
         amount = Math.min(amount, best);
         price = amount * PRICE[needM];
-        if (gov.treasury[seat] < price) {
+        if (gov.treasury[seat] - gov.reserve[seat] < price) {
           // Ask the richest seat of the people for the money.
           let rich = -1;
           for (const s of seats) if (owner[s] === civ && s !== seat && (rich < 0 || gov.treasury[s] > gov.treasury[rich])) rich = s;
-          if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] > 2 * price) {
-            const send = gov.treasury[rich] / 2;
+          if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] - gov.reserve[rich] > 2 * price) {
+            const send = (gov.treasury[rich] - gov.reserve[rich]) / 2;
             gov.treasury[rich] -= send;
             const weeks = Math.max(1, hexDistance(world, rich, seat) * WEEKS_PER_HEX);
             gov.away[rich]++;
