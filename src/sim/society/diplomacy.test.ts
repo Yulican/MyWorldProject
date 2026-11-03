@@ -40,9 +40,9 @@ function runYears(sim: Simulation, years: number): void {
 const sumTerms = (terms: { value: number }[]) => terms.reduce((s, t) => s + t.value, 0);
 const pair = (a: number, b: number) => a * PAIRS + b;
 
-/** World 17, just after its first two peoples met (in year 98, in the diplomacy week). */
+/** World 16, just after its first two peoples met (in year 86, in the diplomacy week). */
 function metWorld(): { sim: Simulation; a: number; b: number } {
-  const sim = createSimulation(generateWorld({ seed: 17 }));
+  const sim = createSimulation(generateWorld({ seed: 16 }));
   const firstMeeting = () => sim.chronicle.find((e) => e.text.endsWith(' met.'));
   while (!firstMeeting() && sim.tick < 300 * TICKS_PER_YEAR) stepSimulation(sim);
   const met = firstMeeting();
@@ -179,7 +179,7 @@ function connected(sim: Simulation, owner: Uint8Array, civ: number, capital: num
 }
 
 test('land cut off by a closed border gets a grace period before it breaks away', () => {
-  const sim = createSimulation(generateWorld({ seed: 17 }));
+  const sim = createSimulation(generateWorld({ seed: 16 }));
   runYears(sim, 150);
   const owner = Uint8Array.from(sim.world.owner);
   // A people, a hex of it the rest of its land depends on, and another people.
@@ -226,7 +226,7 @@ test('every diplomatic event goes into the chronicle with a place', () => {
 
 test('diplomacy keeps the history the same for the same seed', () => {
   const run = () => {
-    const sim = createSimulation(generateWorld({ seed: 17 }));
+    const sim = createSimulation(generateWorld({ seed: 16 }));
     runYears(sim, 120);
     return [Array.from(sim.diplomacy.trust.subarray(0, 8 * PAIRS)), sim.chronicle.map((e) => e.text)];
   };
@@ -234,7 +234,7 @@ test('diplomacy keeps the history the same for the same seed', () => {
 });
 
 test('the simulation uses the same trust and danger the diplomacy panel explains', () => {
-  const sim = createSimulation(generateWorld({ seed: 17 }));
+  const sim = createSimulation(generateWorld({ seed: 16 }));
   runYears(sim, 160);
   let pairs = 0;
   for (const a of livingCivilizations(sim)) {

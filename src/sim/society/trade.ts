@@ -212,11 +212,14 @@ export function stockOf(eco: Economy, cell: number, good: number): number {
   return eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury];
 }
 
-export function addStock(eco: Economy, cell: number, good: number, amount: number): void {
+/** Adds to (or takes from) a hex's stock; grain and water change its supply, so with `trade` it is marked for an update. */
+export function addStock(eco: Economy, cell: number, good: number, amount: number, trade?: Trade): void {
   if (good <= TradeGood.Stone) eco.stock[cell * MATERIAL_COUNT + good] += amount;
   else if (good === TradeGood.Money) eco.money[cell] += amount;
-  else if (good <= TradeGood.Water) eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
-  else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
+  else if (good <= TradeGood.Water) {
+    eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
+    if (trade && amount !== 0) markSupply(trade, cell);
+  } else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
 }
 
 /** Grain and water in stock as food and water supply (up to PROVISIONS_MAX people). */
@@ -879,7 +882,7 @@ export function sendMerchants(sim: Simulation, home: number): void {
     for (let g = 0; g < TRADE_GOODS; g++) {
       trade.tripCargo[trip * TRADE_GOODS + g] = dealSell[g];
       if (dealSell[g] > 0) {
-        addStock(economy, home, g, -dealSell[g]);
+        addStock(economy, home, g, -dealSell[g], trade);
         // A trade agreement counts what sets out (the way takes time).
         if (sim.world.owner[home] !== sim.world.owner[target]) {
           const leg = agreementFor(sim.diplomacy, sim.world.owner[home], sim.world.owner[target], g);
@@ -940,7 +943,7 @@ function payCrossings(sim: Simulation, home: number, civ: number): boolean {
       (g, units) => {
         // Taken from home's stock; what came off the load isn't loaded later.
         dealSell[g] -= Math.min(units, dealSell[g]);
-        addStock(economy, home, g, -units);
+        addStock(economy, home, g, -units, sim.trade);
       },
       PRICE,
       home,
@@ -1036,7 +1039,7 @@ export function advanceTrips(sim: Simulation): void {
           const credit = money + owed;
           const amount = Math.min(asked, trade.surplus[target * TRADE_GOODS + g], stockOf(economy, target, g), load / WEIGHT[g], credit / PRICE[g]);
           if (amount <= 0) continue;
-          addStock(economy, target, g, -amount);
+          addStock(economy, target, g, -amount, trade);
           trade.surplus[target * TRADE_GOODS + g] -= amount;
           trade.tripCargo[cargo + g] += amount;
           load -= amount * WEIGHT[g];

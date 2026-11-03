@@ -142,21 +142,18 @@ const upkeepGold = (type: number) => upkeepOf(type, 0) * PRICE[0] + upkeepOf(typ
 /** A building's materials in money (at market prices), for the growth score. */
 const goldCost = (type: number) => BUILDINGS[type].wood * PRICE[0] + BUILDINGS[type].stone * PRICE[1];
 
-/** Yearly upkeep in money of a district's government buildings (only seats with `seatsOnly`), and its project's. */
-function districtUpkeep(sim: Simulation, seat: number, seatsOnly: boolean): number {
-  const { economy } = sim;
-  const gov = sim.government;
-  let sum = 0;
-  for (let c = 0; c < sim.world.cellCount; c++) {
-    if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
-      const st = economy.state[s];
-      if ((st === SlotState.Standing || st === SlotState.Construction) && (!seatsOnly || economy.type[s] === SEAT_TYPE)) sum += upkeepGold(economy.type[s]);
-    }
-  }
+/** Per seat cell, for the income check (filled once a year, kept up as projects start): the yearly upkeep in money of
+ * its district's government buildings standing or being built, and of those that are seats. */
+let buildUpkeep = new Float64Array(0);
+let seatBuildUpkeep = new Float64Array(0);
+/** Per civilization id: its seats, and GOV_TUNING.incomeShare of their potential income together. */
+let civSeatList: number[][] = [];
+let civBudget = new Float64Array(0);
+
+/** Yearly upkeep in money of a seat's project (0 without one, or if `seatsOnly` and it is no seat). */
+function projectUpkeep(gov: Government, seat: number, seatsOnly: boolean): number {
   const type = gov.projectType[seat];
-  if (gov.projectSite[seat] >= 0 && (!seatsOnly || type === SEAT_TYPE)) sum += upkeepGold(type);
-  return sum;
+  return gov.projectSite[seat] >= 0 && (!seatsOnly || type === SEAT_TYPE) ? upkeepGold(type) : 0;
 }
 
 /** Wood or stone the government keeps at `cell` for its buildings' upkeep (`years` of it). */
@@ -175,8 +172,8 @@ function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_
 export type Record = (text: string, cell: number) => void;
 
 /**
- * Yearly: districts, tax rates, taxes, the levy on site, upkeep of
- * government buildings and the project of every seat.
+ * Yearly: districts, tax rates and taxes (then updateGovernmentUpkeep and
+ * updateGovernmentProjects in the following weeks).
  */
 export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Record): void {
   const gov = sim.government;
@@ -316,6 +313,16 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       }
     }
   }
+}
+
+/**
+ * Yearly, a week after updateGovernment: the levy on site, then the upkeep
+ * of government buildings.
+ */
+export function updateGovernmentUpkeep(sim: Simulation, owner: Uint8Array): void {
+  const gov = sim.government;
+  const { economy } = sim;
+  const n = sim.world.cellCount;
   // Levy on site: each site takes what its government buildings lack for a year's upkeep from its own settlement's
   // surplus, as a goods tax there, as far as that settlement stays above the safety margin.
   for (let c = 0; c < n; c++) {
@@ -363,10 +370,48 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     // A ruin no longer supplies its hex.
     if (ruined) updateCellSupply(sim, c);
   }
-  // Projects: start what is paid for, drop what is lost or waited too long, choose the next.
+}
+
+/**
+ * Yearly, a week after updateGovernmentUpkeep (the government's year is
+ * spread over three weeks so no single one carries it all): every seat starts
+ * its project once paid for, drops one that is lost or waited too long, and
+ * chooses the next.
+ */
+export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): void {
+  const gov = sim.government;
+  const { economy } = sim;
+  const n = sim.world.cellCount;
+  if (buildUpkeep.length !== n) {
+    buildUpkeep = new Float64Array(n);
+    seatBuildUpkeep = new Float64Array(n);
+  } else {
+    buildUpkeep.fill(0);
+    seatBuildUpkeep.fill(0);
+  }
+  for (let c = 0; c < n; c++) {
+    const d = gov.district[c];
+    if (d < 0 || !sim.hasBuildings[c]) continue;
+    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+      const st = economy.state[s];
+      if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
+      const t = economy.type[s];
+      buildUpkeep[d] += upkeepGold(t);
+      if (t === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(t);
+    }
+  }
+  civSeatList = [];
+  if (civBudget.length < sim.civSlots) civBudget = new Float64Array(sim.civSlots);
+  civBudget.fill(0);
+  for (let s = 0; s < n; s++) {
+    if (!gov.traders[s]) continue;
+    (civSeatList[owner[s]] ??= []).push(s);
+    civBudget[owner[s]] += GOV_TUNING.incomeShare * gov.potential[s];
+  }
   const year = Math.floor(sim.tick / WEEKS_PER_YEAR);
   for (let s = 0; s < n; s++) {
-    if (!isSeat[s]) {
+    // Seats are the cells with traders (updateGovernment).
+    if (!gov.traders[s]) {
       gov.projectSite[s] = -1;
       continue;
     }
@@ -375,7 +420,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       const type = gov.projectType[s];
       const slot = gov.projectSlot[s];
       const w = site * MATERIAL_COUNT;
-      // Checked just after the year's upkeep was paid: the reserve has one year less.
+      // Checked after the year's upkeep was paid: the reserve has one year less.
       const keep = UPKEEP_RESERVE_YEARS - 1;
       if (owner[site] !== owner[s] || sim.cellPop[site] === 0 || economy.state[slot] !== SlotState.Empty) {
         gov.projectSite[s] = -1; // lost or taken
@@ -390,6 +435,11 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         economy.unpaid[slot] = 0;
         sim.hasBuildings[site] = 1;
         gov.built++;
+        const d = gov.district[site];
+        if (d >= 0) {
+          buildUpkeep[d] += upkeepGold(type);
+          if (type === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(type);
+        }
         if (type === SEAT_TYPE) sim.seatSite[site] = 0;
         gov.projectSite[s] = -1;
       } else if (type !== SEAT_TYPE && year - gov.projectYear[s] >= PROJECT_YEARS) {
@@ -432,17 +482,12 @@ function freeGovSlot(sim: Simulation, cell: number): number {
 function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolean {
   const gov = sim.government;
   const n = sim.world.cellCount;
-  const share = GOV_TUNING.incomeShare;
-  const budget = share * gov.potential[seat];
-  const upkeep = districtUpkeep(sim, seat, false);
+  const budget = GOV_TUNING.incomeShare * gov.potential[seat];
+  const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false);
   const civ = sim.world.owner[seat];
   let seatUpkeep = 0;
-  let seatBudget = 0;
-  for (let s = 0; s < n; s++) {
-    if (!gov.traders[s] || sim.world.owner[s] !== civ) continue;
-    seatUpkeep += districtUpkeep(sim, s, true);
-    seatBudget += share * gov.potential[s];
-  }
+  for (const s of civSeatList[civ] ?? []) seatUpkeep += seatBuildUpkeep[s] + projectUpkeep(gov, s, true);
+  const seatBudget = civBudget[civ];
   const fits = (t: number) => (t === SEAT_TYPE ? seatUpkeep : upkeep) + upkeepGold(t) <= (t === SEAT_TYPE ? seatBudget : budget);
   let bestSite = -1;
   let bestSlot = -1;

@@ -390,7 +390,7 @@ export function payToll(
     const units = Math.min(want[t + g], available(g), rest / price[g]);
     if (units <= 0) continue;
     take(g, units);
-    addStock(sim.economy, to, g, units);
+    addStock(sim.economy, to, g, units, sim.trade);
     want[t + g] -= units;
     rest -= units * price[g];
   }
