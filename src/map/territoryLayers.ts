@@ -8,7 +8,7 @@ import {
 } from '@shopify/react-native-skia';
 import { DIRECTION_COUNT, DIRECTION_OFFSETS, hexCenterX, hexCenterY, isWaterBiome, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
-import { fillPaint, strokePaint } from './paints';
+import { sharedFillPaint, sharedStrokePaint } from './paints';
 import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
 
 /**
@@ -168,9 +168,11 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   const outlines = Skia.PathBuilder.Make();
   const ruins = Skia.PathBuilder.Make();
   const anchors = Skia.PathBuilder.Make();
-  const poles = Skia.PathBuilder.Make();
+  // Flag poles go with the outlines; the pennants are only drawn on tiles that have seats.
   const seatFlags = Skia.PathBuilder.Make();
   const capitalFlags = Skia.PathBuilder.Make();
+  let seats = 0;
+  let capitals = 0;
   const pathFor = (paths: Map<number, SkPathBuilder>, civ: number) => {
     let path = paths.get(civ);
     if (!path) {
@@ -231,7 +233,13 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     }
 
     if (world.harbors[c]) addAnchor(anchors, world, c, x, y);
-    if (world.seats[c]) addFlag(poles, world.seats[c] === 2 ? capitalFlags : seatFlags, x, y, world.seats[c] === 2);
+    if (world.seats[c] === 2) {
+      addFlag(outlines, capitalFlags, x, y, true);
+      capitals++;
+    } else if (world.seats[c]) {
+      addFlag(outlines, seatFlags, x, y, false);
+      seats++;
+    }
     const level = cityLevel(world.buildings[c]);
     if (level > 0) {
       addCity(pathFor(dots, owner), x, y, level);
@@ -243,17 +251,16 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     pathFor(dots, owner).addCircle(x, y, radius);
   }
 
-  for (const [civ, path] of tints) canvas.drawPath(path.detach(), fillPaint(withAlpha(colorOf(civ), 0.28)));
-  canvas.drawPath(roads.detach(), strokePaint(ROAD_COLOR, HEX_PX * 0.1));
-  for (const [civ, path] of borders) canvas.drawPath(path.detach(), strokePaint(colorOf(civ), HEX_PX * 0.12));
-  canvas.drawPath(rim.detach(), fillPaint('#1b1b1b'));
-  canvas.drawPath(ruins.detach(), fillPaint(RUIN_COLOR));
-  for (const [civ, path] of dots) canvas.drawPath(path.detach(), fillPaint(colorOf(civ)));
-  canvas.drawPath(outlines.detach(), strokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
-  canvas.drawPath(anchors.detach(), strokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
-  canvas.drawPath(poles.detach(), strokePaint(OUTLINE_COLOR, HEX_PX * 0.06));
-  canvas.drawPath(seatFlags.detach(), fillPaint(SEAT_COLOR));
-  canvas.drawPath(capitalFlags.detach(), fillPaint(CAPITAL_COLOR));
+  for (const [civ, path] of tints) canvas.drawPath(path.detach(), sharedFillPaint(withAlpha(colorOf(civ), 0.28)));
+  canvas.drawPath(roads.detach(), sharedStrokePaint(ROAD_COLOR, HEX_PX * 0.1));
+  for (const [civ, path] of borders) canvas.drawPath(path.detach(), sharedStrokePaint(colorOf(civ), HEX_PX * 0.12));
+  canvas.drawPath(rim.detach(), sharedFillPaint('#1b1b1b'));
+  canvas.drawPath(ruins.detach(), sharedFillPaint(RUIN_COLOR));
+  for (const [civ, path] of dots) canvas.drawPath(path.detach(), sharedFillPaint(colorOf(civ)));
+  canvas.drawPath(outlines.detach(), sharedStrokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
+  canvas.drawPath(anchors.detach(), sharedStrokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
+  if (seats > 0) canvas.drawPath(seatFlags.detach(), sharedFillPaint(SEAT_COLOR));
+  if (capitals > 0) canvas.drawPath(capitalFlags.detach(), sharedFillPaint(CAPITAL_COLOR));
 }
 
 /** A seat of government's flag in the hex's upper left: a pole and a pennant (larger for a capital). */

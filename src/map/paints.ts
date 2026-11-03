@@ -16,3 +16,27 @@ export function strokePaint(color: string, width: number): SkPaint {
   paint.setStrokeJoin(StrokeJoin.Round);
   return paint;
 }
+
+const fills = new Map<string, SkPaint>();
+const strokes = new Map<string, SkPaint>();
+
+/** A shared fill paint per color, for drawing that runs often (tiles): no new paint objects per draw. */
+export function sharedFillPaint(color: string): SkPaint {
+  let paint = fills.get(color);
+  if (!paint) {
+    paint = fillPaint(color);
+    fills.set(color, paint);
+  }
+  return paint;
+}
+
+/** A shared stroke paint per color and width (see sharedFillPaint). */
+export function sharedStrokePaint(color: string, width: number): SkPaint {
+  const key = `${color}|${width}`;
+  let paint = strokes.get(key);
+  if (!paint) {
+    paint = strokePaint(color, width);
+    strokes.set(key, paint);
+  }
+  return paint;
+}
