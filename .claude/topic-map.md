@@ -9,7 +9,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | World generation: terrain, climate, water, biomes, deposits | `world/generate.ts`, `terrain.ts`, `climate.ts`, `hydrology.ts`, `biomes.ts`, `classify.ts`, `features.ts`, `deposits.ts` | `world/generate.test.ts` | Game Design doc | `npm run world:preview` | young |
 | World data layout (typed arrays per cell) | `world/world.ts`, `sim/hex.ts` | `hex.test.ts` | – | – | – |
 | Roads | `world/roads.ts` | – | Requirement Handel | – | aged |
-| Inhabitants, aging, births, migration, settling (main loop, 1240 lines) | `society/simulation.ts`, `population.ts` | `simulation.test.ts` | Game Design doc | `economyStats.ts` | aged |
+| Inhabitants, aging, births, migration, settling (main loop, 1320 lines; a tick runs in parts, `stepSimulationPart`, which the game clock in `src/state/worldStore.ts` spreads over frames) | `society/simulation.ts`, `population.ts` | `simulation.test.ts` | Game Design doc | `economyStats.ts` | aged |
 | Food, water, space per hex | `society/supply.ts` | – | Requirement Regionale Rohstoffe | `economyStats.ts` | – |
 | Harvest, buildings, construction, upkeep (912 lines); city tier by used slots (`cityTier()` in `buildings.ts`, `world.cityTier` set in `simulation.ts`) | `society/economy.ts`, `buildings.ts` | `economy.test.ts` | Requirement Regionale Rohstoffe | `economyStats.ts` | cities |
 | Peoples, culture, names | `society/civilizations.ts`, `culture.ts` | – | Game Design doc | – | – |
