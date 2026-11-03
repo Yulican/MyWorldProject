@@ -12,7 +12,7 @@
  * every settlement trades (openTrade.ts), where every people opened its
  * borders to every other and trades freely (dashed borders, merchants
  * abroad; openDiplomacy.ts), and where seats of government and government
- * buildings stand everywhere (flags, government traders; empowerGovernment.ts).
+ * buildings stand everywhere (flags, government traders, soldiers; empowerGovernment.ts).
  */
 export const SCENARIOS: Record<
   'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government',

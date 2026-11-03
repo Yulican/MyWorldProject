@@ -53,7 +53,8 @@ export function DiplomacyPanel({ sim, onClose }: Props) {
           <RelationRow key={r.other} sim={sim} relation={r} expanded={open === r.other} onPress={() => setOpen(open === r.other ? -1 : r.other)} />
         ))}
         <Text style={styles.note}>
-          Trust grows between peaceful neighbors. Borders open at trust 50 and danger up to 40; open borders let
+          Trust grows between peaceful neighbors; danger comes from the other's military strength against ours
+          and how near they are. Borders open at trust 50 and danger up to 40; open borders let
           settlers and merchants pass for a toll. Tap a people for the details.
         </Text>
       </ScrollView>

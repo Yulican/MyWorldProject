@@ -3,18 +3,25 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   BIOMES,
   DEPOSITS,
+  GOOD_NAMES,
+  MIL,
   RESOURCE_COUNT,
   RESOURCE_NAMES,
   SUPPLY_NAMES,
+  TROOP_NAMES,
   elevationMeters,
   hasFreshWater,
   resourceCapacityTerms,
   sumTerms,
   type HexEconomy,
+  type HexMilitary,
   type HexSatisfaction,
+  type Simulation,
   type Term,
   type World,
 } from '../sim';
+import { FIRST_LUXURY, LUXURY_COUNT, STORED_COUNT } from '../sim/society/buildings';
+import { TROOP_GOOD } from '../sim/society/military';
 import { colors, spacing } from '../theme';
 
 type Props = {
@@ -31,6 +38,10 @@ type Props = {
   economy?: HexEconomy | null;
   /** How satisfied the settlement is and why; null if nobody lives here. */
   satisfaction?: HexSatisfaction | null;
+  /** Soldiers per troop type; null for water. */
+  military?: HexMilitary | null;
+  /** Strategic goods without comfort (iron, flint) in stock; horses show with the luxury goods. */
+  strategic?: readonly StrategicStock[] | null;
   onClose: () => void;
 };
 
@@ -38,7 +49,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -63,6 +74,7 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
   const highlights = [
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     civName ? settlementName(standing) : null,
+    military && military.soldiers > 0 ? `${military.soldiers} soldier${military.soldiers > 1 ? 's' : ''}` : null,
     !civName && ruins > 0 ? `${ruins} ruin${ruins > 1 ? 's' : ''}` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
@@ -214,6 +226,9 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                 <TermRow key={i} term={t} digits={1} />
               ))}
               <Row label="Money" value={`${Math.floor(economy.trade.money)} · +${economy.trade.income.toFixed(1)} a year`} />
+              {strategic?.map((g) => (
+                <Row key={g.name} label={g.name} value={`${Math.floor(g.stock)} · for soldiers`} />
+              ))}
               {economy.trade.grain >= 0.5 && <Row label="Grain" value={String(Math.floor(economy.trade.grain))} />}
               {economy.trade.barrels >= 0.5 && <Row label="Water barrels" value={String(Math.floor(economy.trade.barrels))} />}
               <Text style={styles.note}>
@@ -244,6 +259,24 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                   </Text>
                 </>
               )}
+            </>
+          )}
+
+          {military && military.troops.length > 0 && (
+            <>
+              <Text style={styles.section}>Soldiers {military.soldiers}</Text>
+              {military.troops.map((t) => (
+                <Row
+                  key={t.name}
+                  label={t.name}
+                  value={`${t.soldiers}/${t.capacity} · ${t.supplied ? `with ${troopGood(t.name)}, ×${MIL.factor} strength` : `no ${troopGood(t.name)}`}`}
+                />
+              ))}
+              <Text style={styles.note}>
+                Barracks, shooting ranges and stables train soldiers from the adults while the district treasury can
+                pay them ({MIL.sold} money each a year); unpaid soldiers go home. Iron, flint and horses make melee,
+                ranged and shock soldiers {MIL.factor} times as strong.
+              </Text>
             </>
           )}
 
@@ -298,6 +331,25 @@ function Bar({ label, value, capacity }: { label: string; value: number; capacit
     </View>
   );
 }
+
+/** A strategic good in a hex's stock. */
+export type StrategicStock = { name: string; stock: number };
+
+/** Iron and flint in the hex's stock (horses are a luxury good too and show with them). */
+export function strategicStock(sim: Simulation, cell: number): StrategicStock[] {
+  const goods: StrategicStock[] = [];
+  for (let k = LUXURY_COUNT; k < STORED_COUNT; k++) {
+    const stock = sim.economy.luxury[cell * STORED_COUNT + k];
+    if (stock >= 0.5) goods.push({ name: GOOD_NAMES[FIRST_LUXURY + k], stock });
+  }
+  return goods;
+}
+
+/** The strategic good a troop type needs, lower case ("iron"). */
+const troopGood = (troop: string) => {
+  const t = TROOP_NAMES.indexOf(troop as (typeof TROOP_NAMES)[number]);
+  return t >= 0 ? GOOD_NAMES[FIRST_LUXURY + TROOP_GOOD[t]].toLowerCase() : 'its good';
+};
 
 const percent = (v: number) => `${Math.round(v * 100)} %`;
 const goodsList = (goods: readonly { good: string; amount: number }[]) =>

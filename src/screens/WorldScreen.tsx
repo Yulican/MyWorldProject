@@ -7,10 +7,10 @@ import { ChronicleDialog } from '../components/ChronicleDialog';
 import { CivPanel } from '../components/CivPanel';
 import { DiplomacyPanel } from '../components/DiplomacyPanel';
 import { GovernmentPanel } from '../components/GovernmentPanel';
-import { HexInfoPanel } from '../components/HexInfoPanel';
+import { HexInfoPanel, strategicStock } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { hexEconomy, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
+import { hexEconomy, hexMilitary, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
 import {
   acknowledgeChronicle,
   createNewWorld,
@@ -130,6 +130,8 @@ export function WorldScreen() {
             supply={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexSupplyTerms(sim, panel.cell)}
             economy={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexEconomy(sim, panel.cell)}
             satisfaction={hexSatisfaction(sim, panel.cell)}
+            military={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexMilitary(sim, panel.cell)}
+            strategic={isWaterBiome(sim.world.biome[panel.cell]) ? null : strategicStock(sim, panel.cell)}
             onClose={closePanel}
           />
         )}
