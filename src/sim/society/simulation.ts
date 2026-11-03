@@ -290,18 +290,26 @@ export function createSimulation(world: World): Simulation {
  * nothing to do in a tick are skipped.
  */
 export const TickPart = {
-  /** Inhabitants, the year's end for the peoples, merchants on their way. */
+  /** Inhabitants (and merchants on their way, except at the year's end). */
   Start: 0,
+  /** The year's end for the peoples, then merchants on their way. */
+  YearEnd: 1,
   /** The week's share of the quarterly economy, a few hexes per part. */
-  Economy: 1,
-  /** Quarterly: new settlements, cut-off land, satisfaction. */
-  RefreshLand: 2,
-  /** Quarterly: wants, migration, breakaways, the map snapshot. */
-  RefreshPeople: 3,
+  Economy: 2,
+  /** Quarterly: new settlements and the owner of every hex. */
+  RefreshLand: 3,
+  /** Quarterly: land cut off from its people. */
+  RefreshCutOff: 4,
+  /** Quarterly: satisfaction and the peoples' wants. */
+  RefreshSatisfaction: 5,
+  /** Quarterly: migration and breakaways. */
+  RefreshPeople: 6,
+  /** Quarterly: the map snapshot. */
+  RefreshSnapshot: 7,
   /** The yearly plan of this week (seats of government in several parts). */
-  Plan: 4,
+  Plan: 8,
   /** Government traders, distances, transit hubs, the year's totals. */
-  Finish: 5,
+  Finish: 9,
 } as const;
 export type TickPart = (typeof TickPart)[keyof typeof TickPart];
 
@@ -328,17 +336,25 @@ export function stepSimulationPart(sim: Simulation): boolean {
         if (pop.alive[i]) updateInhabitant(sim, i);
       }
       sim.tick++;
-      if (sim.tick % TICKS_PER_YEAR === 0) updateCivilizations(sim);
-      advanceTrips(sim);
-      for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
-      sim.trade.supplyDirtyCount = 0;
+      // The peoples' year's end gets a part of its own.
+      if (sim.tick % TICKS_PER_YEAR === 0) {
+        sim.part = TickPart.YearEnd;
+        return false;
+      }
+      moveMerchants(sim);
+      sim.part = TickPart.Economy;
+      return false;
+    }
+    case TickPart.YearEnd: {
+      updateCivilizations(sim);
+      moveMerchants(sim);
       sim.part = TickPart.Economy;
       return false;
     }
     case TickPart.Economy: {
       // Every hex's economy runs once a quarter, a 13th of the hexes each week;
       // upkeep is due in the year's last quarter.
-      // A few dozen hexes per part, continued in the next part.
+      // A few hexes per part, continued in the next part.
       const week = sim.tick - 1;
       const from = sim.economyCell < 0 ? week % REFRESH_TICKS : sim.economyCell;
       const next = continueEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, from, REFRESH_TICKS, ECONOMY_HEXES_PER_PART);
@@ -352,19 +368,31 @@ export function stepSimulationPart(sim: Simulation): boolean {
     }
     case TickPart.RefreshLand: {
       expandSettlements(sim);
-      const owner = cellOwners(sim);
-      splitCutOffLand(sim, owner);
+      sim.refreshOwner = cellOwners(sim);
+      sim.part = TickPart.RefreshCutOff;
+      return false;
+    }
+    case TickPart.RefreshCutOff: {
+      splitCutOffLand(sim, sim.refreshOwner!);
+      sim.part = TickPart.RefreshSatisfaction;
+      return false;
+    }
+    case TickPart.RefreshSatisfaction: {
+      const owner = sim.refreshOwner!;
       updateSatisfaction(sim, owner);
-      sim.refreshOwner = owner;
+      sumCivWants(sim, owner);
       sim.part = TickPart.RefreshPeople;
       return false;
     }
     case TickPart.RefreshPeople: {
       const owner = sim.refreshOwner!;
       sim.refreshOwner = null;
-      sumCivWants(sim, owner);
       emigrate(sim, owner);
       breakAway(sim, owner);
+      sim.part = TickPart.RefreshSnapshot;
+      return false;
+    }
+    case TickPart.RefreshSnapshot: {
       refreshSnapshot(sim);
       sim.part = TickPart.Plan;
       return false;
@@ -399,6 +427,13 @@ export function stepSimulationPart(sim: Simulation): boolean {
       return true;
     }
   }
+}
+
+/** Merchants on their way, and the supply of the hexes they changed. */
+function moveMerchants(sim: Simulation): void {
+  advanceTrips(sim);
+  for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
+  sim.trade.supplyDirtyCount = 0;
 }
 
 /** Keeps the year's totals for the trend chart and starts new faith ledgers. */
