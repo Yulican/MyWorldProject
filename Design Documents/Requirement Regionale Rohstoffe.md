@@ -301,7 +301,7 @@ Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht si
 
 **Ebenfalls entschieden (Nutzer):**
 - Eisen und Feuerstein sind keine Luxusgüter und geben keinen Komfort.
-- **Gold wird sofort Geld:** Beim Abbau kommt es direkt als zusätzliches Geld in die Siedlung (kein eigenes Gut zum Lagern oder Handeln). Kurs: der heutige Handelspreis von Gold als Startwert, kalibrieren (Simulation).
+- **Gold wird sofort Geld:** Beim Abbau kommt es direkt als zusätzliches Geld in die Siedlung (kein eigenes Gut zum Lagern oder Handeln). Kurs: 5 Geld je Einheit (= heutiger Handelspreis), gewollt, damit Goldvölker viel mehr Soldaten bezahlen können.
 - **Gold ist kein Luxusgut mehr** (kein Komfort +5, kein Handel als Ware). Folge: Die Zahl der Luxusgüter sinkt von 6 auf 5 (`LUXURY_COUNT`); die Auswirkung auf die Zufriedenheit wird in der Simulation geprüft (`Requirement Zufriedenheit.md`, Komfort: Luxusgüter).
 
 **Offen:** nichts zu strategischen Gütern.

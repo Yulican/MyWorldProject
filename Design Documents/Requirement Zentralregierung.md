@@ -37,7 +37,7 @@ Schwerpunkte dazu (Krieg und andere Mechaniken).
   behalten ihre Siedlungen. (Wird beim Thema Krieg verfeinert.)
 
 **Krieg (`Requirement Krieg.md`):**
-- **Sold:** Der Sold der Soldaten kommt aus der Kasse des Bezirks, in dem sie ausgebildet sind, und zählt zur Einkommensprüfung (40 %-Regel, Abschnitt 5). Höhe: kalibrieren (Simulation).
+- **Sold:** Der Sold der Soldaten kommt aus der Kasse des Bezirks, in dem sie ausgebildet sind, und zählt zur Einkommensprüfung (40 %-Regel, Abschnitt 5). Reicht sie nicht, decken die anderen Sitze des Volks die Lücke (gemeinsamer Topf); Soldaten werden nur ausgebildet, wenn der Sold des nächsten Jahres gedeckt ist. Höhe: Startwert 0,1 je Soldat und Jahr, kalibrieren (Simulation).
 - **Eroberte Sitze:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben. Der ganze Bezirk wechselt den Besitzer. Wird die Hauptstadt besetzt, wird das Volk annektiert.
 - Belagerte Sitze: Kapazitäten halbiert, Handel ruht.
 - Das Startgeld für Abgespaltene bleibt vorerst unverändert; Rebellenvölker aus einem Krieg behalten ihre Siedlungen.
@@ -76,6 +76,7 @@ Sicherheitsabstand im ganzen Volk.
 - **Bauliste:** ein Vorhaben je Sitz. Reihenfolge:
   1. ein geplanter **Regierungssitz** (er verdrängt ein anderes Vorhaben),
   2. **Komfort** für Siedlungen unter dem Sicherheitsabstand,
+  (Krieg: Priorität der Vorhaben insgesamt Loyalität der Siedlungen > **Militär** > Wachstum; Militärgebäude baut der Sitz, wenn ein stärkeres Volk existiert, das Reich unzufriedene Siedlungen (Zufriedenheit < 0) hat oder Ressourcen frei sind, `Requirement Krieg.md`, Abschnitt 2.)
   3. **Wachstum** für Siedlungen ab 80 % ihrer Kapazität (Gewinn an
      Kapazität je Kosten).
 - Ein Vorhaben, das 5 Jahre nicht beginnen konnte, wird gestrichen (Sitze

@@ -10,13 +10,15 @@ Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und 
 
 ## 2. Soldaten und Stärke
 
-- **Ausbildung:** Militärgebäude bilden jährlich Soldaten aus der Bevölkerung aus. Soldaten werden von der Bevölkerung abgezogen (sie kosten Wachstum und Ernte).
-- **Gebäude:** Kaserne = Nahkampf, Schießplatz = Fernkampf, Stall = Schock (braucht Pferde). Soldaten pro Gebäude und Jahr, Kosten, Unterhalt: kalibrieren (Simulation).
+- **Ausbildung:** Militärgebäude bilden jährlich Soldaten aus der Bevölkerung aus. Soldaten werden von der Bevölkerung abgezogen (sie kosten Wachstum und Ernte). Training: Startwert 25 % der Gebäudekapazität pro Jahr, nur wenn der Sold des nächsten Jahres gedeckt ist (kalibrieren (Simulation)).
+- **Soldaten sterben nur durch Desertion und Krieg** (kein Altern).
+- **Gebäude:** Kaserne = Nahkampf, Schießplatz = Fernkampf, Stall = Schock (braucht Pferde). Kapazität: Startwert 20 Soldaten pro Gebäude; Kosten und Unterhalt: kalibrieren (Simulation).
+- **Aufrüstung macht die Regierung:** Ein Sitz baut Militärgebäude, wenn (a) ein stärkeres Volk existiert, (b) es unzufriedene Siedlungen (Zufriedenheit < 0) im Reich gibt oder (c) er Ressourcen frei hat. Priorität der Regierungsvorhaben: Loyalität der Siedlungen > Militär > Wachstum (`Requirement Zentralregierung.md`, Abschnitt 5).
 - **Soldaten sind in der Siedlung**, können aber zu Armeen zusammengestellt und bewegt werden (Abschnitt 4).
-- **Sold:** nur Geld, aus der Kasse des Bezirks (`Requirement Zentralregierung.md`). Keine Nahrung. Der Sold zählt zur Einkommensprüfung (40 %-Regel) wie der Unterhalt der Regierungsgebäude; Höhe pro Soldat: kalibrieren (Simulation). Kann der Bezirk den Sold nicht zahlen: Soldaten desertieren (Anteil kalibrieren).
-- **Strategische Güter:** Je Truppenart und Gut gibt es einen Stärkefaktor (Startwert ×1,5, z. B. Pferde für Schock). Das Gut wird jährlich verbraucht; fehlt es, gilt der Faktor nicht. Zuordnung: Eisen → Nahkampf, Feuerstein → Fernkampf, Pferde → Schock (`Requirement Regionale Rohstoffe.md`, Abschnitt 10). Eisen und Feuerstein müssen erst abgebaut und gehandelt werden können; sie sind keine Luxusgüter und geben keinen Komfort.
+- **Sold:** nur Geld, aus der Kasse des Bezirks (`Requirement Zentralregierung.md`). Keine Nahrung. Der Sold zählt zur Einkommensprüfung (40 %-Regel) wie der Unterhalt der Regierungsgebäude; Höhe: Startwert 0,1 Geld pro Soldat und Jahr (kalibrieren (Simulation)). Reicht die Kasse des Bezirks nicht, deckt die übrigen Sitze des Volks die Lücke (gemeinsamer Topf). Ohne Sold desertieren Soldaten (Anteil kalibrieren (Simulation)).
+- **Strategische Güter:** Je Truppenart und Gut gibt es einen Stärkefaktor (Startwert ×1,5, z. B. Pferde für Schock). Verbrauch: 1 Einheit je 20 Soldaten und Jahr; fehlt es, gilt der Faktor nicht. Zuordnung: Eisen → Nahkampf, Feuerstein → Fernkampf, Pferde → Schock (`Requirement Regionale Rohstoffe.md`, Abschnitt 10). Eisen und Feuerstein müssen erst abgebaut und gehandelt werden können; sie sind keine Luxusgüter und geben keinen Komfort.
 - **Stärke eines Volks:** Summe der Soldaten, gewichtet mit den Güterfaktoren. Verbündete zählen zur Stärke (Abschnitt 7).
-- **Gefahr:** 50 × Stärke des anderen ÷ eigene Stärke, höchstens 100, × Nähe. Ersetzt die Bevölkerung in der Gefahr-Formel (`Requirement Diplomatie.md`, Abschnitt 1).
+- **Gefahr:** 50 × (Stärke des anderen + 20) ÷ (eigene Stärke + 20), höchstens 100, × Nähe. Die +20 verhindern 0 ÷ 0. Ersetzt die Bevölkerung in der Gefahr-Formel (`Requirement Diplomatie.md`, Abschnitt 1).
 - **Kauf strategischer Güter:** Völker wollen sie kaufen, um ihre Armee zu stärken. Sie verkaufen sie nur an Völker, deren Gefahr für sie ≤ X ist (X: kalibrieren (Simulation), Startwert 40), nie an Kriegsgegner und deren Verbündete.
 
 ## 3. Schlacht
@@ -112,5 +114,6 @@ Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröß
 
 Offen:
 - Zuordnung entschieden (Eisen/Feuerstein/Pferde, Marmor ohne Kriegsrolle, Gold wird Geld). Entschieden: kein Komfort für Eisen/Feuerstein; Gold wird sofort Geld der Siedlung zum heutigen Handelspreis (kalibrieren (Simulation)) und ist kein Luxusgut mehr (Zufriedenheit in der Simulation prüfen). Siehe `Requirement Regionale Rohstoffe.md`, Abschnitt 10.
-- Alle Zahlen mit „kalibrieren (Simulation)“: Soldaten je Gebäude, Sold, Verlustanteil, Ersatzrollenstrafe, Verteidigerbonus, Aufgabeanteil, Erschöpfungsjahre, Verkaufsgrenze X, Auflösungsschwellen der Bündnisse.
+- Alle Zahlen mit „kalibrieren (Simulation)“ (Startwerte stehen in Abschnitt 2): Soldaten je Gebäude, Sold, Verlustanteil, Ersatzrollenstrafe, Verteidigerbonus, Aufgabeanteil, Erschöpfungsjahre, Verkaufsgrenze X, Auflösungsschwellen der Bündnisse.
+- **Eisen und Feuerstein bis zu den Soldaten, wird simuliert:** (a) Völker siedeln freie Eisen-/Feuerstein-Vorkommen wie Luxusvorkommen, oder (b) ein Abbaugebäude wird auf einem Vorkommen immer gebaut, unabhängig vom Bedarf.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
