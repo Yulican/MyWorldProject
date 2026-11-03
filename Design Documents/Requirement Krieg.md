@@ -1,6 +1,6 @@
 # Requirement: Krieg
 
-Stand: **Entwurf, vom Nutzer entschieden, noch nicht simuliert und nicht umgesetzt** (Branch `feature/war`). Ablauf: Design → Simulation → Umsetzung. Alle Zahlen sind Startwerte; was noch gerechnet werden muss, ist mit „kalibrieren (Simulation)“ markiert. Spieltexte sind Englisch.
+Stand: **Phase 0 und 1 umgesetzt, Phase 2 (Schlacht) simuliert und in Umsetzung, Phasen 3 bis 5 vom Nutzer entschieden, aber noch nicht simuliert** (Branch `feature/war`). Ablauf: Design → Simulation → Umsetzung. Alle Zahlen sind Startwerte; was noch gerechnet werden muss, ist mit „kalibrieren (Simulation)“ markiert. Spieltexte sind Englisch.
 
 Baut auf Diplomatie (`Requirement Diplomatie.md`, Stufe 2), Zufriedenheit (`Requirement Zufriedenheit.md`), Zentralregierung (`Requirement Zentralregierung.md`), regionalen Rohstoffen (`Requirement Regionale Rohstoffe.md`, strategische Güter) und Handel auf.
 
@@ -67,7 +67,7 @@ Simuliert und vom Nutzer gewählt (Abschnitt 14).
 
 - **Erklärung:** Ein Volk darf erklären, wenn seine Stärke das ≥2-Fache des Nachbarn ist. Ziel: einen Regierungssitz samt Bezirk erobern. Der Sitz muss besetzt werden können, und der Feind darf nicht glauben, ihn zurückzuerobern (Aufgabe: siehe unten).
 - Höchstens **ein Krieg** je Volk gleichzeitig.
-- **Aufgabe des Feindes:** Hat eine Seite weniger als 40 % der Stärke des Gegners, gibt sie auf (entschieden).
+- **Aufgabe:** Eine Seite gibt auf, wenn sie weniger als 40 % der Stärke des Gegners hat (entschieden).
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
 - **Ende:** Der Krieg endet, wenn das Kriegsziel erreicht ist oder nach N Jahren Erschöpfung (N: kalibrieren (Simulation)). Danach: Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
 - **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer. Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
