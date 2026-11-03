@@ -1,4 +1,4 @@
-import { MIL, threatened, createMilitary, updateMilitary, TROOP_TYPES, type Military } from './military';
+import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
@@ -82,7 +82,10 @@ const SEATS_WEEK = 6;
 const CAPTURE_WEEK = 19;
 const SUPPLY_ROADS_WEEK = 32;
 const DIPLOMACY_WEEK = 45;
+/** Soldiers' pay, training and strength (military.ts), before diplomacy rates the danger from it. */
 const MILITARY_WEEK = 40;
+/** Age of a dismissed soldier who goes back to the population (soldiers don't age). */
+const SOLDIER_RETURN_AGE = 30;
 const GOVERNMENT_WEEK = 28;
 const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
@@ -364,11 +367,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
         sim.seatPlan = null;
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
-      else if (weekOfYear === MILITARY_WEEK) {
-        updateMilitary(sim, owner);
-        drawSoldiers(sim);
-        returnSoldiers(sim, owner);
-      } else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === MILITARY_WEEK) runMilitaryYear(sim);
+      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
@@ -426,19 +426,43 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
   sim.cellCivPop[cell * sim.civSlots + civ]++;
 }
 
-/** Soldiers dismissed for lack of pay (MIL.dismiss) go back to their settlement as adults. */
+/** The military's year (military.ts: updateMilitary): pay, dismissals, training; trained adults leave the population, dismissed soldiers return to it. */
+export function runMilitaryYear(sim: Simulation): void {
+  const owner = sim.world.owner;
+  updateMilitary(sim, owner);
+  drawSoldiers(sim);
+  returnSoldiers(sim, owner);
+}
+
+/**
+ * Soldiers dismissed for lack of pay, or beyond their buildings' capacity
+ * (military.release), go back to their settlement as adults of its people,
+ * with their soldiers' mean faith; without a settlement they are lost.
+ */
 function returnSoldiers(sim: Simulation, owner: Uint8Array): void {
   const { military } = sim;
   for (let c = 0; c < sim.world.cellCount; c++) {
     const n = military.release[c];
-    if (n === 0) continue;
+    const stay = soldiersAt(sim, c);
+    if (n === 0) {
+      if (stay === 0) military.faith[c] = 0;
+      continue;
+    }
     military.release[c] = 0;
-    if (owner[c] === 0) continue;
-    for (let k = 0; k < n; k++) addInhabitant(sim, c, owner[c], 30, 0.5);
+    const faith = military.faith[c] / (stay + n);
+    military.faith[c] = stay > 0 ? faith * stay : 0;
+    const civ = owner[c];
+    if (civ === 0 || sim.cellPop[c] === 0) continue;
+    for (let k = 0; k < n; k++) addInhabitant(sim, c, civ, SOLDIER_RETURN_AGE, faith);
+    if (faith >= BELIEVER_FAITH) sim.civs[civ]!.faithYear.discharged += n;
   }
 }
 
-/** Takes the adults the military buildings trained (military.train per hex) out of the population; soldiers not found are dropped. */
+/**
+ * Takes the adults the military buildings trained (military.train per hex)
+ * out of the population; their faith goes with them (military.faith).
+ * Soldiers not found among the adults are dropped.
+ */
 function drawSoldiers(sim: Simulation): void {
   const { pop, military } = sim;
   let open = 0;
@@ -450,6 +474,9 @@ function drawSoldiers(sim: Simulation): void {
     if (military.train[c] === 0) continue;
     military.train[c]--;
     open--;
+    military.faith[c] += pop.faith[i];
+    const civ = sim.civs[pop.civ[i]];
+    if (civ && pop.faith[i] >= BELIEVER_FAITH) civ.faithYear.enlisted++;
     removeInhabitant(sim, i);
   }
   // Rare: fewer adults than counted; the missing soldiers are not there.
@@ -783,7 +810,9 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
           prev[nb] = c;
           touched.push(nb);
           const workshop = WORKSHOP_OF[world.deposit[nb]];
-          if (workshop !== undefined && (isLuxury(BUILDINGS[workshop].good) || (MIL.captureStrategic && isStored(BUILDINGS[workshop].good) && (MIL.captureStrategic === 1 || threatened(sim, civ.id, PAIRS)))) && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
+          // Luxury deposits always; iron and flint only while the people feels threatened (war phase 1).
+          const good = workshop === undefined ? -1 : BUILDINGS[workshop].good;
+          if (good >= 0 && !(makes[civ.id] & (1 << (good - FIRST_LUXURY))) && (isLuxury(good) || (isStored(good) && threatened(sim, civ.id, PAIRS)))) found = nb;
           else next.push(nb);
         }
       }

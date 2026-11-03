@@ -6,7 +6,10 @@ import { Biome, isWaterBiome } from '../world/biomes';
 import { generateWorld } from '../world/generate';
 import {
   BUILDINGS,
+  FIRST_LUXURY,
   Good,
+  LUXURY_COUNT,
+  STORED_COUNT,
   MATERIAL_COUNT,
   Material,
   SETTLEMENT_SLOTS,
@@ -15,8 +18,11 @@ import {
   UPKEEP_GRACE_YEARS,
   forageYield,
   harvestTerms,
+  isLuxury,
+  isStored,
   withBuildings,
 } from './buildings';
+import { MIL } from './military';
 import { EXPANSION_GROUP, buildingFits, capacityAfterRepair, isSettlementTarget, runEconomy, updateCellSupply, usableSlots } from './economy';
 import { Deposit } from '../world/deposits';
 import { PAIRS } from './diplomacy';
@@ -259,23 +265,75 @@ function settledHex(seed: number): { sim: Simulation; cell: number; civ: number 
 }
 
 test('a settlement on a luxury deposit mines it when its people lack the good, even if it is happy itself', () => {
+  // Gems (gold is no luxury good any more since war phase 0: see the gold test below).
   const { sim, cell, civ } = settledHex(3);
-  sim.world.deposit[cell] = Deposit.Gold;
-  const gold = TradeGood.Luxury + 3;
+  sim.world.deposit[cell] = Deposit.Gems;
+  const gems = TradeGood.Luxury + Good.Gems - FIRST_LUXURY;
   sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 500;
   sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 500;
-  sim.trade.civWant[civ * TRADE_GOODS + gold] = 0;
-  sim.trade.civSpare[civ * TRADE_GOODS + gold] = 0;
-  const mine = typeOf('Gold mine');
+  sim.trade.civWant[civ * TRADE_GOODS + gems] = 0;
+  sim.trade.civSpare[civ * TRADE_GOODS + gems] = 0;
+  const mine = typeOf('Gem mine');
   const building = () => {
     for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) if (sim.economy.type[s] === mine && sim.economy.state[s] !== SlotState.Empty) return true;
     return false;
   };
   runEconomy(sim, false, cell, sim.world.cellCount);
-  assert.equal(building(), false, 'nobody lacks gold: no mine');
-  sim.trade.civWant[civ * TRADE_GOODS + gold] = 10;
+  assert.equal(building(), false, 'nobody lacks gems: no mine');
+  sim.trade.civWant[civ * TRADE_GOODS + gems] = 10;
   runEconomy(sim, false, cell, sim.world.cellCount);
-  assert.equal(building(), true, 'its people lack gold: the mine goes up');
+  assert.equal(building(), true, 'its people lack gems: the mine goes up');
+});
+
+test('a settlement on an iron deposit mines it when its people lack iron, like a luxury good', () => {
+  const { sim, cell, civ } = settledHex(3);
+  sim.world.deposit[cell] = Deposit.Iron;
+  const iron = TradeGood.Luxury + Good.Iron - FIRST_LUXURY;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 500;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 500;
+  sim.trade.civWant[civ * TRADE_GOODS + iron] = 0;
+  sim.trade.civSpare[civ * TRADE_GOODS + iron] = 0;
+  const mine = typeOf('Iron mine');
+  const building = () => {
+    for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) if (sim.economy.type[s] === mine && sim.economy.state[s] !== SlotState.Empty) return true;
+    return false;
+  };
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  assert.equal(building(), false, 'nobody lacks iron: no mine');
+  sim.trade.civWant[civ * TRADE_GOODS + iron] = 10;
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  assert.equal(building(), true, 'its people lack iron: the mine goes up');
+  // Iron and flint are stored and traded, but no comfort.
+  assert.equal(isLuxury(Good.Iron) || isLuxury(Good.Flint) || isLuxury(Good.Gold), false);
+  assert.equal(isStored(Good.Iron) && isStored(Good.Flint), true);
+  assert.equal(LUXURY_COUNT, 5);
+});
+
+test('a settlement on a gold deposit always mines it, and mined gold is money taxed for the district', () => {
+  const { sim, cell, civ } = settledHex(3);
+  sim.world.deposit[cell] = Deposit.Gold;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 500;
+  sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 500;
+  for (let g = 0; g < TRADE_GOODS; g++) sim.trade.civWant[civ * TRADE_GOODS + g] = 0;
+  const mine = typeOf('Gold mine');
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  let slot = -1;
+  for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) if (sim.economy.type[s] === mine && sim.economy.state[s] !== SlotState.Empty) slot = s;
+  assert.ok(slot >= 0, 'nobody asks for gold, the mine goes up anyway');
+  // Standing: a quarter's gold, MIL.goldRate money a unit; the district's money tax rate of it goes to the seat.
+  sim.economy.state[slot] = SlotState.Standing;
+  const seat = sim.government.district[cell];
+  assert.ok(seat >= 0);
+  sim.government.cellRate[cell] = 0.2;
+  const money = sim.economy.money[cell];
+  const treasury = sim.government.treasury[seat];
+  const luxury = Array.from(sim.economy.luxury.subarray(cell * STORED_COUNT, (cell + 1) * STORED_COUNT));
+  runEconomy(sim, false, cell, sim.world.cellCount);
+  const gold = (BUILDINGS[mine].amount * yieldFactor(sim.satisfaction[cell]) * MIL.goldRate) / 4;
+  assert.equal(MIL.goldRate, 5);
+  assert.ok(Math.abs(sim.government.treasury[seat] - treasury - 0.2 * gold) < 1e-3, 'the tax share to the treasury');
+  assert.ok(sim.economy.money[cell] - money >= 0.8 * gold - 1e-3, 'the rest is the settlement\'s money');
+  assert.deepEqual(Array.from(sim.economy.luxury.subarray(cell * STORED_COUNT, (cell + 1) * STORED_COUNT)), luxury, 'no gold in stock');
 });
 
 test('a settlement trading in transit asks for what its partner lacks, up to a load, and does not use it up itself', () => {
@@ -293,9 +351,9 @@ test('a settlement trading in transit asks for what its partner lacks, up to a l
   assert.ok(sim.trade.want[cell * TRADE_GOODS + salt] >= keep - 1e-3, 'asks for it');
   // Its people need salt too (luxury goods are used up where buildings stand), but the partner's stays.
   place(sim, cell, typeOf('Hut'));
-  sim.economy.luxury[cell * 6] = keep;
+  sim.economy.luxury[cell * STORED_COUNT] = keep;
   runEconomy(sim, true, cell, sim.world.cellCount);
-  assert.ok(sim.economy.luxury[cell * 6] >= keep - 1e-3, `held for the partner: ${sim.economy.luxury[cell * 6]}`);
+  assert.ok(sim.economy.luxury[cell * STORED_COUNT] >= keep - 1e-3, `held for the partner: ${sim.economy.luxury[cell * STORED_COUNT]}`);
 });
 
 test('settlements do not build seats of government: a planned seat is for the government', () => {

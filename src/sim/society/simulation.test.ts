@@ -54,7 +54,7 @@ test('same seed gives the same history', () => {
   assert.deepEqual(a.chronicle, b.chronicle);
 });
 
-for (const seed of [2, 3, 4]) {
+for (const seed of [3, 4, 5]) {
   test(`seed ${seed}: after 200 years the bookkeeping is consistent`, () => {
     const sim = createSimulation(generateWorld({ seed }));
     runYears(sim, 200);
@@ -265,9 +265,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement is cut off in year 151.
-  const sim = createSimulation(generateWorld({ seed: 103 }));
-  for (let year = 1; year <= 154; year++) {
+  // In this world a settlement is cut off in year 145.
+  const sim = createSimulation(generateWorld({ seed: 144 }));
+  for (let year = 1; year <= 148; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);

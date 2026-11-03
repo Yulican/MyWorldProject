@@ -1,7 +1,7 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
-import { MIL, TROOP_TYPE_OF_BUILDING, armingWanted, districtPay, pickTroopType } from './military';
+import { armingWanted, districtPay, pickMilitaryBuilding, prepareArming } from './military';
 import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -64,8 +64,6 @@ export type Government = {
   upkeep: Float32Array;
   /** Per seat cell: money kept back for next year's soldiers' pay (military.ts); the government doesn't spend it. */
   reserve: Float32Array;
-  /** Per seat cell: money tax its district paid into the treasury at the last yearly update. */
-  income: Float32Array;
   /** Per civilization id: its founding tick + 1 once its government got its starting money. */
   funded: number[];
   /** Per seat cell: its traders and how many are away. */
@@ -112,7 +110,6 @@ export function createGovernment(cellCount: number): Government {
     potential: new Float32Array(cellCount),
     upkeep: new Float32Array(cellCount),
     reserve: new Float32Array(cellCount),
-    income: new Float32Array(cellCount),
     funded: [],
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -306,7 +303,6 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     gov.rate[s] = rate;
     gov.goodsRate[s] = goodsRate;
   }
-  gov.income.fill(0);
   // Taxes: money into the seat's treasury, goods from the settlements' surplus into its stock.
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
@@ -316,7 +312,6 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     const tax = Math.min(economy.money[c], gov.rate[s] * sim.cellAdults[c] * MONEY_PER_ADULT);
     economy.money[c] -= tax;
     gov.treasury[s] += tax;
-    gov.income[s] += tax;
     gov.collected += tax;
     if (gov.goodsRate[s] > 0) {
       for (let m = 0; m < MATERIAL_COUNT; m++) {
@@ -416,6 +411,7 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
     }
   }
   for (let s = 0; s < n; s++) gov.upkeep[s] = buildUpkeep[s];
+  prepareArming(sim, owner, PAIRS);
   civSeatList = [];
   if (civBudget.length < sim.civSlots) civBudget = new Float64Array(sim.civSlots);
   civBudget.fill(0);
@@ -490,7 +486,8 @@ function freeGovSlot(sim: Simulation, cell: number): number {
 
 /**
  * The next project of a seat's district, into pickSite/pickSlot/pickType: a
- * planned seat, comfort for the restless, growth for the crowded; none at the
+ * planned seat, comfort for the restless, a military building when the
+ * people arms (military.ts: armingWanted), growth for the crowded; none at the
  * site of its current project. Income check: the district's yearly upkeep
  * with the new building stays within GOV_TUNING.incomeShare of its potential
  * income; a seat is checked against the whole people's seats and income.
@@ -509,7 +506,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   let bestSlot = -1;
   let bestType = -1;
   let bestScore = 0;
-  const arm = !seatOnly && MIL.enabled && MIL.govBuild && armingWanted(sim, seat, PAIRS);
+  const arm = !seatOnly && armingWanted(sim, seat);
   for (let c = 0; c < n; c++) {
     if (gov.district[c] !== seat || gov.projectSite[seat] === c) continue;
     const slot = freeGovSlot(sim, c);
@@ -532,20 +529,10 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
       }
     }
     // 3. Military (below loyalty, above growth): one building of each type per settlement.
-    if (arm && people >= MIL.minPop && bestScore < MILITARY_SCORE) {
-      const has = (good: number) => {
-        for (let q = c * SLOTS, end = q + SLOTS; q < end; q++) {
-          const st = sim.economy.state[q];
-          if (st !== SlotState.Empty && st !== SlotState.Ruin && BUILDINGS[sim.economy.type[q]].good === good) return true;
-        }
-        return false;
-      };
-      const k = pickTroopType(sim, c, has);
-      if (k >= 0) {
-        bestSite = c;
-        bestSlot = slot;
-        bestType = TROOP_TYPE_OF_BUILDING[k];
-        bestScore = MILITARY_SCORE;
+    if (arm && bestScore < MILITARY_SCORE) {
+      const t = pickMilitaryBuilding(sim, c);
+      if (t >= 0) {
+        [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, MILITARY_SCORE];
         continue;
       }
     }

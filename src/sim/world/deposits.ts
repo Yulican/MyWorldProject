@@ -51,10 +51,11 @@ export const DEPOSITS: readonly DepositInfo[] = [
   { name: 'None', category: 'mineral', biomes: [], frequency: 0 },
   { name: 'Copper', category: 'metal', biomes: [Biome.Hills, Biome.Mountains], frequency: 4, bonus: { resource: Resource.Ore, amount: 0.3 } },
   { name: 'Tin', category: 'metal', biomes: [Biome.Hills, Biome.Mountains], frequency: 2, bonus: { resource: Resource.Ore, amount: 0.3 } },
-  { name: 'Iron', category: 'metal', biomes: [Biome.Hills, Biome.Mountains, Biome.Tundra], frequency: 4, bonus: { resource: Resource.Ore, amount: 0.4 } },
+  // Iron and flint are strategic goods (war): twice as frequent as first planned (Requirement Krieg, phase 0).
+  { name: 'Iron', category: 'metal', biomes: [Biome.Hills, Biome.Mountains, Biome.Tundra], frequency: 8, bonus: { resource: Resource.Ore, amount: 0.4 } },
   { name: 'Gold', category: 'metal', biomes: [Biome.Hills, Biome.Mountains, Biome.Jungle], frequency: 1.5, bonus: { resource: Resource.Ore, amount: 0.2 } },
   { name: 'Salt', category: 'mineral', biomes: [Biome.Desert, Biome.Plains, Biome.Swamp], frequency: 3, bonus: { resource: Resource.Stone, amount: 0.1 } },
-  { name: 'Flint', category: 'mineral', biomes: [Biome.Plains, Biome.Hills, Biome.Savanna], frequency: 4, bonus: { resource: Resource.Stone, amount: 0.3 } },
+  { name: 'Flint', category: 'mineral', biomes: [Biome.Plains, Biome.Hills, Biome.Savanna], frequency: 8, bonus: { resource: Resource.Stone, amount: 0.3 } },
   { name: 'Marble', category: 'mineral', biomes: [Biome.Hills, Biome.Mountains], frequency: 2, bonus: { resource: Resource.Stone, amount: 0.4 } },
   { name: 'Gems', category: 'mineral', biomes: [Biome.Mountains, Biome.Jungle], frequency: 1.5 },
   { name: 'Fishing grounds', category: 'bounty', biomes: [Biome.ShallowSea], frequency: 6, bonus: { resource: Resource.Fish, amount: 0.6 } },

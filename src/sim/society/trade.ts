@@ -5,7 +5,7 @@ import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
 import { BUILDINGS, Good, LUXURY_COUNT, STORED_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
-import { MIL, TROOP_GOOD, TROOP_TYPES, yearlyGoodNeed } from './military';
+import { MIL, TROOP_GOOD, TROOP_TYPES, mayBuyStrategic, yearlyGoodNeed } from './military';
 import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -30,8 +30,8 @@ export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Sa
 const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
 export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5];
-/** Trade goods that are strategic (horses, iron, flint; the last three luxury-block goods): sold only to peoples that don't threaten the seller (military.ts: MIL.saleDanger). */
-const isStrategic = (g: number) => g >= TradeGood.Luxury + 4;
+/** Trade goods that are strategic (horses, iron, flint: the last three of the stored goods): sold only to peoples that don't threaten the seller (military.ts: mayBuyStrategic). */
+export const isStrategic = (g: number) => g >= TradeGood.Luxury + STORED_COUNT - 3;
 export const MERCHANT_LOAD = 40;
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
@@ -338,14 +338,15 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     trade.surplus[t + g] = Math.max(0, stock - keep);
   }
   // Strategic goods (war): the soldiers' yearly need of MIL.keepYears years is kept and asked for, on top of the
-  // luxury need of horses; the rest is for sale. Iron and flint have no other use.
+  // luxury need of horses; the rest is for sale. Iron and flint have no other use, and the soldiers' wish for
+  // them weighs MIL.wish times (so trade agreements form for them).
   for (let tt = 0; tt < TROOP_TYPES; tt++) {
     const k = TROOP_GOOD[tt];
     const g = TradeGood.Luxury + k;
     const stock = economy.luxury[cell * STORED_COUNT + k];
-    const army = MIL.enabled ? yearlyGoodNeed(sim, cell, tt) * MIL.keepYears : 0;
+    const army = yearlyGoodNeed(sim, cell, tt) * MIL.keepYears;
     const own = k < LUXURY_COUNT ? keep : 0;
-    trade.want[t + g] = Math.max(0, own + army * (k < LUXURY_COUNT ? 1 : MIL.agreeBoost) - stock - trade.incoming[t + g]);
+    trade.want[t + g] = Math.max(0, own + army * (k < LUXURY_COUNT ? 1 : MIL.wish) - stock - trade.incoming[t + g]);
     trade.surplus[t + g] = Math.max(0, stock - own - army);
   }
   // An export hub asks its people for what its trade agreements still owe;
@@ -678,7 +679,7 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     // The buyer takes what the agreement still owes, asked for or not.
     const owed = agreement ? legOwed(agreement, sim.tick) : 0;
     // Strategic goods are not sold to peoples that threaten the seller.
-    if (abroad && isStrategic(g) && !mayBuyStrategic(sim, homeCiv, targetCiv)) continue;
+    if (abroad && isStrategic(g) && !mayBuyStrategic(sim, homeCiv, targetCiv, PAIRS)) continue;
     const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g]);
     if (amount <= 0) continue;
     dealSell[g] = amount;
@@ -702,12 +703,6 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     dealPriority += amount * PRICE[g] * unhappyHome * lacking(eco, home, g);
   }
   return worth;
-}
-
-/** Whether `buyer` may buy strategic goods of `seller`: its danger for the seller is at most MIL.saleDanger (war phase 1). */
-export function mayBuyStrategic(sim: Simulation, seller: number, buyer: number): boolean {
-  if (!MIL.enabled) return true;
-  return sim.diplomacy.danger[seller * PAIRS + buyer] <= MIL.saleDanger;
 }
 
 /** How much a deal matters, from the last planDeal: its worth, more for luxury goods a settlement lacks and for unhappy settlements. */

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { sumTerms } from '../terms';
 import { Deposit } from '../world/deposits';
 import { generateWorld } from '../world/generate';
-import { BUILDINGS, FIRST_LUXURY, Good, LUXURY_COUNT, SLOTS, SlotState } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, Good, STORED_COUNT, SLOTS, SlotState } from './buildings';
 import { runEconomy, updateCellSupply } from './economy';
 import {
   CONNECTION_BEST,
@@ -160,7 +160,7 @@ test('comfort buildings, luxury goods and seats of government raise satisfaction
   const salt = Good.Salt - FIRST_LUXURY;
   assert.equal(sim.economy.luxuryCovered[cell], 1 << salt);
   const made = BUILDINGS[typeOf('Salt works')].amount;
-  assert.ok(Math.abs(sim.economy.luxury[cell * LUXURY_COUNT + salt] - (made - people * LUXURY_PER_PERSON)) < 1e-3);
+  assert.ok(Math.abs(sim.economy.luxury[cell * STORED_COUNT + salt] - (made - people * LUXURY_PER_PERSON)) < 1e-3);
   assert.ok(Math.abs(satisfactionTarget(sim, cell, civ) - before - comfort.value - 5) < 1e-6);
 
   // A seat of government in a settlement makes it as well connected as the capital.

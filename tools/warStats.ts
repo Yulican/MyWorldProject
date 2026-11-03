@@ -2,15 +2,14 @@
 // Krieg.md", section 10) over many worlds: growth, soldiers, pay, strategic
 // goods, trade, satisfaction, diplomacy (danger from strength) and sim time.
 // Usage: npx tsx tools/warStats.ts [worlds=12] [years=300,500] [variant ...]
-//   A variant is "name:key=value,key=value" with the keys of MIL (src/sim/society/military.ts), e.g.
-//   npx tsx tools/warStats.ts 12 300,500 "off:enabled=0" "cap20:capacity=20,sold=0.1" "cap30:capacity=30,sold=0.1,saleDanger=50"
-//   depositMul=2: iron and flint deposits 2x as frequent at world generation.
-//   enabled=0: phase 0 only (mines, gold as money), no soldiers and danger from population.
+//   A variant is "name:key=value,key=value" with the numbers of MIL (src/sim/society/military.ts), e.g.
+//   npx tsx tools/warStats.ts 12 300,500 "cap30:capacity=30,sold=0.15" "sale50:saleDanger=50"
+//   depositMul=0.5: iron and flint deposits half as frequent at world generation (relative to today's).
 //   Without variants one run with the defaults. Also accepts GOV_TUNING keys (incomeShare, ...).
 // The same file runs on the code before the war work (no military.ts): then it prints only the shared figures.
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
-import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
+import { BUILDINGS, SLOTS, STORED_COUNT, SlotState } from '../src/sim/society/buildings';
 import { GOV_TUNING } from '../src/sim/society/taxes';
 import { DEPOSITS, Deposit } from '../src/sim/world/deposits';
 import { PAIRS } from '../src/sim/society/diplomacy';
@@ -127,7 +126,7 @@ function measure(sim: Simulation, ms: number, year: number): Row {
   if (mil) {
     for (let c = 0; c < w.cellCount; c++) {
       const has = soldiersAtCell(mil, c) > 0 ? 1 : 0;
-      stockAt[has] += sim.economy.luxury[c * 7 + 5] + sim.economy.luxury[c * 7 + 6];
+      stockAt[has] += sim.economy.luxury[c * STORED_COUNT + 5] + sim.economy.luxury[c * STORED_COUNT + 6];
     }
   }
   let money = 0;
@@ -151,28 +150,24 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     ranges: built['Shooting range'] ?? 0,
     stables: built['Stable'] ?? 0,
     'iron/flint/gold mines': mines,
-    'desertion % of trained': mil?.trained ? (100 * mil.deserted) / mil.trained : 0,
+    'dismissed % of trained': mil?.trained ? (100 * mil.dismissed) / mil.trained : 0,
     'soldiers/1000 gold peoples': (1000 * grp[1][0]) / Math.max(1, grp[1][1]),
     'soldiers/1000 other peoples': (1000 * grp[0][0]) / Math.max(1, grp[0][1]),
     'gold peoples': goldCiv.size,
     'iron+flint mined /yr': (mil?.goodsMined ?? 0) / year,
-    'iron+flint needed /yr (melee+ranged)': (mil?.goodsNeeded ?? 0) / year,
-    'iron+flint used by soldiers /yr': (mil?.goodsUsed ?? 0) / year,
+    'strategic goods needed /yr': (mil?.goodsNeeded ?? 0) / year,
+    'strategic goods used /yr': (mil?.goodsUsed ?? 0) / year,
     'bought by gov traders /yr': (mil?.goodsBought ?? 0) / year,
     'iron+flint stock at soldiers': stockAt[1],
     'iron+flint stock elsewhere': stockAt[0],
-    'gold taxed (to treasuries)': mil?.goldTaxed ?? 0,
-    'desertion: young peoples (<30y)': mil?.desNew ?? 0,
-    'desertion: older peoples': mil?.desOld ?? 0,
-    'desertion: rounding up': mil?.desRound ?? 0,
-    'returned to population': mil?.returned ?? 0,
     'strategic agreements signed': sim.chronicle.filter((e) => /agreed to (deliver|trade).*\b(iron|flint|horses)\b/.test(e.text)).length,
     trained: mil?.trained ?? 0,
-    deserted: mil?.deserted ?? 0,
+    dismissed: mil?.dismissed ?? 0,
     disbanded: mil?.disbanded ?? 0,
     'pay paid': mil?.paid ?? 0,
     'gold mined (money)': mil?.goldMined ?? 0,
     'goods used': mil?.goodsUsed ?? 0,
+    'gold taxed': mil?.goldTaxed ?? 0,
     treasuries,
     'gov spent': sim.government.spent,
     'taxes collected': sim.government.collected,
