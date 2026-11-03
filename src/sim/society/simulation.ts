@@ -18,7 +18,7 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
-import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, cityTier, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
   EXPAND_MIN_CONNECTION,
@@ -29,6 +29,7 @@ import {
   rawMaterials,
   runEconomy,
   updateCellSupply,
+  usableSlots,
 } from './economy';
 import {
   MOOD_NEW_PEOPLE,
@@ -877,6 +878,7 @@ function refreshSnapshot(sim: Simulation): void {
     if (owner) territory[owner]++;
     if (sim.hasBuildings[c]) {
       world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);
+      world.cityTier[c] = cityTier(world.buildings[c], usableSlots(sim, c));
       world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
       world.harbors[c] = sim.trade.harbor[c];
     }

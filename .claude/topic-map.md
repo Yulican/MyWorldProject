@@ -11,7 +11,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | Roads | `world/roads.ts` | – | Requirement Handel | – | aged |
 | Inhabitants, aging, births, migration, settling (main loop, 1240 lines) | `society/simulation.ts`, `population.ts` | `simulation.test.ts` | Game Design doc | `economyStats.ts` | aged |
 | Food, water, space per hex | `society/supply.ts` | – | Requirement Regionale Rohstoffe | `economyStats.ts` | – |
-| Harvest, buildings, construction, upkeep (912 lines) | `society/economy.ts`, `buildings.ts` | `economy.test.ts` | Requirement Regionale Rohstoffe | `economyStats.ts` | cities |
+| Harvest, buildings, construction, upkeep (912 lines); city tier by used slots (`cityTier()` in `buildings.ts`, `world.cityTier` set in `simulation.ts`) | `society/economy.ts`, `buildings.ts` | `economy.test.ts` | Requirement Regionale Rohstoffe | `economyStats.ts` | cities |
 | Peoples, culture, names | `society/civilizations.ts`, `culture.ts` | – | Game Design doc | – | – |
 | Satisfaction, uprisings | `society/satisfaction.ts` (+ uprisings in `simulation.ts`) | `satisfaction.test.ts` | Requirement Zufriedenheit | `satisfactionStats.ts` | unrest |
 | Trade, merchants, harbors, goods (1280 lines) | `society/trade.ts` | `trade.test.ts` | Requirement Handel (+ Diplomatie for foreign trade) | `economyStats.ts` | trade |
