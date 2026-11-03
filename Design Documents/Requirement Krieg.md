@@ -13,6 +13,8 @@ Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und 
 Zahlen von Phase 0 und 1 sind simuliert und vom Nutzer gewählt (Abschnitt 14); die übrigen bleiben „kalibrieren (Simulation)“.
 
 - **Ausbildung:** Militärgebäude bilden jährlich Soldaten aus der Bevölkerung aus: 25 % der Gebäudekapazität pro Jahr, nur wenn der Sold des nächsten Jahres gedeckt ist. Soldaten werden von der Bevölkerung abgezogen (sie kosten Wachstum und Ernte).
+  - **Grenzen:** Höchstens 10 % der Bevölkerung einer Siedlung sind Soldaten; pro Jahr werden höchstens 50 % ihrer Erwachsenen ausgebildet.
+  - **Rückkehr:** Soldaten über der Kapazität eines Gebäudes, oder deren Siedlung ihren Bezirk verliert, kommen in die Bevölkerung zurück.
 - **Soldaten sterben nur durch Krieg** (kein Altern, keine Desertion).
 - **Gebäude:** Kaserne = Nahkampf, Schießplatz = Fernkampf, Stall = Schock (nur mit Pferden im Lager). Kapazität: 20 Soldaten pro Gebäude. Kosten und Unterhalt: kalibrieren (Simulation).
 - **Soldaten sind in der Siedlung**, können aber zu Armeen zusammengestellt und bewegt werden (Abschnitt 4).
