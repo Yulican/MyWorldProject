@@ -28,6 +28,8 @@ export {
   livingCivilizations,
   simulationYear,
   stepSimulation,
+  stepSimulationPart,
+  TickPart,
   type ChronicleEntry,
   type Simulation,
 } from './society/simulation';

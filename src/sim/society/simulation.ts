@@ -25,10 +25,12 @@ import {
   capacityAfterRepair,
   cellModifiers,
   isSettlementTarget,
-  planSeats,
+  continueSeatPlan,
   rawMaterials,
   runEconomy,
+  startSeatPlan,
   updateCellSupply,
+  type SeatPlan,
 } from './economy';
 import {
   MOOD_NEW_PEOPLE,
@@ -82,6 +84,8 @@ const DIPLOMACY_WEEK = 45;
 const GOVERNMENT_WEEK = 28;
 const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
+/** Districts whose next seat of government one part of a tick plans (see stepSimulationPart). */
+const SEAT_DISTRICTS_PER_PART = 2;
 /** Settlers cross at most this many hexes of land opened to them to reach free land beyond it. */
 const CROSSING_REACH = 4;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
@@ -199,6 +203,12 @@ export type Simulation = {
   gameOver: boolean;
   /** Increases whenever the map snapshot in `world` changes. */
   snapshotVersion: number;
+  /** The part of the current tick that runs next (see stepSimulationPart); TickPart.Start between ticks. */
+  part: TickPart;
+  /** Owner of every hex for the current tick's refresh, from one of its parts to the next. */
+  refreshOwner: Uint8Array | null;
+  /** The current tick's seat planning while it runs in parts. */
+  seatPlan: SeatPlan | null;
 };
 
 /** Settles the player's starting tribe in a freshly generated world. */
@@ -239,6 +249,9 @@ export function createSimulation(world: World): Simulation {
     history: { population: [], believers: [] },
     gameOver: false,
     snapshotVersion: 0,
+    part: TickPart.Start,
+    refreshOwner: null,
+    seatPlan: null,
   };
   computeCapacity(sim);
 
@@ -254,48 +267,114 @@ export function createSimulation(world: World): Simulation {
   return sim;
 }
 
-/** Advances the world by one week. */
+/**
+ * The parts of a tick, in order. The game clock runs a tick part by part,
+ * spread over frames when a part is long (stepSimulationPart), so no single
+ * frame carries a whole quarterly refresh or yearly plan. Parts that have
+ * nothing to do in a tick are skipped.
+ */
+export const TickPart = {
+  /** Inhabitants, the year's end for the peoples, merchants on their way. */
+  Start: 0,
+  Economy: 1,
+  /** Quarterly: new settlements, cut-off land, satisfaction. */
+  RefreshLand: 2,
+  /** Quarterly: wants, migration, breakaways, the map snapshot. */
+  RefreshPeople: 3,
+  /** The yearly plan of this week (seats of government in several parts). */
+  Plan: 4,
+  /** Government traders, distances, transit hubs, the year's totals. */
+  Finish: 5,
+} as const;
+export type TickPart = (typeof TickPart)[keyof typeof TickPart];
+
+/** Advances the world by one week (or finishes the week stepSimulationPart has started). */
 export function stepSimulation(sim: Simulation): void {
-  if (sim.gameOver) return;
-  const { pop } = sim;
-  const end = pop.end;
-  for (let i = sim.tick % TICKS_PER_YEAR; i < end; i += TICKS_PER_YEAR) {
-    if (pop.alive[i]) updateInhabitant(sim, i);
-  }
-  sim.tick++;
-  const yearEnd = sim.tick % TICKS_PER_YEAR === 0;
-  if (yearEnd) updateCivilizations(sim);
-  // Every hex's economy runs once a quarter, a 13th of the hexes each week;
-  // upkeep is due in the year's last quarter.
-  const week = sim.tick - 1;
-  advanceTrips(sim);
-  for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
-  sim.trade.supplyDirtyCount = 0;
-  runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
-  if (sim.tick % REFRESH_TICKS === 0) {
-    expandSettlements(sim);
-    const owner = cellOwners(sim);
-    splitCutOffLand(sim, owner);
-    updateSatisfaction(sim, owner);
-    sumCivWants(sim, owner);
-    emigrate(sim, owner);
-    breakAway(sim, owner);
-    refreshSnapshot(sim);
-  }
-  // The people's yearly plans each get a week of their own, away from the
-  // refreshes, so no single tick carries them all.
+  while (!stepSimulationPart(sim));
+}
+
+/**
+ * Runs the next part of the current tick (or starts a new tick); true when
+ * the tick is complete. Running a tick in parts gives exactly the same
+ * result as stepSimulation, as long as nothing else changes the simulation
+ * between its parts.
+ */
+export function stepSimulationPart(sim: Simulation): boolean {
+  if (sim.part === TickPart.Start && sim.gameOver) return true;
+  const isRefresh = () => sim.tick % REFRESH_TICKS === 0;
   const weekOfYear = sim.tick % TICKS_PER_YEAR;
-  if (weekOfYear === SEATS_WEEK) planSeats(sim, sim.world.owner);
-  else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, sim.world.owner);
-  else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
-  else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
-  else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
-  else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, sim.world.owner);
-  else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, sim.world.owner);
-  advanceGovernment(sim);
-  measureDistances(sim, sim.world.owner);
-  updateTransitHubs(sim);
-  if (yearEnd) closeYear(sim);
+  switch (sim.part) {
+    case TickPart.Start: {
+      const { pop } = sim;
+      const end = pop.end;
+      for (let i = sim.tick % TICKS_PER_YEAR; i < end; i += TICKS_PER_YEAR) {
+        if (pop.alive[i]) updateInhabitant(sim, i);
+      }
+      sim.tick++;
+      if (sim.tick % TICKS_PER_YEAR === 0) updateCivilizations(sim);
+      advanceTrips(sim);
+      for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
+      sim.trade.supplyDirtyCount = 0;
+      sim.part = TickPart.Economy;
+      return false;
+    }
+    case TickPart.Economy: {
+      // Every hex's economy runs once a quarter, a 13th of the hexes each week;
+      // upkeep is due in the year's last quarter.
+      const week = sim.tick - 1;
+      runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
+      sim.part = isRefresh() ? TickPart.RefreshLand : TickPart.Plan;
+      return false;
+    }
+    case TickPart.RefreshLand: {
+      expandSettlements(sim);
+      const owner = cellOwners(sim);
+      splitCutOffLand(sim, owner);
+      updateSatisfaction(sim, owner);
+      sim.refreshOwner = owner;
+      sim.part = TickPart.RefreshPeople;
+      return false;
+    }
+    case TickPart.RefreshPeople: {
+      const owner = sim.refreshOwner!;
+      sim.refreshOwner = null;
+      sumCivWants(sim, owner);
+      emigrate(sim, owner);
+      breakAway(sim, owner);
+      refreshSnapshot(sim);
+      sim.part = TickPart.Plan;
+      return false;
+    }
+    case TickPart.Plan: {
+      // The people's yearly plans each get a week of their own, away from the
+      // refreshes, so no single tick carries them all.
+      const owner = sim.world.owner;
+      if (weekOfYear === SEATS_WEEK) {
+        // A part for the candidates, then a few districts per part.
+        if (!sim.seatPlan) {
+          sim.seatPlan = startSeatPlan(sim, owner);
+          return false;
+        }
+        if (!continueSeatPlan(sim, sim.seatPlan, SEAT_DISTRICTS_PER_PART)) return false;
+        sim.seatPlan = null;
+      } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
+      else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
+      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
+      else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
+      sim.part = TickPart.Finish;
+      return false;
+    }
+    case TickPart.Finish: {
+      advanceGovernment(sim);
+      measureDistances(sim, sim.world.owner);
+      updateTransitHubs(sim);
+      if (weekOfYear === 0) closeYear(sim);
+      sim.part = TickPart.Start;
+      return true;
+    }
+  }
 }
 
 /** Keeps the year's totals for the trend chart and starts new faith ledgers. */
