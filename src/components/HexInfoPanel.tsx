@@ -175,6 +175,35 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                 </View>
               ))}
 
+              {(economy.government.seat >= 0 || economy.government.buildings.length > 0) && (
+                <>
+                  <Text style={styles.section}>
+                    Government buildings {economy.government.buildings.length}/{economy.government.slots}
+                  </Text>
+                  {economy.government.seat >= 0 && (
+                    <Row
+                      label="District"
+                      value={`${economy.government.capital ? 'capital' : 'seat of government'} at ${economy.government.seat % world.width}, ${Math.floor(economy.government.seat / world.width)}`}
+                    />
+                  )}
+                  {economy.government.seat >= 0 && (
+                    <Row label="Taxes" value={`money ${Math.round(economy.government.rate * 100)} % · goods ${Math.round(economy.government.goodsRate * 100)} %`} />
+                  )}
+                  {economy.government.buildings.map((b, i) => (
+                    <View key={i}>
+                      <Row label={b.name} value={`${buildingState(b.state, b.workLeft)} · ${b.effect}`} />
+                      <Text style={styles.terms}>
+                        Upkeep {b.upkeep} a year
+                        {b.unpaidYears > 0 ? ` · unpaid for ${b.unpaidYears} year${b.unpaidYears > 1 ? 's' : ''}` : ''}
+                      </Text>
+                    </View>
+                  ))}
+                  {(economy.government.wood >= 0.5 || economy.government.stone >= 0.5) && (
+                    <Row label="Government stock" value={`${Math.floor(economy.government.wood)} wood · ${Math.floor(economy.government.stone)} stone`} />
+                  )}
+                </>
+              )}
+
               <Text style={styles.section}>Stock</Text>
               <Row label="Wood" value={`${Math.floor(economy.wood)} · ${yearly(sumTerms(economy.harvest.wood), economy.upkeepWood)}`} />
               {economy.harvest.wood.map((t, i) => (

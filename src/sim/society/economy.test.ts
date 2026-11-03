@@ -9,6 +9,7 @@ import {
   Good,
   MATERIAL_COUNT,
   Material,
+  SETTLEMENT_SLOTS,
   SLOTS,
   SlotState,
   UPKEEP_GRACE_YEARS,
@@ -236,9 +237,9 @@ test('plains have more building slots than other land', () => {
     for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.biome[c] === biome) return c;
     throw new Error(`no biome ${biome}`);
   };
-  assert.equal(usableSlots(sim, first(Biome.Plains)), SLOTS);
+  assert.equal(usableSlots(sim, first(Biome.Plains)), SETTLEMENT_SLOTS);
   assert.equal(usableSlots(sim, first(Biome.Forest)), 4);
-  assert.ok(SLOTS > 4);
+  assert.ok(SETTLEMENT_SLOTS > 4);
 });
 
 /** A settled hex of the first people after some years, cleared of buildings, with a happy population. */
@@ -297,18 +298,15 @@ test('a settlement trading in transit asks for what its partner lacks, up to a l
   assert.ok(sim.economy.luxury[cell * 6] >= keep - 1e-3, `held for the partner: ${sim.economy.luxury[cell * 6]}`);
 });
 
-test('a planned seat of government comes first: its site starts nothing else', () => {
+test('settlements do not build seats of government: a planned seat is for the government', () => {
   const { sim, cell } = settledHex(3);
   sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 1000;
   sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 1000;
-  sim.satisfaction[cell] = -5; // would build comfort first otherwise
   sim.seatSite[cell] = 1;
   runEconomy(sim, false, cell, sim.world.cellCount);
-  const started: string[] = [];
   for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) {
-    if (sim.economy.state[s] === SlotState.Construction) started.push(BUILDINGS[sim.economy.type[s]].name);
+    assert.ok(sim.economy.state[s] === SlotState.Empty || BUILDINGS[sim.economy.type[s]].name !== 'Seat of government', `slot ${s - cell * SLOTS}`);
   }
-  assert.ok(started.every((name) => name === 'Seat of government'), started.join(', '));
 });
 
 test('a seat of government whose harvest lacks its upkeep orders ten years of it, before all other trips', () => {

@@ -60,9 +60,15 @@ Jedes Quartal kennt jede Siedlung, was sie verlangt und was sie übrig hat:
 | Ware | verlangt | übrig |
 |---|---|---|
 | Holz, Stein | was dem Gebäude fehlt, auf das sie spart | was über dem Sparziel und 2 Jahren Unterhalt (mindestens 10) liegt |
-| Getreide, Wasser | wenn das die knappste Versorgung ist und das Feld halb voll: bis zur nächsten Grenze, höchstens 50 | was die eigenen Leute nicht brauchen |
+| Getreide, Wasser | wenn das die knappste Versorgung ist und das Feld halb voll: bis zur nächsten Grenze, höchstens 50 | was die eigenen Leute nicht brauchen und (im halb vollen Feld) was sie bis zur nächsten Grenze selbst verlangen würden, höchstens 50 |
 | Luxusgüter | 2 Jahre Bedarf (1 je 100 Einwohner und Jahr) | was darüber liegt |
 
+- **Kein Hin und Her (Regel R1):** Eine Siedlung verkauft kein Getreide und
+  Wasser, das sie gleich danach wieder verlangen würde. Getreide und Wasser,
+  die den Vorrat verlassen (Verkauf, Zoll), zählen sofort nicht mehr zur
+  Versorgung. In der Simulation (12 Welten, Jahr 500, mit Regierung) sank
+  der Handel mit Getreide und Wasser von 104 800 auf 39 500, ohne dass das
+  Wachstum litt (16 837 Menschen gegenüber 16 010).
 - Ein freier Händler wählt unter allen erreichbaren Siedlungen seines Volks
   die Fahrt mit dem meisten Wert pro Woche Hin- und Rückweg:
   - **Hinweg:** was daheim übrig ist und dort verlangt wird, teuerste Ware

@@ -9,13 +9,14 @@
  * land next to them has ruins (the most icons the map can show, see
  * fillBuildings.ts), over such worlds where every settlement but the
  * capitals rose up (the most peoples and borders, see stirUnrest.ts), where
- * every settlement trades (openTrade.ts), and where every people opened its
+ * every settlement trades (openTrade.ts), where every people opened its
  * borders to every other and trades freely (dashed borders, merchants
- * abroad; openDiplomacy.ts).
+ * abroad; openDiplomacy.ts), and where seats of government and government
+ * buildings stand everywhere (flags, government traders; empowerGovernment.ts).
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy',
-  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean; diplomacy?: boolean }
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government',
+  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean; diplomacy?: boolean; government?: boolean }
 > = {
   young: { years: 0 },
   aged: { years: 300 },
@@ -23,6 +24,7 @@ export const SCENARIOS: Record<
   unrest: { years: 300, unrest: true },
   trade: { years: 300, trade: true },
   diplomacy: { years: 300, diplomacy: true },
+  government: { years: 300, government: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 

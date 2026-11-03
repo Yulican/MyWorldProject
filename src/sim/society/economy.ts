@@ -10,6 +10,8 @@ import {
   MATERIAL_COUNT,
   Material,
   REPAIR_SHARE,
+  GOV_SLOT,
+  SETTLEMENT_SLOTS,
   SLOTS,
   SlotState,
   UPKEEP_GRACE_YEARS,
@@ -32,6 +34,7 @@ import {
   seatField,
   yieldFactor,
 } from './satisfaction';
+import { GOV_TUNING } from './taxes';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
 import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
@@ -57,7 +60,7 @@ const BUILD_FROM_CROWDING = 0.5;
 export const SAVE_UP_YEARS = 5;
 
 /** Building slots of a hex on plains and elsewhere: plains build up, woods and mountains supply them. */
-const PLAINS_SLOTS = SLOTS;
+const PLAINS_SLOTS = SETTLEMENT_SLOTS;
 const OTHER_SLOTS = 4;
 
 /** Building slots a hex can use. */
@@ -135,7 +138,7 @@ export function cellModifiers(sim: Simulation, cell: number): SupplyModifier[] {
 }
 
 /** People a hex would support with its standing buildings plus up to two extra types. */
-function capacityWith(sim: Simulation, cell: number, extraA: number, extraB: number): number {
+export function capacityWith(sim: Simulation, cell: number, extraA: number, extraB: number): number {
   const base = cell * SUPPLY_KINDS;
   let capacity = Infinity;
   for (let k = 0; k < SUPPLY_KINDS; k++) {
@@ -201,7 +204,8 @@ function harvestWith(sim: Simulation, cell: number, good: number, extraA: number
 function upkeepWith(sim: Simulation, cell: number, material: number, extraA: number, extraB: number): number {
   const { economy } = sim;
   let sum = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  // The settlement's own buildings (the government keeps up its own).
+  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
     if (economy.state[s] === SlotState.Standing) sum += upkeepOfType(economy.type[s], material);
   }
   if (extraA >= 0) sum += upkeepOfType(extraA, material);
@@ -278,14 +282,17 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       if (st === SlotState.Construction || st === SlotState.Repair) {
         // Only people build; an empty hex's construction site waits.
         if (people > 0) economy.work[s] -= 1 / STEPS_PER_YEAR;
-        if (economy.work[s] > 1e-4) busy = true;
-        else {
+        if (economy.work[s] > 1e-4) {
+          // Government construction doesn't hold up the settlement's own.
+          if (s < c * SLOTS + GOV_SLOT) busy = true;
+        } else {
           economy.state[s] = SlotState.Standing;
           economy.work[s] = 0;
           economy.unpaid[s] = 0;
           supplyChanged = true;
         }
-      } else if (st === SlotState.Standing && yearEnd) {
+      } else if (st === SlotState.Standing && yearEnd && s < c * SLOTS + GOV_SLOT) {
+        // The government keeps up its own buildings (government.ts).
         const b = BUILDINGS[economy.type[s]];
         // Nobody maintains an empty hex's buildings.
         if (
@@ -316,15 +323,9 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       economy.goal[stock + Material.Stone] = 0;
       // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
       const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
-      // A planned seat of government comes first: nothing new, only repairs, until it stands.
-      const seatFirst = sim.seatSite[c] > 0;
-      const started =
-        !busy &&
-        (seatFirst
-          ? planBuilding(sim, c, true)
-          : planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
-      if (started || (!busy && !seatFirst && yearEnd && planTrade(sim, c))) supplyChanged = true;
-      if (sim.seatSite[c] && !busy && !started && buildPlannedSeat(sim, c)) supplyChanged = true;
+      // Seats of government are the government's (government.ts).
+      const started = !busy && (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
+      if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
         buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
@@ -383,7 +384,7 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
   let firstType = -1;
 
   // Options: every population building type in a free slot, every ruined one repaired.
-  for (let option = 0; option < BUILDINGS.length + SLOTS; option++) {
+  for (let option = 0; option < BUILDINGS.length + SETTLEMENT_SLOTS; option++) {
     let type: number;
     let slot = -1;
     if (option < BUILDINGS.length) {
@@ -415,7 +416,7 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
     }
 
     // After an affordable production building (new or repaired) first.
-    for (let first = 0; first < BUILDINGS.length + SLOTS; first++) {
+    for (let first = 0; first < BUILDINGS.length + SETTLEMENT_SLOTS; first++) {
       let ptype: number;
       let pslot = -1;
       if (first < BUILDINGS.length) {
@@ -588,7 +589,7 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
   let bestTime = Infinity;
   let bestSlot = -1;
   let bestType = -1;
-  for (let option = 0; option < BUILDINGS.length + SLOTS; option++) {
+  for (let option = 0; option < BUILDINGS.length + SETTLEMENT_SLOTS; option++) {
     let type: number;
     let slot = -1;
     if (option < BUILDINGS.length) {
@@ -636,39 +637,53 @@ const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 export function planSeats(sim: Simulation, owner: Uint8Array): void {
   const { economy, world } = sim;
   const n = world.cellCount;
-  const busy = new Uint8Array(sim.civSlots);
+  // One planned seat per government district (by its seat cell).
+  const groups = n;
+  const groupOf = (c: number) => sim.government.district[c];
+  const busy = new Uint8Array(groups);
   const candidates: number[][] = [];
+  const again = new Int32Array(groups).fill(-1);
+  const civOf = new Uint8Array(groups);
   const year = Math.floor(sim.tick / (STEPS_PER_YEAR * 13));
   for (let c = 0; c < n; c++) {
     const id = owner[c];
+    const g = groupOf(c);
     if (sim.seatSite[c] && (id === 0 || sim.cellPop[c] === 0)) sim.seatSite[c] = 0; // lost
     if (sim.seatSite[c] && year + 1 - sim.seatSite[c] > SAVE_UP_YEARS) {
-      // Not built in time: try elsewhere, and this site again only later.
       sim.seatSite[c] = 0;
-      sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
+      // Queued by the government: it competes again with the other sites (below).
+      if (sim.government.seatQueued[c] && id && g >= 0) again[g] = c;
+      // Not built in time: try elsewhere, and this site again only later.
+      else sim.seatRetry[c] = year + SEAT_RETRY_YEARS + 1;
     }
-    if (id === 0) continue;
-    if (sim.seatSite[c]) busy[id] = 1;
+    if (id === 0 || g < 0) continue;
+    civOf[g] = id;
+    if (sim.seatSite[c]) busy[g] = 1;
     if (sim.hasBuildings[c]) {
       for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
         const st = economy.state[s];
-        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[id] = 1;
+        if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[g] = 1;
       }
     }
     if (sim.cellPop[c] < EXPANSION_GROUP || sim.seatCost[c] < SEAT_MIN_COST || hasGood(sim, c, Good.Seat)) continue;
     if (sim.seatRetry[c] > year + 1) continue;
-    (candidates[id] ??= []).push(c);
+    (candidates[g] ??= []).push(c);
   }
   const field = scratchField(n);
-  for (let id = 1; id < sim.civSlots; id++) {
-    const list = candidates[id];
-    if (!sim.civs[id] || busy[id] || !list) continue;
+  for (let g = 0; g < groups; g++) {
+    const id = civOf[g];
+    const list = candidates[g];
+    // A queued site keeps its plan while another seat is being built.
+    if (again[g] >= 0 && busy[g]) sim.seatSite[again[g]] = year + 1;
+    if (!sim.civs[id] || busy[g] || !list) continue;
     // Held back by the expansion stop first, then the worst connected.
     const held = (c: number) => (sim.frontierBlocked[c] && year + 1 - sim.frontierBlocked[c] <= 1 ? 1 : 0);
     list.sort((a, b) => held(b) - held(a) || sim.seatCost[b] - sim.seatCost[a] || a - b);
     let best = -1;
     let bestBenefit = SEAT_MIN_BENEFIT;
-    for (const c of list.slice(0, SEAT_CANDIDATES)) {
+    const evaluate = list.slice(0, SEAT_CANDIDATES);
+    if (again[g] >= 0 && list.includes(again[g]) && !evaluate.includes(again[g])) evaluate.push(again[g]);
+    for (const c of evaluate) {
       const reached = seatField(sim, owner, id, [c], field);
       let benefit = 0;
       for (const k of reached) {
@@ -680,84 +695,18 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
         }
         field[k] = Infinity;
       }
+      // A district its government cannot tax (0 %) needs the seat most (GOV_TUNING.zeroPriority).
+      const d = sim.government.district[c];
+      if (d >= 0 && sim.government.rate[d] === 0) benefit *= GOV_TUNING.zeroPriority;
       if (benefit > bestBenefit) {
         bestBenefit = benefit;
         best = c;
       }
     }
     if (best >= 0) sim.seatSite[best] = year + 1;
+    if (again[g] >= 0 && best !== again[g]) sim.seatRetry[again[g]] = year + SEAT_RETRY_YEARS + 1;
   }
 }
-
-/**
- * A planned seat (planSeatSites) in the economy step: the site saves up for
- * it; once it has the wood and stone and the harvest keeps its upkeep, it
- * builds it, in a free slot, a ruined seat, or in place of its least needed
- * building (the one whose loss costs the fewest people; imports make up for
- * it). Returns whether construction started.
- */
-function buildPlannedSeat(sim: Simulation, cell: number): boolean {
-  const { economy } = sim;
-  const b = BUILDINGS[SEAT_TYPE];
-  let slot = seatSlot(sim, cell);
-  const share = slot !== null && slot >= 0 ? REPAIR_SHARE : 1;
-  economy.goal[cell * MATERIAL_COUNT + Material.Wood] = b.wood * share;
-  economy.goal[cell * MATERIAL_COUNT + Material.Stone] = b.stone * share;
-  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood * share) return false;
-  if (economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone * share) return false;
-  // Upkeep first: freeing a slot only ever lowers it. The realm keeps the
-  // seat up when the site can't: its people must spare RESERVE years of it.
-  if (!seatUpkeepCovered(sim, cell)) return false;
-  if (slot === null) {
-    // Replace the least needed building.
-    const capacity = sim.cellCapacity[cell];
-    let bestCost = Infinity;
-    for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
-      if (economy.state[s] !== SlotState.Standing && economy.state[s] !== SlotState.Ruin) continue;
-      const t = BUILDINGS[economy.type[s]];
-      if (t.good === Good.Seat) return false;
-      const was = economy.state[s];
-      economy.state[s] = SlotState.Empty;
-      const loss = Math.max(0, capacity - capacityWith(sim, cell, -1, -1));
-      economy.state[s] = was;
-      const cost = was === SlotState.Ruin ? -1 : loss + (isLuxury(t.good) ? 1000 : t.good === Good.Merchants || t.good === Good.Harbor ? 50 : t.good === Good.Comfort ? 10 : 0);
-      if (cost < bestCost) {
-        bestCost = cost;
-        slot = s;
-      }
-    }
-    if (slot === null) return false;
-    economy.state[slot] = SlotState.Empty;
-    economy.type[slot] = -1;
-    updateTradeBuildings(sim, cell);
-    updateCellSupply(sim, cell);
-    slot = -1;
-  }
-  sim.seatSite[cell] = 0;
-  economy.goal[cell * MATERIAL_COUNT + Material.Wood] = 0;
-  economy.goal[cell * MATERIAL_COUNT + Material.Stone] = 0;
-  return startConstruction(sim, cell, slot, SEAT_TYPE);
-}
-
-/**
- * Whether a seat's upkeep at `cell` is covered: by the site's harvest, or by
- * its realm. The realm wants the seat, so it keeps it up through a supply
- * route (merchants bring what the site lacks, see trade.ts) as long as its
- * people spare SEAT_REALM_YEARS of the missing upkeep.
- */
-function seatUpkeepCovered(sim: Simulation, cell: number): boolean {
-  const ownWood = netWith(sim, cell, Material.Wood, SEAT_TYPE, -1);
-  const ownStone = netWith(sim, cell, Material.Stone, SEAT_TYPE, -1);
-  if (ownWood >= 0 && ownStone >= 0) return true;
-  const civ = sim.world.owner[cell];
-  const spare = sim.trade.civSpare;
-  const i = civ * TRADE_GOODS;
-  if (i + TRADE_GOODS > spare.length) return false;
-  return spare[i] >= -ownWood * SEAT_REALM_YEARS && spare[i + 1] >= -ownStone * SEAT_REALM_YEARS;
-}
-
-/** Years of a seat's missing upkeep its people must spare before the realm takes it on. */
-const SEAT_REALM_YEARS = 2;
 
 let scratch = new Float32Array(0);
 /** A reusable all-Infinity field of `n` cells (seatField users reset what they touched). */
@@ -824,6 +773,22 @@ export type HexEconomy = {
   buildings: BuildingInfo[];
   slots: number;
   trade: HexTrade;
+  /** The government on this hex (Requirement Zentralregierung): its district, taxes, stock and buildings. */
+  government: HexGovernment;
+};
+
+export type HexGovernment = {
+  /** The seat whose district the hex is in, -1 if none; whether that is the capital. */
+  seat: number;
+  capital: boolean;
+  /** Money and goods tax rates the settlement pays (0..1). */
+  rate: number;
+  goodsRate: number;
+  /** Wood and stone the government keeps on this hex. */
+  wood: number;
+  stone: number;
+  buildings: BuildingInfo[];
+  slots: number;
 };
 
 /** A hex's trade for the hex info: money, grain and barrels, merchants, and what it asks for and spares. */
@@ -844,15 +809,19 @@ export type HexTrade = {
 const STATE_NAMES = ['standing', 'construction', 'standing', 'ruin', 'repair'] as const;
 
 export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
-  const { economy, world } = sim;
+  const { economy, world, government: gov } = sim;
   const buildings: BuildingInfo[] = [];
+  const govBuildings: BuildingInfo[] = [];
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     const st = economy.state[s];
     if (st === SlotState.Empty) continue;
     const b = BUILDINGS[economy.type[s]];
     const good = GOOD_NAMES[b.good].toLowerCase();
-    const upkeep = [b.upkeepWood ? `${b.upkeepWood} wood` : '', b.upkeepStone ? `${b.upkeepStone} stone` : ''].filter(Boolean);
-    buildings.push({
+    const isGov = s >= cell * SLOTS + GOV_SLOT;
+    // Seats in government slots cost GOV_TUNING.seatUpkeep of the usual upkeep.
+    const factor = isGov && b.good === Good.Seat ? GOV_TUNING.seatUpkeep : 1;
+    const upkeep = [b.upkeepWood ? `${b.upkeepWood * factor} wood` : '', b.upkeepStone ? `${b.upkeepStone * factor} stone` : ''].filter(Boolean);
+    (isGov ? govBuildings : buildings).push({
       name: b.name,
       state: STATE_NAMES[st],
       workLeft: economy.work[s],
@@ -871,8 +840,18 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
     upkeepWood: upkeepWith(sim, cell, Material.Wood, -1, -1),
     upkeepStone: upkeepWith(sim, cell, Material.Stone, -1, -1),
     buildings,
-    slots: SLOTS,
+    slots: usableSlots(sim, cell),
     trade: hexTrade(sim, cell),
+    government: {
+      seat: gov.district[cell],
+      capital: gov.district[cell] >= 0 && sim.civs[world.owner[cell]]?.capital === gov.district[cell],
+      rate: gov.cellRate[cell],
+      goodsRate: gov.cellGoodsRate[cell],
+      wood: gov.stock[cell * MATERIAL_COUNT + Material.Wood],
+      stone: gov.stock[cell * MATERIAL_COUNT + Material.Stone],
+      buildings: govBuildings,
+      slots: usableSlots(sim, cell),
+    },
   };
 }
 
