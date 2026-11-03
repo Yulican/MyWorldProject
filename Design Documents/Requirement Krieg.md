@@ -42,7 +42,7 @@ Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und 
 - **Während der Belagerung:** alle Kapazitäten der Siedlung (Ernte, Bau, Bevölkerung) halbiert; der Handel mit der Siedlung ruht.
 - **Entsatz:** Die Armee der Siedlung oder Armeen anderer Siedlungen des Volks (und von Verbündeten) können die Belagerung brechen. Es gibt keine Entfernungsgrenze, die Armee muss den Weg zurücklegen.
 - **Verteidigerbonus:** +25 % im Sitz, +50 % mit eigener Armee im Sitz (kalibrieren (Simulation)).
-- **Besetzung:** Erreicht die Unzufriedenheit der Siedlung den Wert, bei dem sie sich abspalten würde, wird sie besetzt statt abtrünnig. Offen: Der Aufstand nutzt künftig „Zufriedenheit < 0“ (Abschnitt 8), nicht mehr die 5-Jahres-Regel. Gilt für die Besetzung weiter die 5-Jahres-Regel (Empfehlung: ja, sonst fällt ein Sitz bei kurzem Minus) oder auch „< 0“? Nicht entschieden.
+- **Besetzung:** Erreicht die Unzufriedenheit der Siedlung den Wert, bei dem sie sich abspalten würde, wird sie besetzt statt abtrünnig. Für die Besetzung gilt weiter die 5-Jahres-Regel (5 Jahre am Stück unter 0), anders als beim Aufstand (Abschnitt 8).
 - **Beute:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben stehen.
 - **Hauptstadt:** Wird die Hauptstadt besetzt, wird das Volk annektiert und ausgelöscht; sein ganzes Gebiet fällt an den Eroberer.
 
@@ -66,13 +66,15 @@ Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und 
 
 ## 8. Aufstände als Krieg
 
-- Gilt nur für **echte Aufstände** (Abspaltung durch Unzufriedenheit). Abgeschnittene Gebiete bleiben friedlich wie heute (sie werden direkt ein neues Volk). Ob es eine Mindestgröße der Rebellen gibt (heute: Bund mit 3 Siedlungen oder 100 Einwohnern), ist offen (Abschnitt 13).
+- Gilt nur für **echte Aufstände** (Abspaltung durch Unzufriedenheit). Abgeschnittene Gebiete bleiben friedlich wie heute (sie werden direkt ein neues Volk). Es gibt keine Mindestgröße der Rebellen mehr (die heutige Bundgröße von 3 Siedlungen oder 100 Einwohnern entfällt für Aufstände).
 - **Unzufrieden** heißt: Zufriedenheit der Siedlung aktuell < 0. Die 5-Jahres-Regel entfällt für Aufstände (die Rebellen müssen ohnehin lange genug unter 0 bleiben, um die Stärke aufzubauen). Die Hauptstadt wird nie unzufrieden im Sinn der Abspaltung.
 - **Unzufriedene Siedlungen** müssen **nicht zusammenhängen**. Sie bleiben normaler Teil des Reichs, ohne Sonderzustand, bis die **Stärke aller unzufriedenen Siedlungen des Reichs zusammen größer ist als die Stärke des Mutterlandes** (nicht die ≥2-Schwelle der Kriegserklärung). Dann erklären sie den Krieg und werden dabei **sofort ein unabhängiges Volk** (Hauptstadt wie in `Requirement Zufriedenheit.md`).
-- **Ein Krieg, eine Seite:** Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und kämpfen im Krieg als eine Seite. Gewinnen sie, werden sie mehrere Völker, die miteinander verbündet sind (Annahme: ein Volk je zusammenhängender Gruppe; offen, Abschnitt 13).
-- **Krieg der Rebellen:** Das Mutterland muss alle Regierungssitze des neuen Volks erobern. Gelingt das, werden die Rebellen wieder annektiert. Endet der Krieg ohne das (Erschöpfung, Frieden), bleiben die Rebellen unabhängig.
+- **Ein Krieg, eine Seite:** Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und kämpfen im Krieg als eine Seite. Gewinnen sie, wird aus jeder zusammenhängenden Gruppe ein eigenes Volk; die neuen Völker sind miteinander verbündet.
+- **Krieg der Rebellen:** Das Mutterland muss alle Regierungssitze des neuen Volks erobern. Gelingt das, werden die Rebellen wieder annektiert. Endet der Krieg ohne das (Erschöpfung), bleiben die Rebellen unabhängig.
+- **Besitzerwechsel zur Erklärung:** Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; ihre spätere Zufriedenheit ist für den Krieg ohne Belang. Siedlungen, die an einem laufenden Rebellenkrieg beteiligt sind (auf beiden Seiten), können sich keiner weiteren Rebellion anschließen.
+- **Annektierte Rebellensiedlungen** bekommen den Teilwert „erobert“ (−15, klingt über 10 Jahre ab).
 - **Hilfe von außen:** Völker, die sich vom Mutterland bedroht fühlen und nicht mit ihm befreundet sind, können den Rebellen als Bündnispartner helfen.
-- Teilwerte: „Neuer Stamm“ und „Erfolgreiche Revolution“ gelten, wenn die Rebellen den Krieg gewinnen; „Verlorene Revolution“ wird zu Annexion (Abschnitt 2, Tabelle der Teilwerte, in `Requirement Zufriedenheit.md`).
+- Teilwerte: „Neuer Stamm“ und „Erfolgreiche Revolution“ gelten, wenn die Rebellen den Krieg gewinnen; „Verlorene Revolution“ gilt für das Mutterland, wenn die Rebellen unabhängig bleiben (Abschnitt 2, Tabelle der Teilwerte, in `Requirement Zufriedenheit.md`).
 
 ## 9. Anzeige
 
@@ -105,10 +107,9 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 ## 13. Offene Punkte
 
-- Entschieden: „Unzufrieden“ = Zufriedenheit < 0 (Aufstand); Rebellen müssen nicht zusammenhängen.
-- Annahme, zu bestätigen: Bei Sieg wird je zusammenhängender Gruppe ein eigenes Volk, alle miteinander verbündet. Alternative: ein Volk mit getrennten Gebieten (kollidiert mit der Regel für abgeschnittene Gebiete).
-- Mindestgröße der Rebellen (bisher Bund mit 3 Siedlungen oder 100 Einwohnern)? Ohne Zusammenhang zählt sie wohl für die ganze Gruppe; ohne Mindestgröße könnten einzelne Siedlungen rebellieren. Empfehlung: Mindestgröße für die Gesamtgruppe.
-- Gilt für die Besetzung weiter die 5-Jahres-Regel oder „< 0“ (Abschnitt 5)? Empfehlung: 5-Jahres-Regel.
-- Was geschieht mit Siedlungen, die nach der Kriegserklärung zufrieden werden, und mit besetzten, aber annektierten Rebellensiedlungen (Malus „erobert“)?
-- Alle Zahlen mit „kalibrieren (Simulation)“ (Soldaten je Gebäude, Sold, Verlustanteil, Ersatzrollenstrafe, Verteidigerbonus, Aufgabeanteil, Erschöpfungsjahre, Verkaufsgrenze X, Auflösungsschwellen).
-- Wie verhalten sich Kriegsgegner zu Rebellen-Verbündeten im Kriegs-Panel (Anzeige)?
+Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröße; Rebellen müssen nicht zusammenhängen; bei Sieg ein Volk je zusammenhängender Gruppe, miteinander verbündet; Besetzung behält die 5-Jahres-Regel; Rebellensiedlungen wechseln mit der Erklärung den Besitzer; annektierte Rebellensiedlungen bekommen „erobert“.
+
+Offen:
+- **Zuordnung strategischer Güter zu Truppenarten und Wirkung** (siehe `Requirement Regionale Rohstoffe.md`, Abschnitt 10; Eisen und Erz werden heute nicht abgebaut).
+- Alle Zahlen mit „kalibrieren (Simulation)“: Soldaten je Gebäude, Sold, Verlustanteil, Ersatzrollenstrafe, Verteidigerbonus, Aufgabeanteil, Erschöpfungsjahre, Verkaufsgrenze X, Auflösungsschwellen der Bündnisse.
+- Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?

@@ -286,7 +286,7 @@ Straße zum Sitz 10 %.
 
 Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht simuliert.
 
-- Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung der Güter zu den Truppenarten: kalibrieren (Simulation), Vorschlag: Pferde → Schock, Marmor/Edelsteine → keine Truppe.
+- Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung der Güter zu den Truppenarten: offen (Nutzer entscheidet; Eisen und Erz werden heute nicht abgebaut, siehe `Requirement Krieg.md`, Abschnitt 13).
 - Das Gut wird jährlich verbraucht; ohne Gut gilt der Faktor nicht.
 - Völker kaufen strategische Güter, um ihre Armee zu stärken (Bedarf in der Handelsliste), und verkaufen sie nur an Völker, die sie nicht bedrohen (`Requirement Diplomatie.md`).
 - Die gezielte Luxusabbau-Regel (Abschnitt 6) greift auch bei Bedarf der Armee.
