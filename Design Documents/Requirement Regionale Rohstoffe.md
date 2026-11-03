@@ -286,8 +286,19 @@ Straße zum Sitz 10 %.
 
 Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht simuliert.
 
-- Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung der Güter zu den Truppenarten: offen (Nutzer entscheidet; Eisen und Erz werden heute nicht abgebaut, siehe `Requirement Krieg.md`, Abschnitt 13).
+- Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung: siehe unten.
 - Das Gut wird jährlich verbraucht; ohne Gut gilt der Faktor nicht.
 - Völker kaufen strategische Güter, um ihre Armee zu stärken (Bedarf in der Handelsliste), und verkaufen sie nur an Völker, die sie nicht bedrohen (`Requirement Diplomatie.md`).
 - Die gezielte Luxusabbau-Regel (Abschnitt 6) greift auch bei Bedarf der Armee.
 - Neue Gebäude im Katalog: Kaserne (Nahkampf), Schießplatz (Fernkampf), Stall (Schock, braucht Pferde); Kosten und Unterhalt: kalibrieren (Simulation).
+
+**Entschieden (Nutzer):**
+- **Eisen → Nahkampf, Feuerstein → Fernkampf, Pferde → Schock.**
+- **Voraussetzung vor Phase 1:** Eisen und Feuerstein werden bisher nicht abgebaut. Sie brauchen Abbaugebäude (auf den Vorkommen Iron und Flint) und werden Handelswaren.
+- **Marmor** hat keine Kriegsrolle. Einen Verteidigerbonus gibt es nur als direkten Verteidigerbonus (Krieg.md, Abschnitt 5).
+- **Gold** wird abgebaut und in Geld umgewandelt (Richtung entschieden, Einzelheiten offen, siehe unten).
+- **Später:** Kupfer + Zinn → Bronze; Meteorit.
+
+**Offen (nicht entschieden):**
+- Geben Eisen und Feuerstein Komfort wie Luxusgüter, oder sind es keine Luxusgüter? Ändert sich `LUXURY_COUNT` (heute 6)?
+- Gold: Umrechnungskurs in Geld; wer wandelt um (Siedlung oder Bezirkskasse); behält Gold seine Rolle als Luxusgut (Komfort +5) und seinen Handelswert?
