@@ -26,7 +26,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | Simulation outside React, snapshots for the map | `src/state/worldStore.ts` | components subscribe; Context only for UI state (`src/context/AppContext.tsx`, `src/hooks/useApp.ts`) |
 | Map rendering (Skia), gestures, zoom | `src/map/WorldMap.tsx`, `viewport.ts`, `mapGeometry.ts` | `viewport.test.ts` |
 | Map pictures, tile cache | `src/map/worldPicture.ts`, `tileImages.ts`, `hexIcons.ts`, `palette.ts`, `paints.ts` | hot path for the benchmark |
-| Territories, borders (dashed = open), seat flags | `src/map/territoryLayers.ts` | unrest, diplomacy, government scenarios |
+| Territories, borders (dashed = open), seat flags, city icons (from `world.cityTier`) | `src/map/territoryLayers.ts` | cities, unrest, diplomacy, government scenarios |
 | FPS meter, perf counters | `src/map/MapPerfMeter.tsx`, `motionStats.ts`, `src/state/perfStats.ts` | `motionStats.test.ts` |
 | Screen, panels, dialogs (English texts) | `src/screens/WorldScreen.tsx`, `src/components/HexInfoPanel.tsx`, `CivPanel.tsx`, `DiplomacyPanel.tsx`, `GovernmentPanel.tsx`, `ChronicleDialog.tsx`, `TimeControls.tsx`, `Screen.tsx`, `src/theme/` | – |
 | Benchmark rules and scenarios | `src/bench/benchmark.ts` (rules), `useBenchmark.ts` (in-app runner), `fillBuildings.ts` (cities), `stirUnrest.ts` (unrest), `openTrade.ts` (trade), `openDiplomacy.ts` (diplomacy), `empowerGovernment.ts` (government) | `benchmark.test.ts`; scenario list also in `.github/workflows/android-build.yml` and `AGENTS.md` |

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   BIOMES,
+  CityTier,
   DEPOSITS,
   RESOURCE_COUNT,
   RESOURCE_NAMES,
@@ -58,11 +59,10 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
   const scarcest = totals ? SUPPLY_NAMES[totals.indexOf(Math.min(...totals))] : null;
   let roads = 0;
   for (let d = 0; d < 6; d++) if (world.roads[cell] & (1 << d)) roads++;
-  const standing = economy ? economy.buildings.filter((b) => b.state === 'standing').length : 0;
   const ruins = economy ? economy.buildings.filter((b) => b.state === 'ruin' || b.state === 'repair').length : 0;
   const highlights = [
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
-    civName ? settlementName(standing) : null,
+    civName ? settlementName(world.cityTier[cell]) : null,
     !civName && ruins > 0 ? `${ruins} ruin${ruins > 1 ? 's' : ''}` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
@@ -303,8 +303,9 @@ const percent = (v: number) => `${Math.round(v * 100)} %`;
 const goodsList = (goods: readonly { good: string; amount: number }[]) =>
   goods.length === 0 ? 'Nothing' : goods.map((g) => `${Math.round(g.amount)} ${g.good.toLowerCase()}`).join(', ');
 const UNHAPPY_NOTE = '5 years';
-/** Settlement size by standing buildings, as the map icon shows it. */
-const settlementName = (buildings: number) => (buildings === 0 ? 'Tribe' : buildings <= 2 ? 'Small city' : 'Big city');
+/** Settlement size by its city tier (share of used slots), as the map icon shows it. */
+const settlementName = (tier: number) =>
+  tier === CityTier.BigCity ? 'Big city' : tier === CityTier.SmallCity ? 'Small city' : 'Tribe';
 const yearly = (harvest: number, upkeep: number) =>
   `+${harvest.toFixed(1)}${upkeep > 0 ? ` −${upkeep} upkeep` : ''} a year`;
 
