@@ -1,4 +1,13 @@
-import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
+import {
+  advanceGovernment,
+  createGovernment,
+  prepareGovernment,
+  updateGovernment,
+  updateGovernmentProjects,
+  updateGovernmentUpkeep,
+  type Government,
+  type GovernmentYear,
+} from './government';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
@@ -222,6 +231,8 @@ export type Simulation = {
   refreshOwner: Uint8Array | null;
   /** The current tick's seat planning while it runs in parts. */
   seatPlan: SeatPlan | null;
+  /** The current tick's government year (districts, taxes) while it runs in parts. */
+  governmentYear: GovernmentYear | null;
   /** The hex the current tick's economy continues at while it runs in parts; -1 before it starts. */
   economyCell: number;
 };
@@ -267,6 +278,7 @@ export function createSimulation(world: World): Simulation {
     part: TickPart.Start,
     refreshOwner: null,
     seatPlan: null,
+    governmentYear: null,
     economyCell: -1,
   };
   computeCapacity(sim);
@@ -401,6 +413,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
       // The people's yearly plans each get a week of their own, away from the
       // refreshes, so no single tick carries them all.
       const owner = sim.world.owner;
+      // The government's year: districts, then what they have and need, a part each; the taxes below.
+      if (weekOfYear === GOVERNMENT_WEEK && !prepareGovernment(sim, owner)) return false;
       if (weekOfYear === SEATS_WEEK) {
         // A part for the candidates, then a few districts per part.
         if (!sim.seatPlan) {
