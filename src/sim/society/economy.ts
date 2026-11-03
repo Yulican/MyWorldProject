@@ -20,6 +20,8 @@ import {
   harvestTerms,
   isLuxury,
   isMaterial,
+  isStored,
+  STORED_COUNT,
   withBuildings,
 } from './buildings';
 import {
@@ -35,6 +37,7 @@ import {
   yieldFactor,
 } from './satisfaction';
 import { GOV_TUNING } from './taxes';
+import { MIL, TROOP_BUILDING, TROOP_GOOD, TROOP_TYPES, TROOP_TYPE_OF_BUILDING, districtRoom } from './military';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
 import { MONEY_PER_ADULT, PROVISIONS_MAX, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, WORKSHOP_OF, buildTradeRoad, isCoast, provisionModifiers, sendMerchants, updateTradeBuildings, updateTradeNeeds, wantedTradeBuilding } from './trade';
@@ -325,7 +328,7 @@ export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 
       const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
       // Seats of government are the government's (government.ts).
       const started = !busy && (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
-      if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
+      if (started || (!busy && yearEnd && (planTrade(sim, c) || planMilitary(sim, c)))) supplyChanged = true;
       if (sim.trade.merchants[c] > 0) {
         sendMerchants(sim, c);
         buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
@@ -484,6 +487,47 @@ function planTrade(sim: Simulation, cell: number): boolean {
 }
 
 /**
+ * Placeholder rule (war phase 1; where and when the AI builds military
+ * buildings is not designed yet): yearly, a settlement of MIL.minPop people
+ * whose district has room for the pay (the income check) builds the military
+ * building its people has the least capacity of, at most one of each type per
+ * settlement, a stable only where horses are at hand, when it can pay and keep
+ * it up like its other buildings.
+ */
+function planMilitary(sim: Simulation, cell: number): boolean {
+  if (!MIL.enabled || !MIL.build || sim.cellPop[cell] < MIL.minPop) return false;
+  const seat = sim.government.district[cell];
+  if (seat < 0 || districtRoom(sim, seat) < MIL.capacity) return false;
+  const { economy, military } = sim;
+  // Not what the settlement saves up for something else (growth, comfort).
+  if (economy.goal[cell * MATERIAL_COUNT] > 0 || economy.goal[cell * MATERIAL_COUNT + 1] > 0) return false;
+  let free = 0;
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
+  if (free <= MIL.reserveSlots) return false;
+  const civ = sim.world.owner[cell];
+  let best = -1;
+  let bestCap = Infinity;
+  for (let k = 0; k < TROOP_TYPES; k++) {
+    const t = (k + cell) % TROOP_TYPES; // ties go different ways in different settlements
+    if (hasGood(sim, cell, TROOP_BUILDING[t])) continue;
+    if (t === 2 && economy.luxury[cell * STORED_COUNT + TROOP_GOOD[t]] < 1) continue;
+    const have = civ > 0 && civ * TROOP_TYPES + t < military.soldiersOf.length ? military.soldiersOf[civ * TROOP_TYPES + t] : 0;
+    if (have < bestCap) {
+      bestCap = have;
+      best = t;
+    }
+  }
+  if (best < 0) return false;
+  const type = TROOP_TYPE_OF_BUILDING[best];
+  const b = BUILDINGS[type];
+  if (economy.stock[cell * MATERIAL_COUNT + Material.Wood] < b.wood || economy.stock[cell * MATERIAL_COUNT + Material.Stone] < b.stone) return false;
+  if (netWith(sim, cell, Material.Wood, type, -1) < 0 || netWith(sim, cell, Material.Stone, type, -1) < 0) return false;
+  if (!startConstruction(sim, cell, -1, type)) return false;
+  military.districtCap[seat] += MIL.capacity;
+  return true;
+}
+
+/**
  * A quarter of the luxury goods the hex's standing buildings harvest from
  * its deposit; at the year's end its people use their yearly need of each
  * (with buildings or without),
@@ -495,14 +539,19 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     if (economy.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[economy.type[s]];
-    if (isLuxury(b.good)) economy.luxury[cell * LUXURY_COUNT + b.good - FIRST_LUXURY] += (b.amount * factor) / STEPS_PER_YEAR;
-    else if (b.good === Good.Grain || b.good === Good.Barrels) economy.provisions[cell * 2 + (b.good === Good.Grain ? 0 : 1)] += b.amount / STEPS_PER_YEAR;
+    if (isStored(b.good)) economy.luxury[cell * STORED_COUNT + b.good - FIRST_LUXURY] += (b.amount * factor) / STEPS_PER_YEAR;
+    else if (b.good === Good.Gold) {
+      // Gold is money at once (war phase 0): MIL.goldRate per unit.
+      const gold = (b.amount * factor * MIL.goldRate) / STEPS_PER_YEAR;
+      economy.money[cell] += gold;
+      sim.military.goldMined += gold;
+    } else if (b.good === Good.Grain || b.good === Good.Barrels) economy.provisions[cell * 2 + (b.good === Good.Grain ? 0 : 1)] += b.amount / STEPS_PER_YEAR;
   }
   if (!yearEnd) return;
   const need = sim.cellPop[cell] * LUXURY_PER_PERSON;
   let covered = 0;
   for (let k = 0; k < LUXURY_COUNT; k++) {
-    const i = cell * LUXURY_COUNT + k;
+    const i = cell * STORED_COUNT + k;
     if (economy.luxury[i] <= 0) continue;
     // Goods held for a trade partner in transit aren't the settlement's own.
     const held = Math.min(economy.luxury[i], sim.trade.transitKeep[cell * TRADE_GOODS + TradeGood.Luxury + k]);
@@ -544,9 +593,12 @@ function planDeposit(sim: Simulation, cell: number): boolean {
   if (type === undefined || hasGood(sim, cell, BUILDINGS[type].good) || !buildingFits(sim, cell, type)) return false;
   const { economy, trade } = sim;
   const civ = sim.world.owner[cell];
-  const g = TradeGood.Luxury + BUILDINGS[type].good - FIRST_LUXURY;
-  const lacks = (p: number) => (p + 1) * TRADE_GOODS <= trade.civWant.length && trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g] > 0;
-  if (!lacks(civ) && !(sim.diplomacy.partners[civ] ?? []).some(lacks)) return false;
+  // Gold is mined for its money, wanted or not; the other goods when the people or a partner lacks them.
+  if (BUILDINGS[type].good !== Good.Gold) {
+    const g = TradeGood.Luxury + BUILDINGS[type].good - FIRST_LUXURY;
+    const lacks = (p: number) => (p + 1) * TRADE_GOODS <= trade.civWant.length && trade.civWant[p * TRADE_GOODS + g] - trade.civSpare[p * TRADE_GOODS + g] > 0;
+    if (!lacks(civ) && !(sim.diplomacy.partners[civ] ?? []).some(lacks)) return false;
+  }
   let slot = -1;
   let free = false;
   for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {

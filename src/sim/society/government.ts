@@ -1,6 +1,7 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
+import { districtPay } from './military';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { GOV_TUNING, TAX_MAX, goodsRateFor, goodsTaxValue, rateFor, taxValue } from './taxes';
@@ -56,6 +57,8 @@ export type Government = {
   seatQueued: Uint8Array;
   /** Per seat cell: what its district could raise in a year at its loyalty limit (the income check). */
   potential: Float32Array;
+  /** Per seat cell: yearly upkeep in money of its district's government buildings (standing or being built), as of the last projects update (military.ts reads it). */
+  upkeep: Float32Array;
   /** Per civilization id: its founding tick + 1 once its government got its starting money. */
   funded: number[];
   /** Per seat cell: its traders and how many are away. */
@@ -100,6 +103,7 @@ export function createGovernment(cellCount: number): Government {
     projectYear: new Int32Array(cellCount),
     seatQueued: new Uint8Array(cellCount),
     potential: new Float32Array(cellCount),
+    upkeep: new Float32Array(cellCount),
     funded: [],
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -400,6 +404,7 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
       if (t === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(t);
     }
   }
+  for (let s = 0; s < n; s++) gov.upkeep[s] = buildUpkeep[s];
   civSeatList = [];
   if (civBudget.length < sim.civSlots) civBudget = new Float64Array(sim.civSlots);
   civBudget.fill(0);
@@ -483,7 +488,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   const gov = sim.government;
   const n = sim.world.cellCount;
   const budget = GOV_TUNING.incomeShare * gov.potential[seat];
-  const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false);
+  const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false) + districtPay(sim, seat);
   const civ = sim.world.owner[seat];
   let seatUpkeep = 0;
   for (const s of civSeatList[civ] ?? []) seatUpkeep += seatBuildUpkeep[s] + projectUpkeep(gov, s, true);

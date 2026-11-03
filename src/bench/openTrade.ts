@@ -1,5 +1,5 @@
 import { TICKS_PER_YEAR, stepSimulation, type Simulation } from '../sim';
-import { BUILDINGS, LUXURY_COUNT, SLOTS, SlotState } from '../sim/society/buildings';
+import { BUILDINGS, LUXURY_COUNT, STORED_COUNT, SLOTS, SlotState } from '../sim/society/buildings';
 import { updateCellSupply, usableSlots } from '../sim/society/economy';
 import { isCoast, updateTradeBuildings } from '../sim/society/trade';
 
@@ -26,7 +26,7 @@ export function openTrade(sim: Simulation): void {
     updateTradeBuildings(sim, c);
     updateCellSupply(sim, c);
     // Something to sell and money to buy, so merchants actually set out.
-    economy.luxury[c * LUXURY_COUNT + (c % LUXURY_COUNT)] += LUXURY_STOCK;
+    economy.luxury[c * STORED_COUNT + (c % LUXURY_COUNT)] += LUXURY_STOCK;
     economy.money[c] = Math.max(economy.money[c], 100);
   }
   // A quarter for the totals of what each people asks for and spares, a second for merchants to set out.

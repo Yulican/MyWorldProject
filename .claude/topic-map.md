@@ -17,7 +17,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | Trade, merchants, harbors, goods (1280 lines) | `society/trade.ts` | `trade.test.ts` | Requirement Handel (+ Diplomatie for foreign trade) | `economyStats.ts` | trade |
 | Diplomacy: trust, borders, treaties, seats of government (914 lines) | `society/diplomacy.ts` | `diplomacy.test.ts` | Requirement Diplomatie | `diplomacyStats.ts`, `economyStats.ts open=1` | diplomacy |
 | Central government: seats, goods tax, government buildings and traders | `society/government.ts`, `taxes.ts` (+ government traders in `trade.ts`) | `government.test.ts` | Requirement Zentralregierung | `economyStats.ts` | government |
-| War: soldiers, battles, sieges, alliances, rebel wars | not yet implemented (planned `society/war.ts`) | – | Requirement Krieg (draft) | – (planned `warStats.ts`) | planned `war` |
+| War: soldiers, battles, sieges, alliances, rebel wars | phase 0+1 as simulation experiment (uncommitted on `feature/war`): `society/military.ts` (soldiers, pay, strength, `MIL` numbers), mines/gold in `economy.ts` (harvestLuxury, planMilitary placeholder), strategic goods in `trade.ts`, danger from strength in `diplomacy.ts`; battles etc. planned `society/war.ts` | – | Requirement Krieg (draft) | `warStats.ts` (variants `name:key=val,...`) | planned `war` |
 | Randomness, noise, helpers | `rng.ts`, `noise.ts`, `minHeap.ts`, `terms.ts`, `index.ts` (public API) | – | – | – | – |
 
 ## App (agent `app-engineer`)

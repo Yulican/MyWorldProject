@@ -2,7 +2,7 @@ import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import { sumTerms, type Term } from '../terms';
 import { stepCost } from '../world/roads';
-import { GOOD_NAMES, FIRST_LUXURY, Good, LUXURY_COUNT, SLOTS, SlotState, BUILDINGS, type Economy } from './buildings';
+import { GOOD_NAMES, FIRST_LUXURY, Good, LUXURY_COUNT, STORED_COUNT, SLOTS, SlotState, BUILDINGS, type Economy } from './buildings';
 import type { Civilization } from './civilizations';
 import { mayPass } from './diplomacy';
 import { goodsTaxValue, taxValue } from './taxes';
@@ -330,7 +330,7 @@ export function hexSatisfaction(sim: Simulation, cell: number): HexSatisfaction 
   const terms = satisfactionTerms(sim, cell, sim.civs[owner] ?? null);
   const luxury: HexSatisfaction['luxury'] = [];
   for (let k = 0; k < LUXURY_COUNT; k++) {
-    const stock = sim.economy.luxury[cell * LUXURY_COUNT + k];
+    const stock = sim.economy.luxury[cell * STORED_COUNT + k];
     const covered = (sim.economy.luxuryCovered[cell] & (1 << k)) !== 0;
     if (stock > 0 || covered) luxury.push({ name: GOOD_NAMES[FIRST_LUXURY + k], stock, covered });
   }

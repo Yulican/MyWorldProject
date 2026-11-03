@@ -1,3 +1,4 @@
+import { MIL, createMilitary, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
@@ -18,7 +19,7 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
-import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, isStored, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
   EXPAND_MIN_CONNECTION,
@@ -81,6 +82,7 @@ const SEATS_WEEK = 6;
 const CAPTURE_WEEK = 19;
 const SUPPLY_ROADS_WEEK = 32;
 const DIPLOMACY_WEEK = 45;
+const MILITARY_WEEK = 40;
 const GOVERNMENT_WEEK = 28;
 const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
@@ -185,6 +187,8 @@ export type Simulation = {
   diplomacy: Diplomacy;
   /** The central government of every people: districts, taxes, treasuries, its buildings and traders (see government.ts). */
   government: Government;
+  /** Soldiers and strengths (see military.ts). */
+  military: Military;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -240,6 +244,7 @@ export function createSimulation(world: World): Simulation {
     trade: createTrade(world.seed, n),
     diplomacy: createDiplomacy(n),
     government: createGovernment(n),
+    military: createMilitary(n),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -359,7 +364,10 @@ export function stepSimulationPart(sim: Simulation): boolean {
         sim.seatPlan = null;
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
-      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === MILITARY_WEEK) {
+        updateMilitary(sim, owner);
+        drawSoldiers(sim);
+      } else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
@@ -415,6 +423,35 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
   pop.count++;
   sim.cellPop[cell]++;
   sim.cellCivPop[cell * sim.civSlots + civ]++;
+}
+
+/** Takes the adults the military buildings trained (military.train per hex) out of the population; soldiers not found are dropped. */
+function drawSoldiers(sim: Simulation): void {
+  const { pop, military } = sim;
+  let open = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) open += military.train[c];
+  if (open === 0) return;
+  for (let i = 0; i < pop.end && open > 0; i++) {
+    if (!pop.alive[i] || pop.age[i] < ADULT_AGE) continue;
+    const c = pop.cell[i];
+    if (military.train[c] === 0) continue;
+    military.train[c]--;
+    open--;
+    removeInhabitant(sim, i);
+  }
+  // Rare: fewer adults than counted; the missing soldiers are not there.
+  if (open > 0) {
+    for (let c = 0; c < sim.world.cellCount && open > 0; c++) {
+      let missing = military.train[c];
+      for (let t = 0; t < TROOP_TYPES && missing > 0; t++) {
+        const cut = Math.min(missing, military.soldiers[c * TROOP_TYPES + t]);
+        military.soldiers[c * TROOP_TYPES + t] -= cut;
+        missing -= cut;
+      }
+      open -= military.train[c];
+      military.train[c] = 0;
+    }
+  }
 }
 
 function removeInhabitant(sim: Simulation, i: number): void {
@@ -705,7 +742,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
       const st = economy.state[s];
       if (st === SlotState.Empty || st === SlotState.Ruin) continue;
       const good = BUILDINGS[economy.type[s]].good;
-      if (isLuxury(good)) makes[owner[c]] |= 1 << (good - FIRST_LUXURY);
+      if (isStored(good)) makes[owner[c]] |= 1 << (good - FIRST_LUXURY);
     }
   }
   const free = (c: number) => owner[c] === 0 && sim.cellPop[c] === 0 && !isWaterBiome(world.biome[c]) && sim.cellCapacity[c] >= group;
@@ -733,7 +770,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
           prev[nb] = c;
           touched.push(nb);
           const workshop = WORKSHOP_OF[world.deposit[nb]];
-          if (workshop !== undefined && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
+          if (workshop !== undefined && (isLuxury(BUILDINGS[workshop].good) || (MIL.captureStrategic && isStored(BUILDINGS[workshop].good))) && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
           else next.push(nb);
         }
       }

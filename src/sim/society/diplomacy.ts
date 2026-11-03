@@ -5,7 +5,8 @@ import { isWaterBiome } from '../world/biomes';
 import { stepCost } from '../world/roads';
 import type { CivMood } from './satisfaction';
 import type { Simulation } from './simulation';
-import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, stockOf } from './trade';
+import { MIL, strengthSize } from './military';
+import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, mayBuyStrategic, stockOf } from './trade';
 
 // Diplomacy, stage 1 (agreed requirement: "Design Documents/Requirement
 // Diplomatie.md"): every people rates every people it knows by trust and
@@ -315,10 +316,11 @@ export function dangerTerms(sim: Simulation, a: number, b: number): Term[] {
   const civA = sim.civs[a];
   const civB = sim.civs[b];
   if (!civA || !civB) return [];
-  const size = Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
+  const byStrength = MIL.enabled && MIL.dangerMode === 1;
+  const size = byStrength ? strengthSize(sim, a, b, DANGER_SCALE) : Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
   const near = nearness(sim.diplomacy.distance[pair(a, b)]);
   return [
-    { label: `Size: ${civB.population} people against our ${civA.population}`, value: size },
+    { label: byStrength ? `Strength ${Math.round(sim.military.strength[b] ?? 0)} against our ${Math.round(sim.military.strength[a] ?? 0)}` : `Size: ${civB.population} people against our ${civA.population}`, value: size },
     { label: `Distance ${distanceText(sim.diplomacy.distance[pair(a, b)])} (nearness ${Math.round(near * 100)} %)`, value: size * near - size },
   ];
 }
@@ -662,7 +664,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   dip.agreements = kept;
   rebuildPartners(dip);
   const free = (supplier: number, buyer: number, g: number) =>
-    g !== TradeGood.Money && !agreementFor(dip, supplier, buyer, g) && (dip.agreementPause.get(agreementKey(supplier, buyer, g)) ?? -1) <= sim.tick;
+    g !== TradeGood.Money && !agreementFor(dip, supplier, buyer, g) && (g < TradeGood.Luxury + 4 || mayBuyStrategic(sim, supplier, buyer)) && (dip.agreementPause.get(agreementKey(supplier, buyer, g)) ?? -1) <= sim.tick;
   const leg = (supplier: number, buyer: number, good: number, amount: number, hub: number): TradeLeg => ({
     supplier,
     buyer,
@@ -861,7 +863,7 @@ export function dangerValue(sim: Simulation, a: number, b: number): number {
   const civA = sim.civs[a];
   const civB = sim.civs[b];
   if (!civA || !civB) return 0;
-  const size = Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
+  const size = MIL.enabled && MIL.dangerMode === 1 ? strengthSize(sim, a, b, DANGER_SCALE) : Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
   return clamp100(size * nearness(sim.diplomacy.distance[pair(a, b)]));
 }
 

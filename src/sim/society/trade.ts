@@ -4,7 +4,8 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
-import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { BUILDINGS, Good, LUXURY_COUNT, STORED_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { MIL, TROOP_GOOD, TROOP_TYPES, yearlyGoodNeed } from './military';
 import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -23,12 +24,14 @@ import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
 /** Goods merchants carry, as indexed in Trade's per-cell arrays. Luxury goods follow from TradeGood.Luxury on. */
 export const TradeGood = { Wood: 0, Stone: 1, Money: 2, Grain: 3, Water: 4, Luxury: 5 } as const;
-export const TRADE_GOODS = 5 + LUXURY_COUNT;
-export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Salt', 'Spices', 'Gems', 'Gold', 'Marble', 'Horses'] as const;
+export const TRADE_GOODS = 5 + STORED_COUNT;
+export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Salt', 'Spices', 'Gems', 'Marble', 'Horses', 'Iron', 'Flint'] as const;
 /** Weight of one unit; a merchant carries MERCHANT_LOAD. */
-const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
-export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
+export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5];
+/** Trade goods that are strategic (horses, iron, flint; the last three luxury-block goods): sold only to peoples that don't threaten the seller (military.ts: MIL.saleDanger). */
+const isStrategic = (g: number) => g >= TradeGood.Luxury + 4;
 export const MERCHANT_LOAD = 40;
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
@@ -209,7 +212,7 @@ export function stockOf(eco: Economy, cell: number, good: number): number {
   if (good <= TradeGood.Stone) return eco.stock[cell * MATERIAL_COUNT + good];
   if (good === TradeGood.Money) return eco.money[cell];
   if (good <= TradeGood.Water) return eco.provisions[cell * 2 + good - TradeGood.Grain];
-  return eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury];
+  return eco.luxury[cell * STORED_COUNT + good - TradeGood.Luxury];
 }
 
 /** Adds to (or takes from) a hex's stock; grain and water change its supply, so with `trade` it is marked for an update. */
@@ -219,7 +222,7 @@ export function addStock(eco: Economy, cell: number, good: number, amount: numbe
   else if (good <= TradeGood.Water) {
     eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
     if (trade && amount !== 0) markSupply(trade, cell);
-  } else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
+  } else eco.luxury[cell * STORED_COUNT + good - TradeGood.Luxury] += amount;
 }
 
 /** Grain and water in stock as food and water supply (up to PROVISIONS_MAX people). */
@@ -330,9 +333,20 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   const keep = people * LUXURY_PER_PERSON * LUXURY_YEARS;
   for (let k = 0; k < LUXURY_COUNT; k++) {
     const g = TradeGood.Luxury + k;
-    const stock = economy.luxury[cell * LUXURY_COUNT + k];
+    const stock = economy.luxury[cell * STORED_COUNT + k];
     trade.want[t + g] = Math.max(0, keep - stock - trade.incoming[t + g]);
     trade.surplus[t + g] = Math.max(0, stock - keep);
+  }
+  // Strategic goods (war): the soldiers' yearly need of MIL.keepYears years is kept and asked for, on top of the
+  // luxury need of horses; the rest is for sale. Iron and flint have no other use.
+  for (let tt = 0; tt < TROOP_TYPES; tt++) {
+    const k = TROOP_GOOD[tt];
+    const g = TradeGood.Luxury + k;
+    const stock = economy.luxury[cell * STORED_COUNT + k];
+    const army = MIL.enabled ? yearlyGoodNeed(sim, cell, tt) * MIL.keepYears : 0;
+    const own = k < LUXURY_COUNT ? keep : 0;
+    trade.want[t + g] = Math.max(0, own + army - stock - trade.incoming[t + g]);
+    trade.surplus[t + g] = Math.max(0, stock - own - army);
   }
   // An export hub asks its people for what its trade agreements still owe;
   // that stock is its surplus for the buyers. The further behind its
@@ -663,6 +677,8 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
     // The buyer takes what the agreement still owes, asked for or not.
     const owed = agreement ? legOwed(agreement, sim.tick) : 0;
+    // Strategic goods are not sold to peoples that threaten the seller.
+    if (abroad && isStrategic(g) && !mayBuyStrategic(sim, homeCiv, targetCiv)) continue;
     const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g]);
     if (amount <= 0) continue;
     dealSell[g] = amount;
@@ -686,6 +702,12 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     dealPriority += amount * PRICE[g] * unhappyHome * lacking(eco, home, g);
   }
   return worth;
+}
+
+/** Whether `buyer` may buy strategic goods of `seller`: its danger for the seller is at most MIL.saleDanger (war phase 1). */
+export function mayBuyStrategic(sim: Simulation, seller: number, buyer: number): boolean {
+  if (!MIL.enabled) return true;
+  return sim.diplomacy.danger[seller * PAIRS + buyer] <= MIL.saleDanger;
 }
 
 /** How much a deal matters, from the last planDeal: its worth, more for luxury goods a settlement lacks and for unhappy settlements. */
@@ -784,7 +806,7 @@ function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean
 
 /** FOCUS_LUXURY for a luxury good the settlement's stock didn't cover last year, else 1. */
 function lacking(eco: Economy, cell: number, good: number): number {
-  if (good < TradeGood.Luxury) return 1;
+  if (good < TradeGood.Luxury || good >= TradeGood.Luxury + LUXURY_COUNT) return 1;
   return eco.luxuryCovered[cell] & (1 << (good - TradeGood.Luxury)) ? 1 : FOCUS_LUXURY;
 }
 

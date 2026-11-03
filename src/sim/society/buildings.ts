@@ -29,15 +29,23 @@ export const Good = {
   Salt: 7,
   Spices: 8,
   Gems: 9,
-  Gold: 10,
-  Marble: 11,
-  Horses: 12,
-  Merchants: 13,
-  Harbor: 14,
-  Grain: 15,
-  Barrels: 16,
+  Marble: 10,
+  Horses: 11,
+  // Strategic goods (war, phase 0): stored and traded like luxury goods, but no comfort.
+  Iron: 12,
+  Flint: 13,
+  /** Gold is mined into money at once (economy.ts: harvestLuxury): no stock, no trade, no comfort. */
+  Gold: 14,
+  Merchants: 15,
+  Harbor: 16,
+  Grain: 17,
+  Barrels: 18,
+  // Military buildings (war, phase 1): melee, ranged and shock soldiers.
+  Barracks: 19,
+  Range: 20,
+  Stable: 21,
 } as const;
-export const GOOD_COUNT = 17;
+export const GOOD_COUNT = 22;
 export const GOOD_NAMES = [
   'Food',
   'Water',
@@ -49,18 +57,27 @@ export const GOOD_NAMES = [
   'Salt',
   'Spices',
   'Gems',
-  'Gold',
   'Marble',
   'Horses',
+  'Iron',
+  'Flint',
+  'Gold',
   'Merchants',
   'Harbor',
   'Grain',
   'Water barrels',
+  'Barracks',
+  'Shooting range',
+  'Stable',
 ] as const;
-/** Luxury goods are Good.Salt .. Good.Horses; `Economy.luxury` holds them in this order. */
+/** Luxury goods are Good.Salt .. Good.Horses (comfort); `Economy.luxury` holds them, then iron and flint, in this order. */
 export const FIRST_LUXURY = Good.Salt;
-export const LUXURY_COUNT = 6;
+export const LUXURY_COUNT = 5;
+/** Goods kept in `Economy.luxury` per cell: the luxury goods and the strategic goods iron and flint. */
+export const STORED_COUNT = 7;
 export const isLuxury = (good: number) => good >= FIRST_LUXURY && good < FIRST_LUXURY + LUXURY_COUNT;
+/** Goods that are mined into `Economy.luxury` (luxury and strategic). */
+export const isStored = (good: number) => good >= FIRST_LUXURY && good < FIRST_LUXURY + STORED_COUNT;
 /** Wood or stone: the goods that pay for buildings. */
 export const isMaterial = (good: number) => good === Good.Wood || good === Good.Stone;
 
@@ -138,6 +155,13 @@ export const BUILDINGS: readonly BuildingType[] = [
   { name: 'Harbor', good: Good.Harbor, amount: 4, percent: 0, wood: 30, stone: 10, upkeepWood: 1, upkeepStone: 1, years: 2, coast: true },
   { name: 'Granary', good: Good.Grain, amount: 25, percent: 0, wood: 15, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, converts: 0 },
   { name: 'Water carriers', good: Good.Barrels, amount: 25, percent: 0, wood: 10, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, converts: 1 },
+  // War, phase 0: mines for the strategic goods (appended: the order is part of the save format).
+  { name: 'Iron mine', good: Good.Iron, amount: 25, percent: 0, wood: 22.5, stone: 15, upkeepWood: 1.5, upkeepStone: 0, years: 2, deposit: Deposit.Iron },
+  { name: 'Flint pit', good: Good.Flint, amount: 25, percent: 0, wood: 22.5, stone: 7.5, upkeepWood: 1.5, upkeepStone: 0, years: 1, deposit: Deposit.Flint },
+  // War, phase 1 (military.ts): money upkeep only (the soldiers' pay, see MIL.sold); MIL.capacity is the soldiers one houses.
+  { name: 'Barracks', good: Good.Barracks, amount: 20, percent: 0, wood: 30, stone: 20, upkeepWood: 0, upkeepStone: 0, years: 2 },
+  { name: 'Shooting range', good: Good.Range, amount: 20, percent: 0, wood: 30, stone: 10, upkeepWood: 0, upkeepStone: 0, years: 2 },
+  { name: 'Stable', good: Good.Stable, amount: 20, percent: 0, wood: 30, stone: 15, upkeepWood: 0, upkeepStone: 0, years: 2 },
 ];
 
 /**
@@ -168,7 +192,7 @@ export type Economy = {
   work: Float32Array;
   /** Standing: years in a row the upkeep wasn't paid. */
   unpaid: Uint8Array;
-  /** Luxury goods in stock: cell * LUXURY_COUNT + (good - FIRST_LUXURY). Stays on the ground like `stock`. */
+  /** Luxury and strategic goods in stock: cell * STORED_COUNT + (good - FIRST_LUXURY). Stays on the ground like `stock`. */
   luxury: Float32Array;
   /** Money in stock (trade.ts). */
   money: Float32Array;
@@ -187,7 +211,7 @@ export function createEconomy(cellCount: number): Economy {
     state: new Uint8Array(cellCount * SLOTS),
     work: new Float32Array(cellCount * SLOTS),
     unpaid: new Uint8Array(cellCount * SLOTS),
-    luxury: new Float32Array(cellCount * LUXURY_COUNT),
+    luxury: new Float32Array(cellCount * STORED_COUNT),
     money: new Float32Array(cellCount),
     provisions: new Float32Array(cellCount * 2),
     goal: new Float32Array(cellCount * MATERIAL_COUNT),
