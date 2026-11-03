@@ -359,6 +359,8 @@ test('a tick run in parts (as the game clock does) gives the same world as whole
   assert.deepEqual(parts.seatSite, whole.seatSite);
   assert.deepEqual(parts.economy.stock, whole.economy.stock);
   assert.deepEqual(parts.government.treasury, whole.government.treasury);
+  assert.deepEqual(parts.trade.merchants, whole.trade.merchants);
+  assert.deepEqual(parts.world.roads, whole.world.roads);
   assert.deepEqual(parts.chronicle, whole.chronicle);
   assert.equal(parts.rng(), whole.rng());
 });
