@@ -284,11 +284,13 @@ Straße zum Sitz 10 %.
 
 ## 10. Strategische Güter und Truppen (Krieg)
 
-Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht simuliert.
+Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Phase 0 und 1 sind simuliert (Abschnitt 14 dort).
 
 - Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung: siehe unten.
-- Das Gut wird jährlich verbraucht; ohne Gut gilt der Faktor nicht.
-- Völker kaufen strategische Güter, um ihre Armee zu stärken (Bedarf in der Handelsliste), und verkaufen sie nur an Völker, die sie nicht bedrohen (`Requirement Diplomatie.md`).
+- Das Gut wird verbraucht: 1 Einheit je 20 Soldaten und Jahr; ohne Gut gilt der Faktor nicht (×1,5).
+- Strategische Güter sind Teil der Handelsabkommen, mit starkem Wunsch (5-faches Gewicht). Verkauf nur, wenn die Gefahr des Käufers für den Verkäufer ≤ 40 ist, nie an Kriegsgegner und deren Verbündete; ohne Abkommen kein Handel über geschlossene Grenzen (`Requirement Diplomatie.md`).
+- Regierungshändler kaufen fehlende Güter (Eisen, Feuerstein, Pferde) bei eigenen Siedlungen und bringen sie zu den Soldaten.
+- Vorkommen Iron und Flint sind bei der Weltgenerierung doppelt so häufig; Völker siedeln freie Vorkommen nur, wenn sie bedroht sind (Gefahr ≥ 50 durch ein Volk).
 - Die gezielte Luxusabbau-Regel (Abschnitt 6) greift auch bei Bedarf der Armee.
 - Neue Gebäude im Katalog: Kaserne (Nahkampf), Schießplatz (Fernkampf), Stall (Schock, braucht Pferde); Kosten und Unterhalt: kalibrieren (Simulation).
 
@@ -301,7 +303,7 @@ Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht si
 
 **Ebenfalls entschieden (Nutzer):**
 - Eisen und Feuerstein sind keine Luxusgüter und geben keinen Komfort.
-- **Gold wird sofort Geld:** Beim Abbau kommt es direkt als zusätzliches Geld in die Siedlung (kein eigenes Gut zum Lagern oder Handeln). Kurs: 5 Geld je Einheit (= heutiger Handelspreis), gewollt, damit Goldvölker viel mehr Soldaten bezahlen können.
+- **Gold wird sofort Geld:** Beim Abbau kommt es direkt als zusätzliches Geld in die Siedlung (kein eigenes Gut zum Lagern oder Handeln). Kurs: 5 Geld je Einheit (= heutiger Handelspreis), gewollt, damit Goldvölker viel mehr Soldaten bezahlen können. Es wird wie anderes in der Siedlung erzeugtes Geld besteuert (Steueranteil in die Kasse des Bezirks).
 - **Gold ist kein Luxusgut mehr** (kein Komfort +5, kein Handel als Ware). Folge: Die Zahl der Luxusgüter sinkt von 6 auf 5 (`LUXURY_COUNT`); die Auswirkung auf die Zufriedenheit wird in der Simulation geprüft (`Requirement Zufriedenheit.md`, Komfort: Luxusgüter).
 
 **Offen:** nichts zu strategischen Gütern.
