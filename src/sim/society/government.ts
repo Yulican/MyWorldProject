@@ -3,36 +3,33 @@ import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYiel
 import { buildingFits, capacityWith, usableSlots } from './economy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
-import { ECON_TUNING, GOV_TUNING, TAX_MAX, TAX_NEUTRAL, goodsRateFor, goodsTaxValue, taxValue } from './taxes';
+import { GOV_TUNING, TAX_MAX, goodsRateFor, goodsTaxValue, rateFor, taxValue } from './taxes';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, upkeepOf as settlementUpkeep } from './trade';
 
-export { GOV_TUNING, taxValue };
+export { GOV_TUNING };
 
-// The central government (agreed requirement: "Design Documents/Requirement
-// Zentralregierung.md"; simulation phase). Every seat of government (and the
-// capital) runs a district: the settlements nearest to it. It sets a tax rate
-// as high as its settlements stay loyal, collects the taxes into its own
-// treasury, and builds in the government slots of its settlements: seats of
+// The central government ("Design Documents/Requirement Zentralregierung.md").
+// The capital and every seat of government run a district: the settlements of
+// their people nearest to them. Once a year each district sets a goods tax (as
+// much wood and stone as it needs) and a money tax (the rest of what its
+// weakest settlement bears while it stays loyal), pays the upkeep of its
+// government buildings, and chooses its next project: a planned seat of
 // government first, then comfort where settlements threaten to break away,
-// then whatever lets crowded settlements grow (and pay more). Its own
-// traders buy the wood and stone and bring them to its building sites.
+// then whatever lets crowded settlements grow. Its traders bring the wood and
+// stone to its building sites, from the seat's stock or bought from its
+// people's settlements.
 
 /** A government trader carries this many units of wood or stone. */
 const TRADER_LOAD = 40;
 /** Weeks per hex a government trader travels (roads and rivers aside). */
 const WEEKS_PER_HEX = 1;
-/** Years of upkeep a government building keeps in stock at its site. */
+/** Years of upkeep a government building keeps in stock at its site; a project starts with one year less left after its cost. */
 const UPKEEP_RESERVE_YEARS = 3;
-/** Years of upkeep money a seat keeps back with reserveUpkeep. */
-const MONEY_RESERVE_YEARS = 2;
+/** Years a government building goes without upkeep before it falls to ruin. */
 const UPKEEP_GRACE_YEARS = 2;
-/** Years of its district's need a seat keeps before its stock serves other districts (seatBalance). */
-const SEAT_KEEP_YEARS = 2;
-/** Years a project may wait for its materials before the government drops it. */
+/** Years a project may wait for its materials before the government drops it (seats excepted). */
 const PROJECT_YEARS = 5;
 const WEEKS_PER_YEAR = 52;
-/** Most projects a seat can queue (GOV_TUNING.queue is at most this). */
-export const QUEUE_MAX = 8;
 const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 const COMFORT_TYPES = BUILDINGS.map((b, i) => (b.good === Good.Comfort ? i : -1)).filter((i) => i >= 0);
 const GROWTH_TYPES = BUILDINGS.map((b, i) => (b.good <= Good.Space && !b.deposit ? i : -1)).filter((i) => i >= 0);
@@ -43,87 +40,52 @@ export type Government = {
   /** Per seat cell: money tax rate and goods tax rate of its district. */
   rate: Float32Array;
   goodsRate: Float32Array;
-  /** Per cell: the money tax rate it pays (for its satisfaction). */
+  /** Per cell: the money and goods tax rates it pays (for its satisfaction). */
   cellRate: Float32Array;
-  /** Per cell: the goods tax rate it pays (for its satisfaction). */
   cellGoodsRate: Float32Array;
   /** Per seat cell: money in its treasury. */
   treasury: Float32Array;
   /** Per cell and material: wood and stone the government keeps there (seat stock, building sites). */
   stock: Float32Array;
-  /** Per seat cell: its queue of projects (QUEUE_MAX entries each): site cell, slot, type, year chosen; projectCount are in use. */
+  /** Per seat cell: its project (site cell, slot, building type, year chosen); site -1 = none. */
   projectSite: Int32Array;
   projectSlot: Int32Array;
   projectType: Int16Array;
   projectYear: Int32Array;
-  projectCount: Uint8Array;
-  /** Per cell: 1 if a seat of government is queued there (seat planning re-evaluates it, economy.ts). */
+  /** Per cell: 1 if a seat of government is a project there (seat planning re-evaluates it, economy.ts). */
   seatQueued: Uint8Array;
-  /** Per seat cell: last year's taxes of its district in money (goods at market prices), for the income check. */
-  income: Float32Array;
-  /** Per seat cell: what its district could raise in a year at its loyalty limit (potentialIncome). */
+  /** Per seat cell: what its district could raise in a year at its loyalty limit (the income check). */
   potential: Float32Array;
-  /** Per seat cell and material (debtYears): what finished buildings still owe, and the yearly installment the goods tax adds. */
-  buildDebt: Float32Array;
-  debtRate: Float32Array;
-  /** Per slot: 1 once a finished government building's cost is booked as debt. */
-  booked: Uint8Array;
-  /** Statistics: building cost booked as debt and repaid by the goods tax, in units. */
-  debtBooked: number;
-  debtRepaid: number;
-  /** Per cell: money the government owes the settlement for materials taken for a seat (seatLoan), and the seat that owes it. */
-  debt: Float32Array;
-  debtSeat: Int32Array;
-  /** Peoples whose government got its starting money. */
-  funded: WeakSet<object>;
-  /** Statistics: starting money given, materials taken on loan, debt repaid. */
-  startMoney: number;
-  loaned: number;
-  repaid: number;
-  /** Per seat cell and material (seatBalance): what the seat keeps for its own district; stock above it serves other districts. */
-  seatKeep: Float32Array;
-  /** Per seat cell: last year's goods tax in money (for the money balancing). */
-  goodsIncome: Float32Array;
-  /** Statistics (localLevy): wood and stone taken on site for upkeep. */
-  levied: number;
-  /** Statistics (moneyBalanceWeeks): money sent between seats by the balancing, and its trips. */
-  balancedMoney: number;
-  balanceTrips: number;
-  /** Statistics (seatBalance): units drawn from other seats' stock. */
-  fromSeats: number;
-  /** Per seat cell (maintenanceFirst): 1 if a government building of its district is short of a year's upkeep. */
-  maintShort: Uint8Array;
+  /** Per civilization id: its founding tick + 1 once its government got its starting money. */
+  funded: number[];
   /** Per seat cell: its traders and how many are away. */
   traders: Uint8Array;
   away: Uint8Array;
   /** Per cell and material: wood and stone on its way there. */
   incoming: Float32Array;
-  trips: GovTrip[];
-  /** Statistics: taxes in money and goods, money spent, buildings put up. */
+  /** Trips under way (struct of arrays, `tripCount` in use): the trader's seat, the site and what it brings, arrival and return. */
+  tripSeat: Int32Array;
+  tripSite: Int32Array;
+  tripMaterial: Uint8Array;
+  tripAmount: Float64Array;
+  tripMoney: Float64Array;
+  tripArrive: Int32Array;
+  tripBack: Int32Array;
+  tripCount: number;
+  /** Statistics: taxes in money and goods, levied on site, starting money, money spent, buildings put up, trips, transfers. */
   collected: number;
   collectedGoods: number;
+  levied: number;
+  startMoney: number;
   spent: number;
   built: number;
-  /** Statistics: why a free trader stayed home (nothing needed, no seller, no money) and trips made. */
-  stayNoNeed: number;
-  stayNoSource: number;
-  stayNoMoney: number;
   sent: number;
-  /** Statistics: money sent between seats, how often, and how often no seat could help. */
   transfers: number;
-  /** Statistics: candidate projects turned down by the income check and by the money-in-hand check. */
-  rejectBudget: number;
-  /** Statistics: extra deliveries made on bundled trips. */
-  bundled: number;
-  rejectCash: number;
   transferred: number;
-  noRichSeat: number;
 };
 
-/** A trader's trip; a bundled trip's further deliveries are entries with `extra` set (they don't hold a trader). */
-type GovTrip = { seat: number; site: number; material: number; amount: number; money: number; arrive: number; back: number; extra?: boolean };
-
 export function createGovernment(cellCount: number): Government {
+  const trips = 64;
   return {
     district: new Int32Array(cellCount).fill(-1),
     rate: new Float32Array(cellCount),
@@ -132,58 +94,34 @@ export function createGovernment(cellCount: number): Government {
     cellGoodsRate: new Float32Array(cellCount),
     treasury: new Float32Array(cellCount),
     stock: new Float32Array(cellCount * MATERIAL_COUNT),
-    projectSite: new Int32Array(cellCount * QUEUE_MAX).fill(-1),
-    projectSlot: new Int32Array(cellCount * QUEUE_MAX).fill(-1),
-    projectType: new Int16Array(cellCount * QUEUE_MAX).fill(-1),
-    projectYear: new Int32Array(cellCount * QUEUE_MAX),
-    projectCount: new Uint8Array(cellCount),
+    projectSite: new Int32Array(cellCount).fill(-1),
+    projectSlot: new Int32Array(cellCount).fill(-1),
+    projectType: new Int16Array(cellCount).fill(-1),
+    projectYear: new Int32Array(cellCount),
     seatQueued: new Uint8Array(cellCount),
-    income: new Float32Array(cellCount),
     potential: new Float32Array(cellCount),
-    buildDebt: new Float32Array(cellCount * MATERIAL_COUNT),
-    debtRate: new Float32Array(cellCount * MATERIAL_COUNT),
-    booked: new Uint8Array(cellCount * SLOTS),
-    debtBooked: 0,
-    debtRepaid: 0,
-    debt: new Float32Array(cellCount),
-    debtSeat: new Int32Array(cellCount).fill(-1),
-    funded: new WeakSet(),
-    startMoney: 0,
-    loaned: 0,
-    repaid: 0,
-    seatKeep: new Float32Array(cellCount * MATERIAL_COUNT),
-    goodsIncome: new Float32Array(cellCount),
-    balancedMoney: 0,
-    levied: 0,
-    balanceTrips: 0,
-    fromSeats: 0,
-    maintShort: new Uint8Array(cellCount),
+    funded: [],
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
     incoming: new Float32Array(cellCount * MATERIAL_COUNT),
-    trips: [],
+    tripSeat: new Int32Array(trips),
+    tripSite: new Int32Array(trips),
+    tripMaterial: new Uint8Array(trips),
+    tripAmount: new Float64Array(trips),
+    tripMoney: new Float64Array(trips),
+    tripArrive: new Int32Array(trips),
+    tripBack: new Int32Array(trips),
+    tripCount: 0,
     collected: 0,
     collectedGoods: 0,
+    levied: 0,
+    startMoney: 0,
     spent: 0,
     built: 0,
-    stayNoNeed: 0,
-    stayNoSource: 0,
-    stayNoMoney: 0,
     sent: 0,
     transfers: 0,
-    rejectBudget: 0,
-    bundled: 0,
-    rejectCash: 0,
     transferred: 0,
-    noRichSeat: 0,
   };
-}
-
-/** The highest rate whose term is at least `need`. */
-function rateFor(need: number): number {
-  if (need > GOV_TUNING.taxPlus) return 0;
-  if (need >= 0) return TAX_NEUTRAL * (1 - need / GOV_TUNING.taxPlus);
-  return TAX_NEUTRAL + (TAX_MAX - TAX_NEUTRAL) * Math.min(1, -need / GOV_TUNING.taxMinus);
 }
 
 /** Wood (m = 0) or stone a building costs the government; seats by GOV_TUNING.seatCost. */
@@ -201,60 +139,46 @@ function upkeepOf(type: number, m: number): number {
 /** Yearly upkeep of a government building in money (at market prices). */
 const upkeepGold = (type: number) => upkeepOf(type, 0) * PRICE[0] + upkeepOf(type, 1) * PRICE[1];
 
-/** Yearly upkeep in money of a seat's government buildings and queued projects. */
-function districtUpkeep(sim: Simulation, seat: number, withQueue = true): number {
-  const { economy } = sim;
-  const gov = sim.government;
-  let sum = 0;
-  for (let c = 0; c < sim.world.cellCount; c++) {
-    if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
-      const st = economy.state[s];
-      if (st === SlotState.Standing || st === SlotState.Construction) sum += upkeepGold(economy.type[s]);
-    }
-  }
-  if (withQueue) for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) sum += upkeepGold(gov.projectType[i]);
-  return sum;
-}
-
-/** Yearly upkeep in money of a seat's district's government seats, built, being built or queued. */
-function districtSeatUpkeep(sim: Simulation, seat: number, withQueue = true): number {
-  const { economy } = sim;
-  const gov = sim.government;
-  let sum = 0;
-  for (let c = 0; c < sim.world.cellCount; c++) {
-    if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
-      const st = economy.state[s];
-      if ((st === SlotState.Standing || st === SlotState.Construction) && economy.type[s] === SEAT_TYPE) sum += upkeepGold(SEAT_TYPE);
-    }
-  }
-  if (withQueue) for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) if (gov.projectType[i] === SEAT_TYPE) sum += upkeepGold(SEAT_TYPE);
-  return sum;
-}
-
-/** Money a seat keeps back for its buildings' upkeep (reserveUpkeep): MONEY_RESERVE_YEARS of it; project materials are bought only from what is above. */
-function upkeepMoney(sim: Simulation, seat: number): number {
-  return GOV_TUNING.reserveUpkeep ? districtUpkeep(sim, seat, false) * MONEY_RESERVE_YEARS : 0;
-}
-
-/** What a new government building costs the treasury up front: its materials and its first reserve of upkeep, at market prices. */
-const buildGold = (type: number) => costOf(type, 0) * PRICE[0] + costOf(type, 1) * PRICE[1] + UPKEEP_RESERVE_YEARS * upkeepGold(type);
-
-/** Whether a building type is a growth building (not a seat or comfort, which keep the realm loyal). */
-const isGrowth = (type: number) => type !== SEAT_TYPE && !COMFORT_TYPES.includes(type);
-
+/** A building's materials in money (at market prices), for the growth score. */
 const goldCost = (type: number) => BUILDINGS[type].wood * PRICE[0] + BUILDINGS[type].stone * PRICE[1];
+
+/** Yearly upkeep in money of a district's government buildings (only seats with `seatsOnly`), and its project's. */
+function districtUpkeep(sim: Simulation, seat: number, seatsOnly: boolean): number {
+  const { economy } = sim;
+  const gov = sim.government;
+  let sum = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
+    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+      const st = economy.state[s];
+      if ((st === SlotState.Standing || st === SlotState.Construction) && (!seatsOnly || economy.type[s] === SEAT_TYPE)) sum += upkeepGold(economy.type[s]);
+    }
+  }
+  const type = gov.projectType[seat];
+  if (gov.projectSite[seat] >= 0 && (!seatsOnly || type === SEAT_TYPE)) sum += upkeepGold(type);
+  return sum;
+}
+
+/** Wood or stone the government keeps at `cell` for its buildings' upkeep (`years` of it). */
+function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_RESERVE_YEARS): number {
+  const { economy } = sim;
+  let sum = 0;
+  for (let s = cell * SLOTS + GOV_SLOT, end = s + usableSlots(sim, cell); s < end; s++) {
+    const st = economy.state[s];
+    if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
+    sum += upkeepOf(economy.type[s], m);
+  }
+  return sum * years;
+}
 
 /** A chronicle entry at a hex (simulation.ts: record). */
 export type Record = (text: string, cell: number) => void;
 
 /**
- * Yearly: districts, tax rates, taxes, upkeep of government buildings and
- * the next project of every seat.
+ * Yearly: districts, tax rates, taxes, the levy on site, upkeep of
+ * government buildings and the project of every seat.
  */
 export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Record): void {
-  if (!GOV_TUNING.on) return;
   const gov = sim.government;
   const { world, economy } = sim;
   const n = world.cellCount;
@@ -275,7 +199,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     }
     gov.district[c] = best;
   }
-  // Traders and rates per seat.
+  // Traders per seat.
   const isSeat = new Uint8Array(n);
   for (let civ = 1; civ < seats.length; civ++) {
     const civObj = sim.civs[civ];
@@ -284,133 +208,65 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       gov.traders[s] = civObj && civObj.capital === s ? GOV_TUNING.capitalTraders : GOV_TUNING.traders;
     }
   }
-  // Starting money: a newly founded people's government gets GOV_TUNING.startSeats seats' worth;
-  // breakaways keep the settlements that rose up and get none.
-  if (GOV_TUNING.startSeats > 0) {
-    const money = GOV_TUNING.startSeats * (costOf(SEAT_TYPE, 0) * PRICE[0] + costOf(SEAT_TYPE, 1) * PRICE[1]);
-    for (const civObj of sim.civs) {
-      if (!civObj || gov.funded.has(civObj) || civObj.capital < 0) continue;
-      gov.funded.add(civObj);
-      if (civObj.origin !== 'start' && civObj.origin !== 'tribe') continue;
-      gov.treasury[civObj.capital] += money;
-      gov.startMoney += money;
-    }
+  // Starting money: a newly founded people's government gets GOV_TUNING.startSeats seats' worth; breakaways keep
+  // the settlements that rose up and get none.
+  const seatGold = costOf(SEAT_TYPE, 0) * PRICE[0] + costOf(SEAT_TYPE, 1) * PRICE[1];
+  for (const civObj of sim.civs) {
+    if (!civObj || gov.funded[civObj.id] === civObj.foundedTick + 1 || civObj.capital < 0) continue;
+    gov.funded[civObj.id] = civObj.foundedTick + 1;
+    if (civObj.origin !== 'start' && civObj.origin !== 'tribe') continue;
+    const money = GOV_TUNING.startSeats * seatGold;
+    gov.treasury[civObj.capital] += money;
+    gov.startMoney += money;
   }
+  // While a people finances a seat (one is a project), it taxes without the safety margin.
   const civFinancing = new Uint8Array(sim.civSlots);
-  for (let s = 0; s < n; s++) if (isSeat[s] && seatQueued(gov, s)) civFinancing[owner[s]] = 1;
+  for (let s = 0; s < n; s++) if (isSeat[s] && gov.projectSite[s] >= 0 && gov.projectType[s] === SEAT_TYPE) civFinancing[owner[s]] = 1;
+  // The weakest settlement of every district, without its taxes.
   const low = new Float32Array(n).fill(Infinity);
-  const sum = new Float32Array(n);
   const count = new Uint16Array(n);
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
     if (s < 0) continue;
-    // Satisfaction without its taxes.
     const base = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - taxValue(gov.cellRate[c]) - goodsTaxValue(gov.cellGoodsRate[c]);
     low[s] = Math.min(low[s], base);
-    sum[s] += base;
     count[s]++;
   }
-  // goodsByNeed: what each district needs in wood and stone this year (its buildings' upkeep, its queued
-  // projects' missing materials, less what its seat holds) and what its settlements spare.
-  const goodsNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
-  const baseNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
-  const netNeed = new Float32Array(GOV_TUNING.goodsByNeed ? n * MATERIAL_COUNT : 0);
-  const goodsGot = new Float32Array(n * MATERIAL_COUNT);
-  const goodsSpare = new Float32Array(GOV_TUNING.goodsByNeed || GOV_TUNING.potentialIncome ? n * MATERIAL_COUNT : 0);
-  const moneyBase = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
-  // The district's yearly wood and stone to spare in money: harvest less the settlements' own upkeep (not their stock).
-  const goodsFlow = new Float32Array(GOV_TUNING.potentialIncome ? n : 0);
-  if (GOV_TUNING.potentialIncome) {
-    for (let c = 0; c < n; c++) {
-      const s = gov.district[c];
-      if (s < 0) continue;
-      moneyBase[s] += sim.cellAdults[c] * MONEY_PER_ADULT * ECON_TUNING.money; // the money tax base at 100 %
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        const good = m === 0 ? Good.Wood : Good.Stone;
-        const harvest = withBuildings(economy, c, good, forageYield(world, c, good)) * yieldFactor(sim.satisfaction[c]);
-        goodsFlow[s] += Math.max(0, harvest - settlementUpkeep(economy, c, m)) * PRICE[m];
-      }
-      for (let m = 0; m < MATERIAL_COUNT; m++) goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
+  // Per district: the money tax base, the wood and stone its settlements spare (stock) and harvest beyond their own
+  // upkeep (yearly), and what it needs: a year's upkeep of its buildings and its project's missing materials, less
+  // what its seat holds.
+  const moneyBase = new Float32Array(n);
+  const goodsFlow = new Float32Array(n);
+  const goodsSpare = new Float32Array(n * MATERIAL_COUNT);
+  const goodsNeed = new Float32Array(n * MATERIAL_COUNT);
+  for (let c = 0; c < n; c++) {
+    const s = gov.district[c];
+    if (s < 0) continue;
+    moneyBase[s] += sim.cellAdults[c] * MONEY_PER_ADULT;
+    for (let m = 0; m < MATERIAL_COUNT; m++) {
+      const good = m === 0 ? Good.Wood : Good.Stone;
+      const harvest = withBuildings(economy, c, good, forageYield(world, c, good)) * yieldFactor(sim.satisfaction[c]);
+      goodsFlow[s] += Math.max(0, harvest - settlementUpkeep(economy, c, m)) * PRICE[m];
     }
+    for (let m = 0; m < MATERIAL_COUNT; m++) goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
   }
-  if (GOV_TUNING.goodsByNeed) {
-    for (let c = 0; c < n; c++) {
-      const s = gov.district[c];
-      if (s < 0) continue;
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        if (!GOV_TUNING.potentialIncome) goodsSpare[s * MATERIAL_COUNT + m] += Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
-        if (sim.hasBuildings[c]) goodsNeed[s * MATERIAL_COUNT + m] += upkeepReserve(sim, c, m, 1);
-      }
-    }
-    for (let s = 0; s < n; s++) {
-      if (!isSeat[s]) continue;
-      for (let i = s * QUEUE_MAX, end = i + gov.projectCount[s]; i < end; i++) {
-        const site = gov.projectSite[i];
-        for (let m = 0; m < MATERIAL_COUNT; m++) {
-          goodsNeed[s * MATERIAL_COUNT + m] += Math.max(0, costOf(gov.projectType[i], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m]);
-        }
-      }
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        const i = s * MATERIAL_COUNT + m;
-        // seatBalance: a seat keeps SEAT_KEEP_YEARS of its district's yearly need; the rest may go to other districts.
-        gov.seatKeep[i] = SEAT_KEEP_YEARS * goodsNeed[i];
-        netNeed[i] = goodsNeed[i] - gov.stock[i];
-        goodsNeed[i] = Math.max(0, goodsNeed[i] - gov.stock[i]);
-        // debtYears: the installment on finished buildings' cost comes on top.
-        baseNeed[i] = goodsNeed[i];
-        goodsNeed[i] += Math.min(gov.buildDebt[i], gov.debtRate[i]);
-      }
-    }
+  for (let c = 0; c < n; c++) {
+    const s = gov.district[c];
+    if (s < 0 || !sim.hasBuildings[c]) continue;
+    for (let m = 0; m < MATERIAL_COUNT; m++) goodsNeed[s * MATERIAL_COUNT + m] += upkeepReserve(sim, c, m, 1);
   }
-  // The room the taxes have at a seat: down to the safety margin for its weakest settlement (or its mean);
-  // while a seat is to be paid for, its district (seatTax 1) or its whole people (2) taxes without the margin.
-  const roomOf = (s: number) => {
-    const base = GOV_TUNING.weakest ? low[s] : sum[s] / count[s];
-    const financing = (GOV_TUNING.seatTax === 1 && seatQueued(gov, s)) || (GOV_TUNING.seatTax === 2 && civFinancing[owner[s]] === 1);
-    return (financing ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - base;
-  };
-  // centralGoods: the people's goods rate covers its whole need (all districts, less all seats' stock); districts at
-  // their loyalty limit pay only that, the others make up for them.
-  const civGoodsRate = new Float32Array(GOV_TUNING.centralGoods ? sim.civSlots : 0);
-  if (GOV_TUNING.centralGoods && GOV_TUNING.goodsByNeed) {
-    const cap = new Float32Array(n);
-    const civSeats: number[][] = [];
-    for (let s = 0; s < n; s++) {
-      if (!isSeat[s] || count[s] === 0) continue;
-      cap[s] = Math.min(TAX_MAX, goodsRateFor(roomOf(s) - GOV_TUNING.taxPlus));
-      (civSeats[owner[s]] ??= []).push(s);
-    }
-    for (let civ = 1; civ < civSeats.length; civ++) {
-      const list = civSeats[civ];
-      if (!list) continue;
-      let rate = 0;
+  for (let s = 0; s < n; s++) {
+    if (!isSeat[s]) continue;
+    const site = gov.projectSite[s];
+    if (site >= 0) {
       for (let m = 0; m < MATERIAL_COUNT; m++) {
-        let need = 0;
-        let most = 0;
-        for (const s of list) {
-          need += netNeed[s * MATERIAL_COUNT + m];
-          most += cap[s] * goodsSpare[s * MATERIAL_COUNT + m];
-        }
-        if (need <= 0) continue;
-        if (most <= need) {
-          rate = TAX_MAX;
-          break;
-        }
-        // The lowest common rate r with sum of min(r, cap) x spare >= need.
-        let lo = 0;
-        let hi = TAX_MAX;
-        for (let k = 0; k < 24; k++) {
-          const r = (lo + hi) / 2;
-          let got = 0;
-          for (const s of list) got += Math.min(r, cap[s]) * goodsSpare[s * MATERIAL_COUNT + m];
-          if (got >= need) hi = r;
-          else lo = r;
-        }
-        rate = Math.max(rate, hi);
+        goodsNeed[s * MATERIAL_COUNT + m] += Math.max(0, costOf(gov.projectType[s], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m]);
       }
-      civGoodsRate[civ] = rate;
     }
+    for (let m = 0; m < MATERIAL_COUNT; m++) goodsNeed[s * MATERIAL_COUNT + m] = Math.max(0, goodsNeed[s * MATERIAL_COUNT + m] - gov.stock[s * MATERIAL_COUNT + m]);
   }
+  // Rates: the goods tax as the district needs, as far as its weakest settlement stays loyal without a money tax;
+  // the money tax takes the rest of the room. And the potential income for the income check.
   for (let s = 0; s < n; s++) {
     if (!isSeat[s]) {
       gov.rate[s] = 0;
@@ -419,146 +275,75 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       continue;
     }
     if (count[s] === 0) continue;
-    const room = roomOf(s);
-    let goodsRate = GOV_TUNING.goodsTax ? -1 : 0;
-    if (GOV_TUNING.goodsByNeed) {
-      // As much as the district needs, as far as the money tax at 0 % still keeps it loyal; the money tax takes the rest.
-      goodsRate = 0;
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        const spare = goodsSpare[s * MATERIAL_COUNT + m];
-        if (spare > 0) goodsRate = Math.max(goodsRate, goodsNeed[s * MATERIAL_COUNT + m] / spare);
-      }
-      goodsRate = Math.min(goodsRate, TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
-      // centralGoods: one goods rate for the whole people, each district up to its own loyalty limit.
-      if (GOV_TUNING.centralGoods) goodsRate = Math.min(civGoodsRate[owner[s]], TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
+    const room = (civFinancing[owner[s]] === 1 ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - low[s];
+    const goodsLimit = Math.min(TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
+    let goodsRate = 0;
+    for (let m = 0; m < MATERIAL_COUNT; m++) {
+      const spare = goodsSpare[s * MATERIAL_COUNT + m];
+      if (spare > 0) goodsRate = Math.max(goodsRate, goodsNeed[s * MATERIAL_COUNT + m] / spare);
     }
-    const rate = rateFor(room - goodsTaxValue(Math.max(0, goodsRate)));
-    if (GOV_TUNING.potentialIncome) {
-      // At the loyalty limit: all room for the money tax (goods tax 0 %), or all for the goods tax (money tax 0 %).
-      const moneyOnly = rateFor(room - goodsTaxValue(0)) * moneyBase[s];
-      let goodsValue = 0;
-      for (let m = 0; m < MATERIAL_COUNT; m++) goodsValue += goodsSpare[s * MATERIAL_COUNT + m] * PRICE[m];
-      // No more than the yearly flow: taxing the stockpile is no lasting income.
-      const goodsOnly = Math.min(goodsFlow[s], (GOV_TUNING.goodsByNeed ? Math.min(TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus)) : 0) * goodsValue);
-      gov.potential[s] = Math.max(moneyOnly, goodsOnly);
-    }
+    goodsRate = Math.min(goodsRate, goodsLimit);
+    const rate = rateFor(room - goodsTaxValue(goodsRate));
+    // At the loyalty limit: all room for the money tax (goods tax 0 %), or all for the goods tax (money tax 0 %),
+    // the latter no more than the yearly harvest beyond the settlements' own upkeep.
+    const moneyOnly = rateFor(room - goodsTaxValue(0)) * moneyBase[s];
+    let goodsValue = 0;
+    for (let m = 0; m < MATERIAL_COUNT; m++) goodsValue += goodsSpare[s * MATERIAL_COUNT + m] * PRICE[m];
+    gov.potential[s] = Math.max(moneyOnly, Math.min(goodsFlow[s], goodsLimit * goodsValue));
     if (Math.abs(rate - gov.rate[s]) >= 0.1) {
       record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s);
     }
     gov.rate[s] = rate;
-    gov.goodsRate[s] = goodsRate < 0 ? rate : goodsRate;
+    gov.goodsRate[s] = goodsRate;
   }
-  // Taxes.
-  gov.income.fill(0);
-  gov.goodsIncome.fill(0);
+  // Taxes: money into the seat's treasury, goods from the settlements' surplus into its stock.
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
     gov.cellRate[c] = s >= 0 ? gov.rate[s] : 0;
     gov.cellGoodsRate[c] = s >= 0 ? gov.goodsRate[s] : 0;
     if (s < 0) continue;
-    const tax = Math.min(economy.money[c], gov.rate[s] * sim.cellAdults[c] * MONEY_PER_ADULT * ECON_TUNING.money);
+    const tax = Math.min(economy.money[c], gov.rate[s] * sim.cellAdults[c] * MONEY_PER_ADULT);
     economy.money[c] -= tax;
     gov.treasury[s] += tax;
     gov.collected += tax;
-    gov.income[s] += tax;
     if (gov.goodsRate[s] > 0) {
       for (let m = 0; m < MATERIAL_COUNT; m++) {
         const spare = sim.trade.surplus[c * TRADE_GOODS + m];
         const take = Math.min(economy.stock[c * MATERIAL_COUNT + m], gov.goodsRate[s] * Math.max(0, spare));
         economy.stock[c * MATERIAL_COUNT + m] -= take;
         gov.stock[s * MATERIAL_COUNT + m] += take;
-        goodsGot[s * MATERIAL_COUNT + m] += take;
         gov.collectedGoods += take;
-        gov.income[s] += take * PRICE[m];
-        gov.goodsIncome[s] += take * PRICE[m];
       }
     }
   }
-  // Debts for materials taken for seats are paid first.
-  for (let c = 0; c < n; c++) {
-    const s = gov.debtSeat[c];
-    if (s < 0) continue;
-    const pay = Math.min(gov.debt[c], gov.treasury[s]);
-    gov.treasury[s] -= pay;
-    gov.debt[c] -= pay;
-    gov.repaid += pay;
-    if (sim.cellPop[c] > 0) economy.money[c] += pay;
-    if (gov.debt[c] <= 1e-3 || sim.cellPop[c] === 0 || owner[c] !== owner[s]) {
-      gov.debt[c] = 0;
-      gov.debtSeat[c] = -1;
-    }
-  }
-  // localLevy: each site takes what its government buildings lack for a year's upkeep from its own settlement's
+  // Levy on site: each site takes what its government buildings lack for a year's upkeep from its own settlement's
   // surplus, as a goods tax there, as far as that settlement stays above the safety margin.
-  if (GOV_TUNING.localLevy) {
-    for (let c = 0; c < n; c++) {
-      const s = gov.district[c];
-      if (s < 0 || !sim.hasBuildings[c] || sim.cellPop[c] === 0 || owner[c] !== owner[s]) continue;
-      const lack = [0, 0];
-      let any = false;
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        lack[m] = Math.max(0, upkeepReserve(sim, c, m, 1) - gov.stock[c * MATERIAL_COUNT + m]);
-        if (lack[m] > 1e-3) any = true;
-      }
-      if (!any) continue;
-      // The highest goods rate this settlement bears: its own satisfaction stays at the margin.
-      const headroom = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - GOV_TUNING.margin;
-      if (headroom <= 0) continue;
-      const g0 = gov.cellGoodsRate[c];
-      const extra = Math.max(0, goodsRateFor(goodsTaxValue(g0) - headroom) - g0);
-      let rate = 0;
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        const spare = Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
-        if (lack[m] <= 1e-3 || spare <= 0) continue;
-        const take = Math.min(lack[m], spare * extra, economy.stock[c * MATERIAL_COUNT + m]);
-        if (take <= 0) continue;
-        economy.stock[c * MATERIAL_COUNT + m] -= take;
-        sim.trade.surplus[c * TRADE_GOODS + m] -= take;
-        gov.stock[c * MATERIAL_COUNT + m] += take;
-        gov.levied += take;
-        rate = Math.max(rate, take / spare);
-      }
-      gov.cellGoodsRate[c] = g0 + rate;
+  for (let c = 0; c < n; c++) {
+    const s = gov.district[c];
+    if (s < 0 || !sim.hasBuildings[c] || sim.cellPop[c] === 0 || owner[c] !== owner[s]) continue;
+    const lackWood = Math.max(0, upkeepReserve(sim, c, 0, 1) - gov.stock[c * MATERIAL_COUNT]);
+    const lackStone = Math.max(0, upkeepReserve(sim, c, 1, 1) - gov.stock[c * MATERIAL_COUNT + 1]);
+    if (lackWood <= 1e-3 && lackStone <= 1e-3) continue;
+    const headroom = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - GOV_TUNING.margin;
+    if (headroom <= 0) continue;
+    const g0 = gov.cellGoodsRate[c];
+    const extra = Math.max(0, goodsRateFor(goodsTaxValue(g0) - headroom) - g0);
+    let levy = 0;
+    for (let m = 0; m < MATERIAL_COUNT; m++) {
+      const lack = m === 0 ? lackWood : lackStone;
+      const spare = Math.max(0, sim.trade.surplus[c * TRADE_GOODS + m]);
+      if (lack <= 1e-3 || spare <= 0) continue;
+      const take = Math.min(lack, spare * extra, economy.stock[c * MATERIAL_COUNT + m]);
+      if (take <= 0) continue;
+      economy.stock[c * MATERIAL_COUNT + m] -= take;
+      sim.trade.surplus[c * TRADE_GOODS + m] -= take;
+      gov.stock[c * MATERIAL_COUNT + m] += take;
+      gov.levied += take;
+      levy = Math.max(levy, take / spare);
     }
+    gov.cellGoodsRate[c] = g0 + levy;
   }
-  // debtYears: what the goods tax brought beyond the other needs repays the debt; newly finished buildings book theirs.
-  if (GOV_TUNING.debtYears > 0) {
-    for (let s = 0; s < n; s++) {
-      if (!isSeat[s]) {
-        for (let m = 0; m < MATERIAL_COUNT; m++) gov.buildDebt[s * MATERIAL_COUNT + m] = gov.debtRate[s * MATERIAL_COUNT + m] = 0;
-        continue;
-      }
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        const i = s * MATERIAL_COUNT + m;
-        if (gov.buildDebt[i] <= 0) continue;
-        const paid = Math.min(gov.buildDebt[i], gov.debtRate[i], Math.max(0, goodsGot[i] - (GOV_TUNING.goodsByNeed ? baseNeed[i] : 0)));
-        gov.buildDebt[i] -= paid;
-        gov.debtRepaid += paid;
-        if (gov.buildDebt[i] <= 1e-3) gov.buildDebt[i] = gov.debtRate[i] = 0;
-      }
-    }
-    for (let c = 0; c < n; c++) {
-      if (!sim.hasBuildings[c]) continue;
-      for (let x = c * SLOTS + GOV_SLOT, end = c * SLOTS + SLOTS; x < end; x++) {
-        const st = economy.state[x];
-        if (st !== SlotState.Standing) {
-          if (st === SlotState.Empty || st === SlotState.Ruin) gov.booked[x] = 0;
-          continue;
-        }
-        if (gov.booked[x]) continue;
-        gov.booked[x] = 1;
-        const s = gov.district[c];
-        if (s < 0) continue;
-        for (let m = 0; m < MATERIAL_COUNT; m++) {
-          const owed = costOf(economy.type[x], m) + UPKEEP_RESERVE_YEARS * upkeepOf(economy.type[x], m);
-          gov.buildDebt[s * MATERIAL_COUNT + m] += owed;
-          gov.debtRate[s * MATERIAL_COUNT + m] += owed / GOV_TUNING.debtYears;
-          gov.debtBooked += owed;
-        }
-      }
-    }
-  }
-  // Upkeep of government buildings, from the government's stock at their site.
+  // Upkeep of government buildings, from the government's stock at their site; two years without it, a ruin.
   for (let c = 0; c < n; c++) {
     if (!sim.hasBuildings[c]) continue;
     for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
@@ -574,117 +359,58 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
       }
     }
   }
-  // maintenanceFirst: districts with a building short of a year's upkeep start no growth projects.
-  gov.maintShort.fill(0);
-  if (GOV_TUNING.maintenanceFirst) {
-    for (let c = 0; c < n; c++) {
-      const s = gov.district[c];
-      if (s < 0 || !sim.hasBuildings[c] || gov.maintShort[s]) continue;
-      for (let m = 0; m < MATERIAL_COUNT; m++) {
-        if (gov.stock[c * MATERIAL_COUNT + m] + gov.incoming[c * MATERIAL_COUNT + m] < upkeepReserve(sim, c, m, 1) - 1e-3) gov.maintShort[s] = 1;
-      }
-    }
-  }
-  // Projects: start what is paid for, drop what is lost or waited too long, fill the queue.
-  const seatPlanned = new Uint8Array(n);
-  for (let c = 0; c < n; c++) if (sim.seatSite[c] && gov.district[c] >= 0) seatPlanned[gov.district[c]] = 1;
+  // Projects: start what is paid for, drop what is lost or waited too long, choose the next.
   const year = Math.floor(sim.tick / WEEKS_PER_YEAR);
-  const length = Math.min(QUEUE_MAX, GOV_TUNING.queue);
   for (let s = 0; s < n; s++) {
     if (!isSeat[s]) {
-      gov.projectCount[s] = 0;
+      gov.projectSite[s] = -1;
       continue;
     }
-    const q = s * QUEUE_MAX;
-    let kept = 0;
-    let seatQueued = false;
-    // seatsFirst: while a seat is planned in the district, no other project starts or stays queued.
-    const seatWaits = GOV_TUNING.seatsFirst && seatPlanned[s] === 1;
-    for (let i = 0; i < gov.projectCount[s]; i++) {
-      const site = gov.projectSite[q + i];
-      const type = gov.projectType[q + i];
-      const slot = gov.projectSlot[q + i];
-      const b = BUILDINGS[type];
+    const site = gov.projectSite[s];
+    if (site >= 0) {
+      const type = gov.projectType[s];
+      const slot = gov.projectSlot[s];
       const w = site * MATERIAL_COUNT;
-      if (owner[site] !== owner[s] || sim.cellPop[site] === 0 || economy.state[slot] !== SlotState.Empty) continue; // lost or taken
-      if (type === SEAT_TYPE && !sim.seatSite[site]) continue; // seat planning found a better site, or none is worth it
-      if (type !== SEAT_TYPE && seatWaits) continue; // its materials stay at the site for later
-      // maintenanceFirst: a growth project waits while the district's buildings are short of upkeep.
-      const held = gov.maintShort[s] === 1 && isGrowth(type);
-      // Its upkeep reserve stays (upkeep first).
-      // Checked just after the year's upkeep was paid: one year of the reserve is spent.
+      // Checked just after the year's upkeep was paid: the reserve has one year less.
       const keep = UPKEEP_RESERVE_YEARS - 1;
-      if (!held && gov.stock[w] - upkeepReserve(sim, site, 0, keep) >= costOf(type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1, keep) >= costOf(type, 1)) {
+      if (owner[site] !== owner[s] || sim.cellPop[site] === 0 || economy.state[slot] !== SlotState.Empty) {
+        gov.projectSite[s] = -1; // lost or taken
+      } else if (type === SEAT_TYPE && !sim.seatSite[site]) {
+        gov.projectSite[s] = -1; // seat planning found a better site, or none is worth it
+      } else if (gov.stock[w] - upkeepReserve(sim, site, 0, keep) >= costOf(type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1, keep) >= costOf(type, 1)) {
         gov.stock[w] -= costOf(type, 0);
         gov.stock[w + 1] -= costOf(type, 1);
         economy.type[slot] = type;
         economy.state[slot] = SlotState.Construction;
-        economy.work[slot] = b.years;
+        economy.work[slot] = BUILDINGS[type].years;
         economy.unpaid[slot] = 0;
         sim.hasBuildings[site] = 1;
         gov.built++;
         if (type === SEAT_TYPE) sim.seatSite[site] = 0;
-        continue;
+        gov.projectSite[s] = -1;
+      } else if (type !== SEAT_TYPE && year - gov.projectYear[s] >= PROJECT_YEARS) {
+        gov.projectSite[s] = -1; // waited too long
       }
-      if (type !== SEAT_TYPE && year - gov.projectYear[q + i] >= PROJECT_YEARS) continue; // waited too long
-      if (type === SEAT_TYPE) seatQueued = true;
-      gov.projectSite[q + kept] = site;
-      gov.projectSlot[q + kept] = slot;
-      gov.projectType[q + kept] = type;
-      gov.projectYear[q + kept] = gov.projectYear[q + i];
-      kept++;
     }
-    gov.projectCount[s] = kept;
-    // A planned seat goes before any other project, if need be in place of the last one.
-    if (!seatQueued && chooseProject(sim, s, true)) {
-      if (gov.projectCount[s] >= length) gov.projectCount[s] = length - 1;
-      for (let i = gov.projectCount[s]; i > 0; i--) {
-        gov.projectSite[q + i] = gov.projectSite[q + i - 1];
-        gov.projectSlot[q + i] = gov.projectSlot[q + i - 1];
-        gov.projectType[q + i] = gov.projectType[q + i - 1];
-        gov.projectYear[q + i] = gov.projectYear[q + i - 1];
-      }
-      [gov.projectSite[q], gov.projectSlot[q], gov.projectType[q], gov.projectYear[q]] = [pickSite, pickSlot, pickType, year];
-      gov.projectCount[s]++;
-    }
-    while (!seatWaits && gov.projectCount[s] < length && chooseProject(sim, s, false)) {
-      const i = q + gov.projectCount[s]++;
-      [gov.projectSite[i], gov.projectSlot[i], gov.projectType[i], gov.projectYear[i]] = [pickSite, pickSlot, pickType, year];
-    }
+    // A planned seat goes before any other project.
+    const seatProject = gov.projectSite[s] >= 0 && gov.projectType[s] === SEAT_TYPE;
+    if (!seatProject && chooseProject(sim, s, true)) setProject(gov, s, year);
+    if (gov.projectSite[s] < 0 && chooseProject(sim, s, false)) setProject(gov, s, year);
   }
   gov.seatQueued.fill(0);
-  for (let s = 0; s < n; s++) {
-    for (let i = s * QUEUE_MAX, end = i + gov.projectCount[s]; i < end; i++) if (gov.projectType[i] === SEAT_TYPE) gov.seatQueued[gov.projectSite[i]] = 1;
-  }
-}
-
-/** Wood or stone the government keeps at `cell` for its buildings' upkeep (`years` of it, UPKEEP_RESERVE_YEARS by default). */
-function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_RESERVE_YEARS): number {
-  const { economy } = sim;
-  let sum = 0;
-  for (let s = cell * SLOTS + GOV_SLOT, end = s + usableSlots(sim, cell); s < end; s++) {
-    const st = economy.state[s];
-    if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
-    sum += upkeepOf(economy.type[s], m);
-  }
-  return sum * years;
-}
-
-/** Whether a seat's queue holds a seat of government. */
-function seatQueued(gov: Government, seat: number): boolean {
-  for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) if (gov.projectType[i] === SEAT_TYPE) return true;
-  return false;
-}
-
-/** Whether a seat's queue already has a project at `cell`. */
-function queued(gov: Government, seat: number, cell: number): boolean {
-  for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) if (gov.projectSite[i] === cell) return true;
-  return false;
+  for (let s = 0; s < n; s++) if (gov.projectSite[s] >= 0 && gov.projectType[s] === SEAT_TYPE) gov.seatQueued[gov.projectSite[s]] = 1;
 }
 
 let pickSite = -1;
 let pickSlot = -1;
 let pickType = -1;
+
+function setProject(gov: Government, seat: number, year: number): void {
+  gov.projectSite[seat] = pickSite;
+  gov.projectSlot[seat] = pickSlot;
+  gov.projectType[seat] = pickType;
+  gov.projectYear[seat] = year;
+}
 
 /** A free government slot of a hex, -1 if none. */
 function freeGovSlot(sim: Simulation, cell: number): number {
@@ -692,74 +418,38 @@ function freeGovSlot(sim: Simulation, cell: number): number {
   return -1;
 }
 
-/** The next project of a seat's district, into pickSite/pickSlot/pickType: a planned seat, comfort for the restless, growth for the crowded (one project per site). */
+/**
+ * The next project of a seat's district, into pickSite/pickSlot/pickType: a
+ * planned seat, comfort for the restless, growth for the crowded; none at the
+ * site of its current project. Income check: the district's yearly upkeep
+ * with the new building stays within GOV_TUNING.incomeShare of its potential
+ * income; a seat is checked against the whole people's seats and income.
+ */
 function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolean {
   const gov = sim.government;
   const n = sim.world.cellCount;
+  const share = GOV_TUNING.incomeShare;
+  const budget = share * gov.potential[seat];
+  const upkeep = districtUpkeep(sim, seat, false);
+  const civ = sim.world.owner[seat];
+  let seatUpkeep = 0;
+  let seatBudget = 0;
+  for (let s = 0; s < n; s++) {
+    if (!gov.traders[s] || sim.world.owner[s] !== civ) continue;
+    seatUpkeep += districtUpkeep(sim, s, true);
+    seatBudget += share * gov.potential[s];
+  }
+  const fits = (t: number) => (t === SEAT_TYPE ? seatUpkeep : upkeep) + upkeepGold(t) <= (t === SEAT_TYPE ? seatBudget : budget);
   let bestSite = -1;
   let bestSlot = -1;
   let bestType = -1;
   let bestScore = 0;
-  // Only what the treasury can keep up for GOV_TUNING.secureYears (upkeep secured).
-  const upkeep = districtUpkeep(sim, seat);
-  // With GOV_TUNING.incomeShare instead: the yearly upkeep stays within that share of last year's taxes;
-  // a seat only has to fit beside the district's other seats (seats first in the budget).
-  // actualShare: besides, the upkeep stays within that share of last year's actual taxes.
-  const limit = (s: number) => {
-    const b = GOV_TUNING.incomeShare * (GOV_TUNING.potentialIncome ? gov.potential[s] : gov.income[s]);
-    return GOV_TUNING.actualShare > 0 ? Math.min(b, GOV_TUNING.actualShare * gov.income[s]) : b;
-  };
-  const budget = limit(seat);
-  let seatUpkeep = GOV_TUNING.incomeShare > 0 ? districtSeatUpkeep(sim, seat) : 0;
-  let seatBudget = budget;
-  if (GOV_TUNING.seatPeopleBudget && GOV_TUNING.incomeShare > 0) {
-    // seatPeopleBudget: a seat is checked against the whole people's income and seats, not its district's.
-    const civ = sim.world.owner[seat];
-    seatUpkeep = 0;
-    seatBudget = 0;
-    for (let s = 0; s < n; s++) {
-      if (!gov.traders[s] || sim.world.owner[s] !== civ) continue;
-      seatUpkeep += districtSeatUpkeep(sim, s);
-      seatBudget += limit(s);
-    }
-  }
-  const fitsBudget = (t: number) =>
-    GOV_TUNING.incomeShare > 0
-      ? t === SEAT_TYPE
-        ? seatUpkeep + upkeepGold(t) <= seatBudget
-        : upkeep + upkeepGold(t) <= budget
-      : gov.treasury[seat] >= GOV_TUNING.secureYears * (upkeep + upkeepGold(t));
-  // cashCheck: the treasury and the seat's stock also pay for the building and its first reserve, besides what the
-  // queue still costs and MONEY_RESERVE_YEARS of upkeep for the buildings standing (for a seat: the seats standing).
-  let cash = 0;
-  let committed = 0;
-  let keepExisting = 0;
-  let keepSeats = 0;
-  if (GOV_TUNING.cashCheck) {
-    cash = gov.treasury[seat];
-    for (let m = 0; m < MATERIAL_COUNT; m++) cash += gov.stock[seat * MATERIAL_COUNT + m] * PRICE[m];
-    for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) committed += buildGold(gov.projectType[i]);
-    keepExisting = MONEY_RESERVE_YEARS * districtUpkeep(sim, seat, false);
-    keepSeats = MONEY_RESERVE_YEARS * districtSeatUpkeep(sim, seat, false);
-  }
-  const paid = (t: number) => !GOV_TUNING.cashCheck || cash - committed - (t === SEAT_TYPE ? keepSeats : keepExisting) >= buildGold(t);
-  const secured = (t: number) => {
-    if (!fitsBudget(t)) {
-      gov.rejectBudget++;
-      return false;
-    }
-    if (!paid(t)) {
-      gov.rejectCash++;
-      return false;
-    }
-    return true;
-  };
   for (let c = 0; c < n; c++) {
-    if (gov.district[c] !== seat || queued(gov, seat, c)) continue;
+    if (gov.district[c] !== seat || gov.projectSite[seat] === c) continue;
     const slot = freeGovSlot(sim, c);
     if (slot < 0) continue;
     // 1. A planned seat of government.
-    if (sim.seatSite[c] && buildingFits(sim, c, SEAT_TYPE) && secured(SEAT_TYPE)) {
+    if (sim.seatSite[c] && buildingFits(sim, c, SEAT_TYPE) && fits(SEAT_TYPE)) {
       const score = 1000;
       if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, SEAT_TYPE, score];
       continue;
@@ -769,19 +459,19 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
     // 2. Comfort where a settlement threatens to break away.
     if (sim.satisfaction[c] < GOV_TUNING.margin) {
       for (const t of COMFORT_TYPES) {
-        if (!buildingFits(sim, c, t) || !secured(t)) continue;
+        if (!buildingFits(sim, c, t) || !fits(t)) continue;
         const score = 100 + (GOV_TUNING.margin - sim.satisfaction[c]) * people * 0.01;
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
         break;
       }
     }
-    // 3. Growth where it is crowded (more people pay more taxes); not while buildings lack upkeep (maintenanceFirst).
-    if (people >= 0.8 * sim.cellCapacity[c] && !gov.maintShort[seat]) {
+    // 3. Growth where it is crowded (more people pay more taxes).
+    if (people >= 0.8 * sim.cellCapacity[c]) {
       for (const t of GROWTH_TYPES) {
-        if (!buildingFits(sim, c, t) || !secured(t)) continue;
+        if (!buildingFits(sim, c, t) || !fits(t)) continue;
         const gain = capacityWith(sim, c, t, -1) - sim.cellCapacity[c];
         if (gain < 1) continue;
-        const score = gain / Math.max(1, goldCost(t)) * 10;
+        const score = (gain / Math.max(1, goldCost(t))) * 10;
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
       }
     }
@@ -790,156 +480,137 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   return bestSite >= 0;
 }
 
+/** A trip of a government trader (or a money transfer between seats). */
+function addTrip(gov: Government, seat: number, site: number, material: number, amount: number, money: number, arrive: number, back: number): void {
+  if (gov.tripCount === gov.tripSeat.length) {
+    const grow = <T extends Int32Array | Uint8Array | Float64Array>(a: T): T => {
+      const b = new (a.constructor as { new (n: number): T })(a.length * 2);
+      b.set(a);
+      return b;
+    };
+    gov.tripSeat = grow(gov.tripSeat);
+    gov.tripSite = grow(gov.tripSite);
+    gov.tripMaterial = grow(gov.tripMaterial);
+    gov.tripAmount = grow(gov.tripAmount);
+    gov.tripMoney = grow(gov.tripMoney);
+    gov.tripArrive = grow(gov.tripArrive);
+    gov.tripBack = grow(gov.tripBack);
+  }
+  const i = gov.tripCount++;
+  gov.tripSeat[i] = seat;
+  gov.tripSite[i] = site;
+  gov.tripMaterial[i] = material;
+  gov.tripAmount[i] = amount;
+  gov.tripMoney[i] = money;
+  gov.tripArrive[i] = arrive;
+  gov.tripBack[i] = back;
+}
+
 /**
- * Weekly: government traders arrive and set out. A free trader of a seat
- * brings wood or stone to the site of its project or of its buildings'
- * upkeep: from the seat's own stock, else bought from the settlement of its
- * people that spares the most (paid from the treasury). A seat short of money
- * for its project gets it from the richest seat of its people.
+ * Weekly: government traders arrive and set out. Every four weeks each free
+ * trader of a seat brings wood or stone to a site of its district: the upkeep
+ * reserve of its buildings first, then its project's materials; from the
+ * seat's own stock, else bought from the settlement of its people that
+ * spares the most (paid from the treasury). A seat short of money gets half
+ * the treasury of the richest seat of its people.
  */
 export function advanceGovernment(sim: Simulation): void {
-  if (!GOV_TUNING.on) return;
   const gov = sim.government;
   const { world, economy, trade } = sim;
   const now = sim.tick;
-  // Arrivals.
-  const keep: GovTrip[] = [];
-  for (const t of gov.trips) {
-    if (t.arrive === now) {
-      if (t.amount > 0) {
-        gov.stock[t.site * MATERIAL_COUNT + t.material] += t.amount;
-        gov.incoming[t.site * MATERIAL_COUNT + t.material] -= t.amount;
+  // Arrivals; trips whose trader is back are dropped (in order).
+  let kept = 0;
+  for (let i = 0; i < gov.tripCount; i++) {
+    const site = gov.tripSite[i];
+    if (gov.tripArrive[i] === now) {
+      const amount = gov.tripAmount[i];
+      if (amount > 0) {
+        const m = gov.tripMaterial[i];
+        gov.stock[site * MATERIAL_COUNT + m] += amount;
+        gov.incoming[site * MATERIAL_COUNT + m] -= amount;
       }
-      if (t.money > 0) gov.treasury[t.site] += t.money;
+      if (gov.tripMoney[i] > 0) gov.treasury[site] += gov.tripMoney[i];
     }
-    if (t.back <= now) {
-      if (!t.extra) gov.away[t.seat] = Math.max(0, gov.away[t.seat] - 1);
-    } else keep.push(t);
+    if (gov.tripBack[i] <= now) {
+      gov.away[gov.tripSeat[i]] = Math.max(0, gov.away[gov.tripSeat[i]] - 1);
+      continue;
+    }
+    if (kept !== i) {
+      gov.tripSeat[kept] = gov.tripSeat[i];
+      gov.tripSite[kept] = site;
+      gov.tripMaterial[kept] = gov.tripMaterial[i];
+      gov.tripAmount[kept] = gov.tripAmount[i];
+      gov.tripMoney[kept] = gov.tripMoney[i];
+      gov.tripArrive[kept] = gov.tripArrive[i];
+      gov.tripBack[kept] = gov.tripBack[i];
+    }
+    kept++;
   }
-  gov.trips = keep;
-  // moneyBalanceWeeks: from a few weeks after the yearly update on, every so many weeks the seats short of money get
-  // it from the nearest seats with money to spare, carried by a free trader of the sender.
-  const every = GOV_TUNING.moneyBalanceWeeks;
-  if (every > 0 && ((now % WEEKS_PER_YEAR) - 32 + WEEKS_PER_YEAR) % every === 0) balanceMoney(sim);
+  gov.tripCount = kept;
   if (now % 4 !== 0) return;
   const owner = world.owner;
   const n = world.cellCount;
   for (let seat = 0; seat < n; seat++) {
-    // allTraders: every free trader may set out each round; otherwise one per round.
-    const rounds = GOV_TUNING.allTraders ? gov.traders[seat] : 1;
-    for (let round = 0; round < rounds; round++) {
-      if (gov.traders[seat] === 0 || gov.away[seat] >= gov.traders[seat]) break;
+    for (let round = 0; round < gov.traders[seat]; round++) {
+      if (gov.away[seat] >= gov.traders[seat]) break;
       const civ = owner[seat];
-      // seatLoan: a queued seat takes its missing materials from its site's settlement at once (one year of the settlement's own upkeep stays), owing their price.
-      if (GOV_TUNING.seatLoan) {
-        for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) {
-          if (gov.projectType[i] !== SEAT_TYPE) continue;
-          const site = gov.projectSite[i];
-          if (sim.cellPop[site] === 0 || owner[site] !== civ) continue;
-          for (let m = 0; m < MATERIAL_COUNT; m++) {
-            const lack = costOf(SEAT_TYPE, m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
-            const spare = economy.stock[site * MATERIAL_COUNT + m] - settlementUpkeep(economy, site, m);
-            const take = Math.min(lack, spare);
-            if (take <= 0) continue;
-            economy.stock[site * MATERIAL_COUNT + m] -= take;
-            gov.stock[site * MATERIAL_COUNT + m] += take;
-            gov.debt[site] += take * PRICE[m];
-            gov.debtSeat[site] = seat;
-            gov.loaned += take * PRICE[m];
-          }
-        }
-      }
-      // What its sites need: upkeep reserves of its buildings first, then the queued projects' materials in turn.
+      // What its sites need: upkeep reserves of its buildings first, then its project's materials.
       let need = -1;
       let needM = 0;
       let needAmount = 0;
-      let forProject = false;
-      if (need < 0) {
-        for (let c = 0; c < n && need < 0; c++) {
-          if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
-          for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
-            const lack = upkeepReserve(sim, c, m) - gov.stock[c * MATERIAL_COUNT + m] - gov.incoming[c * MATERIAL_COUNT + m];
-            if (lack > 0.5) [need, needM, needAmount] = [c, m, lack];
-          }
+      for (let c = 0; c < n && need < 0; c++) {
+        if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
+        for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
+          const lack = upkeepReserve(sim, c, m) - gov.stock[c * MATERIAL_COUNT + m] - gov.incoming[c * MATERIAL_COUNT + m];
+          if (lack > 0.5) [need, needM, needAmount] = [c, m, lack];
         }
       }
-      if (need < 0) {
-        for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end && need < 0; i++) {
-          if (gov.maintShort[seat] && isGrowth(gov.projectType[i])) continue; // maintenanceFirst
-          const site = gov.projectSite[i];
-          for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
-            const lack = costOf(gov.projectType[i], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
-            if (lack > 0) [need, needM, needAmount, forProject] = [site, m, lack, true];
-          }
+      const site = gov.projectSite[seat];
+      if (need < 0 && site >= 0) {
+        for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
+          const lack = costOf(gov.projectType[seat], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
+          if (lack > 0) [need, needM, needAmount] = [site, m, lack];
         }
       }
-      if (need < 0) {
-        gov.stayNoNeed++;
-        break;
-      }
+      if (need < 0) break;
       let amount = Math.min(needAmount, TRADER_LOAD);
       // From the seat's own stock, else bought.
       let source = -1;
-      if (need !== seat && gov.stock[seat * MATERIAL_COUNT + needM] >= amount) source = seat;
-      // seatBalance: else the nearest other seat of the people with stock above what it keeps, free of charge.
-      if (source < 0 && GOV_TUNING.seatBalance) {
-        let bestD = Infinity;
-        let bestSpare = 0;
-        for (let x = 0; x < n; x++) {
-          if (x === seat || x === need || !gov.traders[x] || owner[x] !== civ) continue;
-          const spare = gov.stock[x * MATERIAL_COUNT + needM] - gov.seatKeep[x * MATERIAL_COUNT + needM];
-          if (spare < Math.min(amount, GOV_TUNING.minLoad)) continue;
-          const d = hexDistance(world, seat, x);
-          if (d < bestD) [source, bestD, bestSpare] = [x, d, spare];
-        }
-        if (source >= 0) amount = Math.min(amount, bestSpare);
-      }
-      const fromSeat = source >= 0;
+      const fromSeat = need !== seat && gov.stock[seat * MATERIAL_COUNT + needM] >= amount;
+      if (fromSeat) source = seat;
       let price = 0;
-      if (source < 0) {
+      if (!fromSeat) {
         let best = 0;
-        // Its own people's settlements, and with buyPartners those of peoples whose merchants trade with it.
-        const partnersOf = sim.diplomacy.partners;
         for (let c = 0; c < n; c++) {
-          const o = owner[c];
-          if (sim.cellPop[c] === 0 || (o !== civ && !(GOV_TUNING.buyPartners && partnersOf[o]?.includes(civ)))) continue;
+          if (sim.cellPop[c] === 0 || owner[c] !== civ) continue;
           const spare = trade.surplus[c * TRADE_GOODS + needM];
           if (spare >= GOV_TUNING.minLoad && spare > best) {
             best = spare;
             source = c;
           }
         }
-        if (source >= 0) amount = Math.min(amount, best);
+        if (source < 0) break;
+        amount = Math.min(amount, best);
         price = amount * PRICE[needM];
-        // Project materials only from money above the upkeep reserve (reserveUpkeep).
-        const keep = forProject ? upkeepMoney(sim, seat) : 0;
-        if (source >= 0 && gov.treasury[seat] - keep < price) {
+        if (gov.treasury[seat] < price) {
           // Ask the richest seat of the people for the money.
           let rich = -1;
           for (let s = 0; s < n; s++) if (gov.traders[s] && owner[s] === civ && s !== seat && (rich < 0 || gov.treasury[s] > gov.treasury[rich])) rich = s;
-          const richKeep = rich >= 0 ? upkeepMoney(sim, rich) : 0;
-          if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] - richKeep > 2 * price) {
-            const send = (gov.treasury[rich] - richKeep) / 2;
+          if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] > 2 * price) {
+            const send = gov.treasury[rich] / 2;
             gov.treasury[rich] -= send;
             const weeks = Math.max(1, hexDistance(world, rich, seat) * WEEKS_PER_HEX);
             gov.away[rich]++;
-            gov.trips.push({ seat: rich, site: seat, material: 0, amount: 0, money: send, arrive: now + weeks, back: now + 2 * weeks });
+            addTrip(gov, rich, seat, 0, 0, send, now + weeks, now + 2 * weeks);
             gov.transfers++;
             gov.transferred += send;
-          } else gov.noRichSeat++;
-          gov.stayNoMoney++;
+          }
           break;
         }
       }
-      if (source < 0) {
-        gov.stayNoSource++;
-        break;
-      }
       gov.sent++;
-      if (fromSeat) {
-        gov.stock[source * MATERIAL_COUNT + needM] -= amount;
-        if (source !== seat) gov.fromSeats += amount;
-      } else {
+      if (fromSeat) gov.stock[seat * MATERIAL_COUNT + needM] -= amount;
+      else {
         economy.stock[source * MATERIAL_COUNT + needM] -= amount;
         trade.surplus[source * TRADE_GOODS + needM] -= amount;
         economy.money[source] += price;
@@ -947,106 +618,9 @@ export function advanceGovernment(sim: Simulation): void {
         gov.spent += price;
       }
       gov.incoming[need * MATERIAL_COUNT + needM] += amount;
-      const toSource = hexDistance(world, seat, source) * WEEKS_PER_HEX;
-      const toSite = hexDistance(world, source, need) * WEEKS_PER_HEX;
-      let weeks = Math.max(1, toSource + toSite);
-      let at = need;
-      const first: GovTrip = { seat, site: need, material: needM, amount, money: 0, arrive: now + weeks, back: 0 };
-      gov.trips.push(first);
-      if (GOV_TUNING.bundle) {
-        // bundle: the rest of the load, both materials from the same source, to the district's other sites short of
-        // upkeep, nearest first.
-        let load = TRADER_LOAD - amount;
-        const done = new Set<number>([need]);
-        while (load > 0.5) {
-          let next = -1;
-          let nextD = Infinity;
-          for (let c = 0; c < n; c++) {
-            if (gov.district[c] !== seat || !sim.hasBuildings[c] || done.has(c)) continue;
-            let short = false;
-            for (let m = 0; m < MATERIAL_COUNT; m++) if (upkeepReserve(sim, c, m) - gov.stock[c * MATERIAL_COUNT + m] - gov.incoming[c * MATERIAL_COUNT + m] > 0.5) short = true;
-            if (!short) continue;
-            const d = hexDistance(world, at, c);
-            if (d < nextD) [next, nextD] = [c, d];
-          }
-          if (next < 0) break;
-          done.add(next);
-          weeks += Math.max(1, nextD * WEEKS_PER_HEX);
-          for (let m = 0; m < MATERIAL_COUNT && load > 0.5; m++) {
-            const lack = upkeepReserve(sim, next, m) - gov.stock[next * MATERIAL_COUNT + m] - gov.incoming[next * MATERIAL_COUNT + m];
-            if (lack <= 0.5) continue;
-            let take = Math.min(lack, load);
-            if (source === seat) take = Math.min(take, gov.stock[seat * MATERIAL_COUNT + m]);
-            else take = Math.min(take, Math.max(0, trade.surplus[source * TRADE_GOODS + m]), economy.stock[source * MATERIAL_COUNT + m], Math.max(0, gov.treasury[seat]) / PRICE[m]);
-            if (take <= 0.5) continue;
-            if (source === seat) gov.stock[seat * MATERIAL_COUNT + m] -= take;
-            else {
-              const cost = take * PRICE[m];
-              economy.stock[source * MATERIAL_COUNT + m] -= take;
-              trade.surplus[source * TRADE_GOODS + m] -= take;
-              economy.money[source] += cost;
-              gov.treasury[seat] -= cost;
-              gov.spent += cost;
-            }
-            gov.incoming[next * MATERIAL_COUNT + m] += take;
-            load -= take;
-            gov.bundled++;
-            gov.trips.push({ seat, site: next, material: m, amount: take, money: 0, arrive: now + weeks, back: now + weeks, extra: true });
-          }
-          at = next;
-        }
-      }
-      first.back = now + Math.max(2, weeks + hexDistance(world, at, seat) * WEEKS_PER_HEX);
+      const weeks = Math.max(1, (hexDistance(world, seat, source) + hexDistance(world, source, need)) * WEEKS_PER_HEX);
       gov.away[seat]++;
-    }
-  }
-}
-
-/** Money a seat keeps for MONEY_RESERVE_YEARS: its buildings' upkeep its goods tax doesn't cover, and what its queued projects still cost. */
-function moneyNeed(sim: Simulation, seat: number): number {
-  const gov = sim.government;
-  let need = MONEY_RESERVE_YEARS * Math.max(0, districtUpkeep(sim, seat, false) - gov.goodsIncome[seat]);
-  for (let i = seat * QUEUE_MAX, end = i + gov.projectCount[seat]; i < end; i++) {
-    const site = gov.projectSite[i];
-    for (let m = 0; m < MATERIAL_COUNT; m++) {
-      const lack = costOf(gov.projectType[i], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m] - gov.stock[seat * MATERIAL_COUNT + m];
-      if (lack > 0) need += lack * PRICE[m];
-    }
-  }
-  return need;
-}
-
-/** Balancing (moneyBalanceWeeks): seats short of money, largest shortfall first, get it from the nearest seats with money to spare. */
-function balanceMoney(sim: Simulation): void {
-  const gov = sim.government;
-  const { world } = sim;
-  const n = world.cellCount;
-  const owner = world.owner;
-  const seats: number[] = [];
-  for (let s = 0; s < n; s++) if (gov.traders[s]) seats.push(s);
-  const spare = new Map<number, number>();
-  const short: { s: number; lack: number }[] = [];
-  for (const s of seats) {
-    const left = gov.treasury[s] - moneyNeed(sim, s);
-    if (left > 0) spare.set(s, left);
-    else if (left < 0) short.push({ s, lack: -left });
-  }
-  short.sort((a, b) => b.lack - a.lack || a.s - b.s);
-  for (const { s, lack } of short) {
-    let still = lack;
-    const donors = seats.filter((d) => d !== s && owner[d] === owner[s] && (spare.get(d) ?? 0) > 1).sort((a, b) => hexDistance(world, s, a) - hexDistance(world, s, b) || a - b);
-    for (const d of donors) {
-      if (still <= 1) break;
-      if (gov.away[d] >= gov.traders[d]) continue;
-      const send = Math.min(still, spare.get(d)!);
-      spare.set(d, spare.get(d)! - send);
-      gov.treasury[d] -= send;
-      still -= send;
-      const weeks = Math.max(1, hexDistance(world, d, s) * WEEKS_PER_HEX);
-      gov.away[d]++;
-      gov.trips.push({ seat: d, site: s, material: 0, amount: 0, money: send, arrive: sim.tick + weeks, back: sim.tick + 2 * weeks });
-      gov.balancedMoney += send;
-      gov.balanceTrips++;
+      addTrip(gov, seat, need, needM, amount, 0, now + weeks, now + Math.max(2, weeks + hexDistance(world, need, seat) * WEEKS_PER_HEX));
     }
   }
 }

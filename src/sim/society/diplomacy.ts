@@ -1,4 +1,3 @@
-import { ECON_TUNING } from './taxes';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import type { Term } from '../terms';
@@ -355,7 +354,7 @@ export function tollValue(sim: Simulation, cell: number, owner: number, traveler
 }
 
 function isShort(sim: Simulation, cell: number): boolean {
-  if (sim.economy.money[cell] < sim.cellAdults[cell] * MONEY_PER_ADULT * ECON_TUNING.money) return true;
+  if (sim.economy.money[cell] < sim.cellAdults[cell] * MONEY_PER_ADULT) return true;
   const want = sim.trade.want;
   for (let g = cell * TRADE_GOODS, end = g + TRADE_GOODS; g < end; g++) if (want[g] > 0) return true;
   return false;

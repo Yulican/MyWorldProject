@@ -7,7 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
 import { BUILDINGS, GOV_SLOT, SLOTS, SlotState } from '../src/sim/society/buildings';
-import { ECON_TUNING, GOV_TUNING } from '../src/sim/society/taxes';
+import { GOV_TUNING } from '../src/sim/society/taxes';
 import { PRICE } from '../src/sim/society/trade';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
@@ -17,65 +17,11 @@ const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 const open = options.open === '1';
-// Central government variants (defaults: the baseline in taxes.ts): gov=1 switches it on; goods=1 taxes goods too (variant B); mean=1 sets the rate by the district mean instead of the weakest settlement; margin, plus, minus, traders, capital tune it.
-if (options.gov === '1') GOV_TUNING.on = true;
-if (options.goods === '1') GOV_TUNING.goodsTax = true;
-if (options.mean === '1') GOV_TUNING.weakest = false;
-if (options.margin) GOV_TUNING.margin = Number(options.margin);
-if (options.plus) GOV_TUNING.taxPlus = Number(options.plus);
-if (options.minus) GOV_TUNING.taxMinus = Number(options.minus);
-if (options.traders) GOV_TUNING.traders = Number(options.traders);
-if (options.capital) GOV_TUNING.capitalTraders = Number(options.capital);
-// queue: projects a seat can queue; minload: smallest load of a government trader; price: factor on all market prices; money: factor on the money adults earn.
-if (options.queue) GOV_TUNING.queue = Number(options.queue);
-if (options.minload) GOV_TUNING.minLoad = Number(options.minload);
+// Government numbers (taxes.ts) by name, e.g. incomeShare=0.3 margin=4; price: factor on all market prices.
+for (const [key, value] of Object.entries(options)) {
+  if (key in GOV_TUNING) (GOV_TUNING as Record<string, number>)[key] = Number(value);
+}
 if (options.price) for (let g = 0; g < PRICE.length; g++) PRICE[g] *= Number(options.price);
-if (options.money) ECON_TUNING.money = Number(options.money);
-// seattax: while a seat is to be paid for, 1 = its district, 2 = its whole people taxes with seatmargin instead of margin; seatcost, seatupkeep: factors on a government seat's cost and upkeep.
-if (options.seattax) GOV_TUNING.seatTax = Number(options.seattax);
-if (options.seatmargin) GOV_TUNING.seatMargin = Number(options.seatmargin);
-if (options.seatcost) GOV_TUNING.seatCost = Number(options.seatcost);
-if (options.seatupkeep) GOV_TUNING.seatUpkeep = Number(options.seatupkeep);
-// secure: years of upkeep the treasury must cover before the government takes on a project (0 = no check).
-if (options.secure) GOV_TUNING.secureYears = Number(options.secure);
-// partners=1: government traders also buy from peoples whose merchants trade with theirs (free trade, trade agreements).
-if (options.partners === '1') GOV_TUNING.buyPartners = true;
-// district=1: one planned seat per government district instead of per people.
-if (options.district) GOV_TUNING.seatPerDistrict = options.district === '1';
-// start: seats' worth of starting money per new people's government; loan=1: queued seats take materials from their site's settlement on credit.
-if (options.start) GOV_TUNING.startSeats = Number(options.start);
-if (options.loan === '1') GOV_TUNING.seatLoan = true;
-// alltraders=0/1 (default 1): every free government trader sets out each round, or one per round; reserve=1: project materials only from money above 2 years of upkeep; seatsfirst=1: no other projects while a seat is planned in the district.
-if (options.alltraders) GOV_TUNING.allTraders = options.alltraders === '1';
-if (options.reserve === '1') GOV_TUNING.reserveUpkeep = true;
-if (options.seatsfirst === '1') GOV_TUNING.seatsFirst = true;
-// income: share of last year's taxes the yearly upkeep may take (income check, seats first in the budget; 0 = check the treasury instead).
-if (options.income) GOV_TUNING.incomeShare = Number(options.income);
-// goodsneed=1: the goods tax is its own rate, set by the district's need for wood and stone, with its own "Goods taxes" term (goodsplus at 0 %, 0 at 10 %, -goodsminus at 50 %).
-if (options.goodsneed) GOV_TUNING.goodsByNeed = options.goodsneed === '1';
-if (options.goodsplus) GOV_TUNING.goodsPlus = Number(options.goodsplus);
-if (options.goodsminus) GOV_TUNING.goodsMinus = Number(options.goodsminus);
-// potential=1: the income check compares upkeep with what the district could raise at its loyalty limit instead of last year's taxes.
-if (options.potential) GOV_TUNING.potentialIncome = options.potential === '1';
-// cash=1: a project also needs its construction and first reserve in hand (treasury and seat stock), besides the queue and 2 years of upkeep.
-if (options.cash === '1') GOV_TUNING.cashCheck = true;
-// seatbudget=1: a seat's income check uses the whole people's income and seats; zeroprio: factor on a seat candidate's benefit in a district at 0 % tax.
-if (options.seatbudget) GOV_TUNING.seatPeopleBudget = options.seatbudget === '1';
-if (options.zeroprio) GOV_TUNING.zeroPriority = Number(options.zeroprio);
-// debtyears: a finished building's cost and first reserve become a debt the goods tax repays over that many years (0 = off).
-if (options.debtyears) GOV_TUNING.debtYears = Number(options.debtyears);
-// maintfirst=1: no growth projects while a district's building lacks a year's upkeep (seats and comfort exempt); bundle=1: a trader fills its load with both materials for the district's other sites short of upkeep.
-if (options.maintfirst === '1') GOV_TUNING.maintenanceFirst = true;
-if (options.bundle === '1') GOV_TUNING.bundle = true;
-// central=1: one goods rate per people covering its whole need, districts up to their loyalty limit; balance=1: traders also draw from other seats' stock above 2 years of their district's need.
-if (options.central === '1') GOV_TUNING.centralGoods = true;
-if (options.balance === '1') GOV_TUNING.seatBalance = true;
-// moneybal: every so many weeks (52 yearly, 13 quarterly) seats short of money get it from seats with money to spare (0 = off).
-if (options.moneybal) GOV_TUNING.moneyBalanceWeeks = Number(options.moneybal);
-// actual: also keep the upkeep within that share of last year's actual taxes (0 = off).
-if (options.actual) GOV_TUNING.actualShare = Number(options.actual);
-// levy=1: each site takes a year's upkeep of its government buildings from its own settlement's surplus as a goods tax there.
-if (options.levy === '1') GOV_TUNING.localLevy = true;
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -206,27 +152,13 @@ for (let seed = 1; seed <= worlds; seed++) {
       'gov seats': govSeats,
       'gov ruins': govRuins,
       treasuries: sim.government.treasury.reduce((a, v) => a + v, 0),
-      'gov trips running': sim.government.trips.length,
+      'gov trips running': sim.government.tripCount,
       'tax changes': text('the taxes'),
       'gov trips sent': sim.government.sent,
-      'trader home: no need': sim.government.stayNoNeed,
-      'trader home: no seller': sim.government.stayNoSource,
-      'trader home: no money': sim.government.stayNoMoney,
       'money transfers': sim.government.transfers,
-      'debt booked': sim.government.debtBooked,
-      'bundled deliveries': sim.government.bundled,
-      'units from other seats': sim.government.fromSeats,
-      'money balanced': sim.government.balancedMoney,
       'levied on site': sim.government.levied,
-      'balancing trips': sim.government.balanceTrips,
-      'debt repaid': sim.government.debtRepaid,
-      'rejected: income check': sim.government.rejectBudget,
-      'rejected: money in hand': sim.government.rejectCash,
       'money transferred': sim.government.transferred,
-      'no seat could help': sim.government.noRichSeat,
       'starting money': sim.government.startMoney,
-      'seat loans': sim.government.loaned,
-      'loans repaid': sim.government.repaid,
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);
