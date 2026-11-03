@@ -21,6 +21,15 @@ const DEFAULT_SPEED = 1;
 const FRAME_BUDGET_MS = 8;
 /** React is told about new map snapshots at most this often. */
 const NOTIFY_INTERVAL_MS = 400;
+/**
+ * After a new world appears, the previous world is garbage once the map has
+ * let go of it (its tiles are disposed when it re-renders). A forced
+ * collection then, while the new world loads, frees it at once; left to the
+ * collector, freeing it came during the first minute of panning the new
+ * world and cost single frames of 30+ ms (the benchmark's second world).
+ * Shorter than the benchmark's settle time (useBenchmark WORLD_SETTLE_MS).
+ */
+const OLD_WORLD_GC_DELAY_MS = 800;
 
 export type GameState = {
   sim: Simulation | null;
@@ -77,6 +86,7 @@ export function createNewWorld(seed: number = randomSeed()): World {
     resumeSpeed: DEFAULT_SPEED,
   });
   startClock();
+  collectOldWorld();
   return sim.world;
 }
 
@@ -92,6 +102,8 @@ export function advanceYears(years: number, prepare?: (sim: Simulation) => void)
   prepare?.(sim);
   notifiedSnapshot = sim.snapshotVersion;
   publish(state.chronicleDialogs ? {} : { chronicleSeen: sim.chronicle.length });
+  // Simulating years at once leaves garbage of its own.
+  collectOldWorld();
 }
 
 export function setSpeed(speed: number) {
@@ -144,6 +156,21 @@ export const snapshotStore = {
   subscribe,
   getVersion: (): number => notifiedSnapshot,
 };
+
+let gcTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Runs a full garbage collection shortly after a world was created or
+ * simulated ahead (see OLD_WORLD_GC_DELAY_MS), on the JS thread while the map
+ * keeps running on the UI thread. Hermes provides gc(); elsewhere a no-op.
+ */
+function collectOldWorld() {
+  if (gcTimer !== null) clearTimeout(gcTimer);
+  gcTimer = setTimeout(() => {
+    gcTimer = null;
+    (globalThis as { gc?: () => void }).gc?.();
+  }, OLD_WORLD_GC_DELAY_MS);
+}
 
 function startClock() {
   if (frame !== null) return;
