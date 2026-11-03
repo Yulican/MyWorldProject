@@ -1,6 +1,6 @@
 # Requirement: Zentralregierung
 
-Stand: umgesetzt (Ablauf:
+Stand: umgesetzt; Steuer-Einträge ohne Dialog (Ablauf:
 Design → Simulation → Umsetzung). Die Zahlen unten sind die vom Nutzer
 gewählten aus der Simulation („Baseline + Abgabe vor Ort“). Baut auf
 Zufriedenheit (`Requirement Zufriedenheit.md`), Handel
@@ -61,7 +61,8 @@ Sicherheitsabstand im ganzen Volk.
   nur so weit, dass sie selbst über dem Sicherheitsabstand bleibt. Was so
   nicht gedeckt ist, kommt wie gewohnt über die Händler.
 - Große Änderungen des Geldsteuersatzes (ab 10 Prozentpunkten) kommen in
-  die Chronik.
+  die Chronik, still in der Liste und ohne Dialog (Zufriedenheit,
+  Abschnitt 5).
 
 ## 5. Was die Regierung baut
 
