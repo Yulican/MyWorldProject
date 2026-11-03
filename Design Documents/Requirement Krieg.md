@@ -35,13 +35,16 @@ Zahlen von Phase 0 und 1 sind simuliert und vom Nutzer gewählt (Abschnitt 14); 
 
 ## 3. Schlacht
 
-- Armeen bestehen aus Nahkampf, Fernkampf und Schock.
-- Eine Schlacht dauert wenige Runden (Startwert 5). Je Runde verliert eine Seite einen festen Anteil der Stärke der anderen (Startwert 10 %; kalibrieren (Simulation)).
-- **Reihenfolge je Runde:**
-  1. Fernkampf trifft den gegnerischen Nahkampf.
-  2. Nahkampf kämpft gegen Nahkampf.
-  3. Schock trifft den gegnerischen Nahkampf.
-- **Ersatzrolle:** Ist kein Nahkampf mehr da, übernimmt Schock die Rolle des Nahkampfs, danach Fernkampf. Beide kämpfen mit Strafe (Startwert −50 %; kalibrieren (Simulation)).
+Simuliert und vom Nutzer gewählt (Abschnitt 14).
+
+- Armeen bestehen aus Nahkampf, Fernkampf und Schock. Stärke einer Truppe = Soldaten × Güterfaktor.
+- **Schaden:** Jeder Angriff entzieht dem Ziel 10 % × Angriffsstärke. Das Ziel verliert Soldaten = Schaden ÷ sein Faktor.
+- **Ziel:** Fernkampf und Schock treffen nur die vorderste Linie des Gegners: Nahkampf, sonst Schock, sonst Fernkampf.
+- **Vorderste Linie ohne Nahkampf:** Kämpft mit −50 % und nutzt in dieser Runde nicht ihre eigene Rolle.
+- **Ablauf je Runde:** Fernkampf → Nahkampf → Schock. Innerhalb einer Phase wirken beide Seiten gleichzeitig, zwischen den Phasen nacheinander.
+- **Dauer:** höchstens 5 Runden.
+- **Rückzug:** Eine Seite zieht ab, sobald ihre Stärke unter 50 % der Anfangsstärke fällt.
+- **Sieger:** Die Seite, die den größeren Anteil ihrer Anfangsstärke behält.
 - Gerechnet wird pro Schlacht mit Zählern, nicht pro Soldat (Rechenzeit).
 
 ## 4. Armeen
@@ -55,7 +58,7 @@ Zahlen von Phase 0 und 1 sind simuliert und vom Nutzer gewählt (Abschnitt 14); 
 - **Belagert werden können Regierungssitze,** auch die Hauptstadt.
 - **Während der Belagerung:** alle Kapazitäten der Siedlung (Ernte, Bau, Bevölkerung) halbiert; der Handel mit der Siedlung ruht.
 - **Entsatz:** Die Armee der Siedlung oder Armeen anderer Siedlungen des Volks (und von Verbündeten) können die Belagerung brechen. Es gibt keine Entfernungsgrenze, die Armee muss den Weg zurücklegen.
-- **Verteidigerbonus:** +25 % im Sitz, +50 % mit eigener Armee im Sitz (kalibrieren (Simulation)).
+- **Verteidigerbonus:** +25 % in einem belagerten Sitz, +50 % mit eigener Armee im Sitz (entschieden).
 - **Besetzung:** Erreicht die Unzufriedenheit der Siedlung den Wert, bei dem sie sich abspalten würde, wird sie besetzt statt abtrünnig. Für die Besetzung gilt weiter die 5-Jahres-Regel (5 Jahre am Stück unter 0), anders als beim Aufstand (Abschnitt 8).
 - **Beute:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben stehen.
 - **Hauptstadt:** Wird die Hauptstadt besetzt, wird das Volk annektiert und ausgelöscht; sein ganzes Gebiet fällt an den Eroberer.
@@ -64,7 +67,7 @@ Zahlen von Phase 0 und 1 sind simuliert und vom Nutzer gewählt (Abschnitt 14); 
 
 - **Erklärung:** Ein Volk darf erklären, wenn seine Stärke das ≥2-Fache des Nachbarn ist. Ziel: einen Regierungssitz samt Bezirk erobern. Der Sitz muss besetzt werden können, und der Feind darf nicht glauben, ihn zurückzuerobern (Aufgabe: siehe unten).
 - Höchstens **ein Krieg** je Volk gleichzeitig.
-- **Aufgabe des Feindes:** Hat er weniger als X % der Stärke des Angreifers (kalibrieren (Simulation)), gibt er auf.
+- **Aufgabe des Feindes:** Hat eine Seite weniger als 40 % der Stärke des Gegners, gibt sie auf (entschieden).
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
 - **Ende:** Der Krieg endet, wenn das Kriegsziel erreicht ist oder nach N Jahren Erschöpfung (N: kalibrieren (Simulation)). Danach: Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
 - **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer. Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
@@ -99,7 +102,7 @@ Zahlen von Phase 0 und 1 sind simuliert und vom Nutzer gewählt (Abschnitt 14); 
 
 0. **Vorstufe:** Abbaugebäude für Eisen und Feuerstein, beide als Handelswaren (Vorkommen bei der Weltgenerierung doppelt so häufig); Gold wird abgebaut und kommt direkt als Geld in die Siedlung (kein Luxusgut mehr, Luxusgüter 6 → 5). Simuliert, Zahlen gewählt (Abschnitt 14).
 1. **Militär ohne Kampf:** Gebäude, Soldaten, Sold, strategische Güter und ihr Verkauf; Gefahr aus Stärke statt Bevölkerung; Anzeige. Simuliert, Zahlen gewählt (Abschnitt 14).
-2. **Schlachtrechnung** als reine Funktion mit Tests und Stats-Tool (`warStats`).
+2. **Schlachtrechnung** als reine Funktion mit Tests und Stats-Tool (`warStats`). Simuliert, Zahlen gewählt (Abschnitt 14).
 3. **Krieg auf der Karte:** Armeen, Marsch, Belagerung, Besetzung, Kriegserklärung, Frieden, Annexion der Hauptstadt.
 4. **Bündnisse und Verteidigungspakte.**
 5. **Aufstände als Krieg** (Abschnitt 8).
@@ -125,7 +128,7 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröße; Rebellen müssen nicht zusammenhängen; bei Sieg ein Volk je zusammenhängender Gruppe, miteinander verbündet; Besetzung behält die 5-Jahres-Regel; Rebellensiedlungen wechseln mit der Erklärung den Besitzer; annektierte Rebellensiedlungen bekommen „erobert“. Zuordnung der strategischen Güter, Gold, Beschaffung von Eisen und Feuerstein sowie die Zahlen von Phase 0 und 1: siehe Abschnitt 2 und 14.
 
 Offen:
-- Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Verlustanteil, Ersatzrollenstrafe, Verteidigerbonus, Aufgabeanteil, Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
+- Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
 ## 14. Simulation Phase 0 und 1
@@ -144,3 +147,18 @@ Offen:
 Gemessen mit dem Produktionscode (endgültige Variante), 24 Welten, Jahr 500 (Rechenzeit auf 12 Welten).
 
 Zusätzlich gewählt: Eisen- und Feuerstein-Vorkommen sind bei der Weltgenerierung doppelt so häufig.
+
+### Schlacht (Phase 2)
+
+24 Welten, 194 Nachbarpaare plus synthetische Fälle, mit 10 % Schaden, Rückzug bei 50 % und Verteidigerbonus +25 %:
+
+| Stärkeverhältnis | Verlust des Verlierers | Verlust des Siegers |
+|---|---|---|
+| 1,5 : 1 | 50 % | 24 % |
+| 2 : 1 | 55 % | 15 % |
+| 3 : 1 | 64 % | 7 % |
+
+- Ab 1,5-facher Stärke gewinnt fast immer die stärkere Seite; nur nahe Gleichstand entscheidet die Zusammensetzung. Die Stärkeformel (Soldaten × Faktoren) sagt den Ausgang gut voraus. Armeen ohne Nahkampf sind schwächer als ihre Stärke (bewusst akzeptiert).
+- Die Kriegserklärung ab 2-facher Stärke gewinnt gegen jede Zusammensetzung, auch gegen +50 % Verteidigerbonus (nötig wären 1,94-fach).
+- Rechenzeit ca. 0,13 µs pro Schlacht.
+- Für Phase 3: Die echten Armeen sind klein (Ø 64 Soldaten je Volk) und nur etwa 1 % sind Schock (Pferde sind knapp).
