@@ -36,6 +36,7 @@ import type { Simulation } from './simulation';
  * - `govBuild`: 1 = seats build military buildings as government projects (government.ts: chooseProject), priority loyalty > military > growth.
  * - `threatDanger`: a people feels threatened (arms) when another's danger for it is at least this (50 = equal strength at nearness 1).
  * - `spareYears`: a seat with this many years of one building's pay in its treasury counts as having resources to spare.
+ * - `govGoods`: 1 = the seat's government traders buy iron, flint and horses for soldiers that lack them from the people's settlements that spare them (paid from the treasury, MERCHANT-sized loads per trader).
  * - `build`: 1 = settlements build military buildings (placeholder rule), 0 = only what a test sets up.
  */
 export const MIL = {
@@ -60,6 +61,7 @@ export const MIL = {
   mineAlways: 0,
   govBuild: 1,
   threatDanger: 50,
+  govGoods: 0,
   spareYears: 5,
 };
 
@@ -93,6 +95,11 @@ export type Military = {
   paid: number;
   goldMined: number;
   goodsUsed: number;
+  /** Iron+flint mined, needed by the soldiers (soldiers / perN a year) and bought by government traders (units, summed over years). */
+  goodsMined: number;
+  goodsNeeded: number;
+  goodsBought: number;
+  goldTaxed: number;
   uncovered: number;
 };
 
@@ -111,6 +118,10 @@ export function createMilitary(cellCount: number): Military {
     paid: 0,
     goldMined: 0,
     goodsUsed: 0,
+    goodsMined: 0,
+    goodsNeeded: 0,
+    goodsBought: 0,
+    goldTaxed: 0,
     uncovered: 0,
   };
 }
@@ -294,6 +305,8 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     }
   }
 
+  if (MIL.govGoods) governmentBuys(sim, owner);
+
   // Strategic goods: soldiers use MIL.perN^-1 units a year; a troop type without its good is not stronger.
   for (let c = 0; c < n; c++) {
     const base = c * TROOP_TYPES;
@@ -305,6 +318,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
         continue;
       }
       const need = count / MIL.perN;
+      if (t !== Troop.Shock) m.goodsNeeded += need;
       const i = c * STORED_COUNT + TROOP_GOOD[t];
       const covered = eco.luxury[i] >= need;
       if (covered) {
@@ -360,4 +374,70 @@ export function pickTroopType(sim: Simulation, cell: number, has: (good: number)
     }
   }
   return best;
+}
+
+/** Whether the people feels threatened: some people's danger for it is at least MIL.threatDanger. */
+export function threatened(sim: Simulation, civ: number, pairs: number): boolean {
+  const d = sim.diplomacy.danger;
+  for (let b = 1; b < pairs; b++) if (b !== civ && d[civ * pairs + b] >= MIL.threatDanger) return true;
+  return false;
+}
+
+/** Load a government trader carries (units of a strategic good). */
+const TRADER_UNITS = 80;
+
+/**
+ * Variant e: each seat's traders buy what its soldiers' stock lacks for the
+ * year from settlements of the people that spare the good, paid from the
+ * treasury beyond the pay reserve. Idealized: delivery within the week.
+ */
+function governmentBuys(sim: Simulation, owner: Uint8Array): void {
+  const m = sim.military;
+  const gov = sim.government;
+  const eco = sim.economy;
+  const n = sim.world.cellCount;
+  const left = new Float32Array(n);
+  for (let c = 0; c < n; c++) if (gov.traders[c] > 0) left[c] = gov.traders[c] * TRADER_UNITS;
+  for (let c = 0; c < n; c++) {
+    const d = gov.district[c];
+    if (d < 0 || left[d] <= 0) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) {
+      const count = m.soldiers[c * TROOP_TYPES + t];
+      if (count === 0) continue;
+      const k = TROOP_GOOD[t];
+      const i = c * STORED_COUNT + k;
+      let lack = count / MIL.perN - eco.luxury[i];
+      if (lack <= 0) continue;
+      // The people's settlement with the most to spare of the good.
+      for (let tries = 0; tries < 3 && lack > 1e-6 && left[d] > 0; tries++) {
+        let src = -1;
+        let best = 0;
+        for (let o = 0; o < n; o++) {
+          if (o === c || owner[o] !== owner[c]) continue;
+          const spare = eco.luxury[o * STORED_COUNT + k] - soldiersNeed(m, o, k);
+          if (spare > best) {
+            best = spare;
+            src = o;
+          }
+        }
+        if (src < 0) break;
+        const units = Math.min(lack, best, left[d]);
+        const price = units * 5;
+        if (gov.treasury[d] - gov.reserve[d] < price) break;
+        gov.treasury[d] -= price;
+        eco.money[src] += price;
+        eco.luxury[src * STORED_COUNT + k] -= units;
+        eco.luxury[i] += units;
+        left[d] -= units;
+        lack -= units;
+        m.goodsBought += units;
+      }
+    }
+  }
+}
+
+/** Units a cell's own soldiers need of stored good k this year. */
+function soldiersNeed(m: Military, cell: number, k: number): number {
+  const t = TROOP_GOOD.indexOf(k as never);
+  return t < 0 ? 0 : m.soldiers[cell * TROOP_TYPES + t] / MIL.perN;
 }

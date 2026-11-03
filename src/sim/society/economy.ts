@@ -539,11 +539,22 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     if (economy.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[economy.type[s]];
-    if (isStored(b.good)) economy.luxury[cell * STORED_COUNT + b.good - FIRST_LUXURY] += (b.amount * factor) / STEPS_PER_YEAR;
+    if (isStored(b.good)) {
+      economy.luxury[cell * STORED_COUNT + b.good - FIRST_LUXURY] += (b.amount * factor) / STEPS_PER_YEAR;
+      if (b.good === Good.Iron || b.good === Good.Flint) sim.military.goodsMined += (b.amount * factor) / STEPS_PER_YEAR;
+    }
     else if (b.good === Good.Gold) {
       // Gold is money at once (war phase 0): MIL.goldRate per unit.
+      // Generated money, taxed like the adults' money: the district's money tax rate goes to its treasury.
       const gold = (b.amount * factor * MIL.goldRate) / STEPS_PER_YEAR;
-      economy.money[cell] += gold;
+      const seat = sim.government.district[cell];
+      const tax = seat >= 0 ? gold * sim.government.cellRate[cell] : 0;
+      if (tax > 0) {
+        sim.government.treasury[seat] += tax;
+        sim.government.collected += tax;
+        sim.military.goldTaxed += tax;
+      }
+      economy.money[cell] += gold - tax;
       sim.military.goldMined += gold;
     } else if (b.good === Good.Grain || b.good === Good.Barrels) economy.provisions[cell * 2 + (b.good === Good.Grain ? 0 : 1)] += b.amount / STEPS_PER_YEAR;
   }

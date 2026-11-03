@@ -1,4 +1,4 @@
-import { MIL, createMilitary, updateMilitary, TROOP_TYPES, type Military } from './military';
+import { MIL, threatened, createMilitary, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
@@ -770,7 +770,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
           prev[nb] = c;
           touched.push(nb);
           const workshop = WORKSHOP_OF[world.deposit[nb]];
-          if (workshop !== undefined && (isLuxury(BUILDINGS[workshop].good) || (MIL.captureStrategic && isStored(BUILDINGS[workshop].good))) && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
+          if (workshop !== undefined && (isLuxury(BUILDINGS[workshop].good) || (MIL.captureStrategic && isStored(BUILDINGS[workshop].good) && (MIL.captureStrategic === 1 || threatened(sim, civ.id, PAIRS)))) && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
           else next.push(nb);
         }
       }

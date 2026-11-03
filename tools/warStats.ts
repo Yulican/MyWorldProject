@@ -4,6 +4,7 @@
 // Usage: npx tsx tools/warStats.ts [worlds=12] [years=300,500] [variant ...]
 //   A variant is "name:key=value,key=value" with the keys of MIL (src/sim/society/military.ts), e.g.
 //   npx tsx tools/warStats.ts 12 300,500 "off:enabled=0" "cap20:capacity=20,sold=0.1" "cap30:capacity=30,sold=0.1,saleDanger=50"
+//   depositMul=2: iron and flint deposits 2x as frequent at world generation.
 //   enabled=0: phase 0 only (mines, gold as money), no soldiers and danger from population.
 //   Without variants one run with the defaults. Also accepts GOV_TUNING keys (incomeShare, ...).
 // The same file runs on the code before the war work (no military.ts): then it prints only the shared figures.
@@ -11,6 +12,7 @@ import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
 import { GOV_TUNING } from '../src/sim/society/taxes';
+import { DEPOSITS, Deposit } from '../src/sim/world/deposits';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { TRADE_GOOD_NAMES } from '../src/sim/society/trade';
 
@@ -27,6 +29,7 @@ try {
 }
 const defaults = MIL ? { ...MIL } : {};
 const govDefaults = { ...GOV_TUNING };
+const depositDefaults = { iron: DEPOSITS[Deposit.Iron].frequency, flint: DEPOSITS[Deposit.Flint].frequency };
 
 const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
@@ -34,6 +37,10 @@ const variants = process.argv.slice(4).length ? process.argv.slice(4) : ['defaul
 
 type Row = Record<string, number>;
 const goodIndex = (name: string) => TRADE_GOOD_NAMES.indexOf(name as never);
+
+function soldiersAtCell(mil: Record<string, any>, c: number): number {
+  return mil.soldiers[c * 3] + mil.soldiers[c * 3 + 1] + mil.soldiers[c * 3 + 2];
+}
 
 function measure(sim: Simulation, ms: number, year: number): Row {
   const w = sim.world;
@@ -116,6 +123,13 @@ function measure(sim: Simulation, ms: number, year: number): Row {
       grp[g][1] += sim.civs[id]!.population;
     }
   }
+  const stockAt = [0, 0];
+  if (mil) {
+    for (let c = 0; c < w.cellCount; c++) {
+      const has = soldiersAtCell(mil, c) > 0 ? 1 : 0;
+      stockAt[has] += sim.economy.luxury[c * 7 + 5] + sim.economy.luxury[c * 7 + 6];
+    }
+  }
   let money = 0;
   for (const v of sim.economy.money) money += v;
   const del = sim.trade.delivered;
@@ -141,6 +155,13 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'soldiers/1000 gold peoples': (1000 * grp[1][0]) / Math.max(1, grp[1][1]),
     'soldiers/1000 other peoples': (1000 * grp[0][0]) / Math.max(1, grp[0][1]),
     'gold peoples': goldCiv.size,
+    'iron+flint mined /yr': (mil?.goodsMined ?? 0) / year,
+    'iron+flint needed /yr (melee+ranged)': (mil?.goodsNeeded ?? 0) / year,
+    'iron+flint used by soldiers /yr': (mil?.goodsUsed ?? 0) / year,
+    'bought by gov traders /yr': (mil?.goodsBought ?? 0) / year,
+    'iron+flint stock at soldiers': stockAt[1],
+    'iron+flint stock elsewhere': stockAt[0],
+    'gold taxed (to treasuries)': mil?.goldTaxed ?? 0,
     trained: mil?.trained ?? 0,
     deserted: mil?.deserted ?? 0,
     disbanded: mil?.disbanded ?? 0,
@@ -187,9 +208,14 @@ for (const spec of variants) {
   const [name, rest = ''] = spec.split(':');
   for (const [k, v] of Object.entries(defaults)) (MIL as Mil)[k] = v as number;
   Object.assign(GOV_TUNING, govDefaults);
+  DEPOSITS[Deposit.Iron].frequency = depositDefaults.iron;
+  DEPOSITS[Deposit.Flint].frequency = depositDefaults.flint;
   for (const kv of rest.split(',').filter(Boolean)) {
     const [k, v] = kv.split('=');
-    if (MIL && k in MIL) MIL[k] = Number(v);
+    if (k === 'depositMul') {
+      DEPOSITS[Deposit.Iron].frequency = depositDefaults.iron * Number(v);
+      DEPOSITS[Deposit.Flint].frequency = depositDefaults.flint * Number(v);
+    } else if (MIL && k in MIL) MIL[k] = Number(v);
     else if (k in GOV_TUNING) (GOV_TUNING as Record<string, number>)[k] = Number(v);
     else throw new Error(`unknown key ${k}`);
   }
