@@ -132,10 +132,13 @@ Offen:
 
 | Kennzahl | heute | mit Phase 0+1 |
 |---|---|---|
-| Siedlungen | 207 | ca. 212 |
-| Einwohner | ca. 17.700 | ca. 17.600 (Rauschen) |
-| Soldaten | – | ca. 550 (ca. 3 % der Bevölkerung) |
-| Soldaten mit ihrem strategischen Gut | – | ca. 24 % |
-| Rechenzeit (ms pro Jahr) | 9,5 | ca. 11 |
+| Siedlungen | 207 | 226 |
+| Einwohner | 17.699 | 17.952 |
+| Soldaten | – | 589 (ca. 3,3 % der Bevölkerung) |
+| Soldaten mit ihrem strategischen Gut | – | 22,5 % |
+| Mangels Sold später entlassene Soldaten (zurück in die Bevölkerung) | – | ca. 44 % der ausgebildeten |
+| Rechenzeit (ms pro Jahr, 12 Welten) | 9,1 | 8,7 (praktisch unverändert) |
+
+Gemessen mit dem Produktionscode (endgültige Variante), 24 Welten, Jahr 500 (Rechenzeit auf 12 Welten).
 
 Zusätzlich gewählt: Eisen- und Feuerstein-Vorkommen sind bei der Weltgenerierung doppelt so häufig.
