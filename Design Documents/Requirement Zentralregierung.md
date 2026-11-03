@@ -1,6 +1,6 @@
 # Requirement: Zentralregierung
 
-Stand: Design und Simulation abgeschlossen, Umsetzung läuft (Ablauf:
+Stand: umgesetzt (Ablauf:
 Design → Simulation → Umsetzung). Die Zahlen unten sind die vom Nutzer
 gewählten aus der Simulation („Baseline + Abgabe vor Ort“). Baut auf
 Zufriedenheit (`Requirement Zufriedenheit.md`), Handel
@@ -135,17 +135,19 @@ Regierungsgebäuden und Regierungshändlern unterwegs.
 
 ## 11. Ergebnis der Simulation
 
-12 Welten, Jahr 500, gegen den Stand ohne Regierung:
+12 Welten, Jahr 500, gegen den Stand ohne Regierung (mit der Umsetzung,
+also auch mit Regel R1 des Handels, siehe `Requirement Handel.md`):
 
 | Jahr 500 | ohne Regierung | mit Regierung |
 |---|---|---|
-| Menschen | 14 622 | 16 489 |
-| Siedlungen | 197 | 188 |
-| Regierungssitze | 23,8 | 32,5 |
-| Aufstände | 2,3 | 0,3 |
-| Handel (Güter) | 67 500 | 49 500 |
-| Geldsteuer / Warensteuer (Mittel) | – | 27 % / 2 % |
-| Regierungsgebäude gebaut / stehend / Ruinen | – | 355 / 311 / 43 (12 %) |
+| Menschen | 14 622 | 16 837 |
+| Siedlungen | 197 | 191 |
+| Völker | 8,8 | 8,1 |
+| Regierungssitze | 23,8 | 31,3 |
+| Aufstände | 2,3 | 1,2 |
+| Handel (Güter) | 67 500 | 48 400 |
+| Geldsteuer (Mittel) | – | 27 % |
+| Regierungsgebäude stehend / Ruinen | – | 294 / 56 |
 
 Verworfen nach Simulation: längere Bauliste, mehr oder größere Händler,
 niedrigere Preise, mehr Geld, Durchschnitt statt schwächster Siedlung,
@@ -157,7 +159,8 @@ strengere Einkommensprüfungen.
 
 ## 12. Offene Punkte
 
-- Handel liegt etwa 27 % unter dem Stand ohne Regierung.
+- Handel liegt etwa 28 % unter dem Stand ohne Regierung (vor allem weniger
+  Getreide und Wasser hin und her, Regel R1).
 - Der Geldsteuersatz liegt im Mittel bei etwa 27 %.
 - Etwas weniger Völker (weniger Abspaltungen).
 - Rund 12 % der Regierungsgebäude verfallen, meist an Orten ohne eigenes

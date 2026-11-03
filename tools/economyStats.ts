@@ -8,7 +8,7 @@ import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type S
 import { openDiplomacy } from '../src/bench/openDiplomacy';
 import { BUILDINGS, GOV_SLOT, SLOTS, SlotState } from '../src/sim/society/buildings';
 import { GOV_TUNING } from '../src/sim/society/taxes';
-import { PRICE, PROVISION_TUNING, TradeGood } from '../src/sim/society/trade';
+import { PRICE, TradeGood } from '../src/sim/society/trade';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
@@ -20,7 +20,6 @@ const open = options.open === '1';
 // Government numbers (taxes.ts) by name, e.g. incomeShare=0.3 margin=4; price: factor on all market prices.
 for (const [key, value] of Object.entries(options)) {
   if (key in GOV_TUNING) (GOV_TUNING as Record<string, number>)[key] = Number(value);
-  if (key in PROVISION_TUNING) (PROVISION_TUNING as Record<string, boolean>)[key] = value === '1';
 }
 if (options.price) for (let g = 0; g < PRICE.length; g++) PRICE[g] *= Number(options.price);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.

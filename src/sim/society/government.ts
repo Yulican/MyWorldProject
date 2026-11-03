@@ -599,7 +599,18 @@ export function advanceGovernment(sim: Simulation): void {
   if (now % 4 !== 0) return;
   const owner = world.owner;
   const n = world.cellCount;
-  for (let seat = 0; seat < n; seat++) {
+  // One pass over the map for the round: the seats, each district's sites with buildings and each people's
+  // settlements, all in hex order (as the traders would find them hex by hex).
+  const seats: number[] = [];
+  const sites = new Map<number, number[]>();
+  const settled = new Map<number, number[]>();
+  for (let c = 0; c < n; c++) {
+    if (gov.traders[c]) seats.push(c);
+    const d = gov.district[c];
+    if (d >= 0 && sim.hasBuildings[c]) (sites.get(d) ?? sites.set(d, []).get(d)!).push(c);
+    if (sim.cellPop[c] > 0 && owner[c]) (settled.get(owner[c]) ?? settled.set(owner[c], []).get(owner[c])!).push(c);
+  }
+  for (const seat of seats) {
     for (let round = 0; round < gov.traders[seat]; round++) {
       if (gov.away[seat] >= gov.traders[seat]) break;
       const civ = owner[seat];
@@ -607,8 +618,8 @@ export function advanceGovernment(sim: Simulation): void {
       let need = -1;
       let needM = 0;
       let needAmount = 0;
-      for (let c = 0; c < n && need < 0; c++) {
-        if (gov.district[c] !== seat || !sim.hasBuildings[c]) continue;
+      for (const c of sites.get(seat) ?? []) {
+        if (need >= 0) break;
         for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
           const lack = upkeepReserve(sim, c, m) - gov.stock[c * MATERIAL_COUNT + m] - gov.incoming[c * MATERIAL_COUNT + m];
           if (lack > 0.5) [need, needM, needAmount] = [c, m, lack];
@@ -630,8 +641,7 @@ export function advanceGovernment(sim: Simulation): void {
       let price = 0;
       if (!fromSeat) {
         let best = 0;
-        for (let c = 0; c < n; c++) {
-          if (sim.cellPop[c] === 0 || owner[c] !== civ) continue;
+        for (const c of settled.get(civ) ?? []) {
           const spare = trade.surplus[c * TRADE_GOODS + needM];
           if (spare >= GOV_TUNING.minLoad && spare > best) {
             best = spare;
@@ -644,7 +654,7 @@ export function advanceGovernment(sim: Simulation): void {
         if (gov.treasury[seat] < price) {
           // Ask the richest seat of the people for the money.
           let rich = -1;
-          for (let s = 0; s < n; s++) if (gov.traders[s] && owner[s] === civ && s !== seat && (rich < 0 || gov.treasury[s] > gov.treasury[rich])) rich = s;
+          for (const s of seats) if (owner[s] === civ && s !== seat && (rich < 0 || gov.treasury[s] > gov.treasury[rich])) rich = s;
           if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] > 2 * price) {
             const send = gov.treasury[rich] / 2;
             gov.treasury[rich] -= send;
