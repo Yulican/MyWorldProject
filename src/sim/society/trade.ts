@@ -212,13 +212,20 @@ export function stockOf(eco: Economy, cell: number, good: number): number {
   return eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury];
 }
 
+/**
+ * Simulation switches (tools/economyStats.ts): `markOnTake` = grain and water
+ * leaving a stock mark its supply for an update (the fix); `keepAsked` = a
+ * settlement keeps the grain and water it would ask for (rule R1).
+ */
+export const PROVISION_TUNING = { markOnTake: true, keepAsked: false };
+
 /** Adds to (or takes from) a hex's stock; grain and water change its supply, so with `trade` it is marked for an update. */
 export function addStock(eco: Economy, cell: number, good: number, amount: number, trade?: Trade): void {
   if (good <= TradeGood.Stone) eco.stock[cell * MATERIAL_COUNT + good] += amount;
   else if (good === TradeGood.Money) eco.money[cell] += amount;
   else if (good <= TradeGood.Water) {
     eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
-    if (trade && amount !== 0) markSupply(trade, cell);
+    if (trade && amount !== 0 && (amount > 0 || PROVISION_TUNING.markOnTake)) markSupply(trade, cell);
   } else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
 }
 
@@ -314,10 +321,14 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     const stock = economy.provisions[cell * 2 + k];
     const supply = sim.cellSupply[base + k];
     const own = supply - Math.min(stock, PROVISIONS_MAX);
-    trade.surplus[t + g] = Math.max(0, stock - Math.max(0, people - own));
-    if (supply > capacity + 0.01 || people < 0.5 * capacity) continue;
     let next = Infinity;
     for (let j = 0; j < SUPPLY_KINDS; j++) if (j !== k) next = Math.min(next, sim.cellSupply[base + j]);
+    // What it keeps: what its people need; with keepAsked (R1), in a hex at least half full, also what it would ask
+    // for (up to the next limit, at most PROVISIONS_MAX), so it never sells what it would buy back.
+    let keep = Math.max(0, people - own);
+    if (PROVISION_TUNING.keepAsked && people >= 0.5 * capacity) keep = Math.max(keep, Math.min(PROVISIONS_MAX, next - own));
+    trade.surplus[t + g] = Math.max(0, stock - keep);
+    if (supply > capacity + 0.01 || people < 0.5 * capacity) continue;
     const room = Math.min(PROVISIONS_MAX - Math.min(stock, PROVISIONS_MAX), next - supply);
     trade.want[t + g] = Math.max(0, room - trade.incoming[t + g]);
   }
