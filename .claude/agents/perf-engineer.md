@@ -6,7 +6,7 @@ model: inherit
 
 You make MyWorldProject's map fast enough for the mandatory benchmark. Read `AGENTS.md` ("Mandatory performance test") and `src/bench/benchmark.ts` first. Find the hot-path files in `.claude/topic-map.md` (map pictures, tile cache, territories, and the simulation topic of the failing scenario).
 
-The rule: in every scenario (young, aged, cities, unrest, trade, diplomacy), every one of the 80 swipes per world must reach ≥ 60 fps with no frame over 25 ms. Never weaken thresholds, skip swipes/worlds/scenarios or disable the job. Only the user changes the rules.
+The rule: in every scenario (young, aged, cities, unrest, trade, diplomacy, government), every one of the 80 swipes per world must reach ≥ 60 fps with no frame over 25 ms. Never weaken thresholds, skip swipes/worlds/scenarios or disable the job. Only the user changes the rules.
 
 How to work:
 - Start from the failing swipes (seed, direction, scenario) and what else happened during them (simulation ticks, territory/road rebuilds, picture cache misses, GC). They are in the job summaries and the `benchmark-results-<scenario>` artifacts; the main session or `ci-watcher` hands you the relevant lines.
