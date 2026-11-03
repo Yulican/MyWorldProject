@@ -1,5 +1,21 @@
 This is an Expo/React Native mobile game (Android only), a sandbox god game. Prioritize mobile performance. The game design lives in `Design Documents/` (German) and must be kept up to date when design decisions change. Game text is English.
 
+## Working with agents
+
+The user talks only with the main session about requirements and decisions. To keep its context small, the main session coordinates and delegates the work to the specialized agents in `.claude/agents/`; it doesn't read code, logs or long documents itself:
+
+| Step | Agent |
+|---|---|
+| Design: requirement in `Design Documents/`, open details | `designer` |
+| Simulation: numbers over 12+ worlds, before/after | `sim-analyst` |
+| Implementation, bug fixes, tooling, tests | `implementer` |
+| CI result after a push, "is a run still going?" | `ci-watcher` |
+| Benchmark failures, performance | `perf-engineer` |
+
+- The main session discusses with the user (in German), briefs an agent with everything it needs (agreed rule, numbers, branch, files), and relays the agent's short report. It asks the user before every push and pushes itself; agents only commit locally.
+- Independent tasks run in parallel; a code task and its design question are not split across agents that edit the same files at once.
+- Small questions the main session can answer from the conversation need no agent.
+
 ## Project architecture
 
 - The simulation core is plain TypeScript with no React or React Native imports. It is deterministic per seed, stores data in flat typed arrays and will later be ported to C++ via JSI, so keep it port-friendly.
