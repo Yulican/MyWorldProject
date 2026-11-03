@@ -17,6 +17,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | Trade, merchants, harbors, goods (1280 lines) | `society/trade.ts` | `trade.test.ts` | Requirement Handel (+ Diplomatie for foreign trade) | `economyStats.ts` | trade |
 | Diplomacy: trust, borders, treaties, seats of government (914 lines) | `society/diplomacy.ts` | `diplomacy.test.ts` | Requirement Diplomatie | `diplomacyStats.ts`, `economyStats.ts open=1` | diplomacy |
 | Central government: seats, goods tax, government buildings and traders | `society/government.ts`, `taxes.ts` (+ government traders in `trade.ts`) | `government.test.ts` | Requirement Zentralregierung | `economyStats.ts` | government |
+| War: soldiers, battles, sieges, alliances, rebel wars | not yet implemented (planned `society/war.ts`) | – | Requirement Krieg (draft) | – (planned `warStats.ts`) | planned `war` |
 | Randomness, noise, helpers | `rng.ts`, `noise.ts`, `minHeap.ts`, `terms.ts`, `index.ts` (public API) | – | – | – | – |
 
 ## App (agent `app-engineer`)
@@ -42,4 +43,5 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | `Requirement Handel.md` | internal trade, merchants, goods, prices |
 | `Requirement Diplomatie.md` | trust, borders, foreign trade |
 | `Requirement Zentralregierung.md` | seats of government, goods tax, government buildings and traders |
+| `Requirement Krieg.md` | war: soldiers, strategic goods, battles, sieges, alliances, rebel wars (draft, 5 phases) |
 | `sim-prototyp/` | old standalone load prototype, placeholder rules |

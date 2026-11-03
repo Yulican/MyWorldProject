@@ -36,6 +36,12 @@ Schwerpunkte dazu (Krieg und andere Mechaniken).
   Hauptstadt. Abgespaltene und aufständische Völker bekommen keins, sie
   behalten ihre Siedlungen. (Wird beim Thema Krieg verfeinert.)
 
+**Krieg (`Requirement Krieg.md`):**
+- **Sold:** Der Sold der Soldaten kommt aus der Kasse des Bezirks, in dem sie ausgebildet sind, und zählt zur Einkommensprüfung (40 %-Regel, Abschnitt 5). Höhe: kalibrieren (Simulation).
+- **Eroberte Sitze:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben. Der ganze Bezirk wechselt den Besitzer. Wird die Hauptstadt besetzt, wird das Volk annektiert.
+- Belagerte Sitze: Kapazitäten halbiert, Handel ruht.
+- Das Startgeld für Abgespaltene bleibt vorerst unverändert; Rebellenvölker aus einem Krieg behalten ihre Siedlungen.
+
 ## 4. Steuern
 
 Jeder Bezirk setzt einmal im Jahr zwei Steuersätze, so hoch, dass seine

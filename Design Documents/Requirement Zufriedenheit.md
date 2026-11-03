@@ -9,6 +9,8 @@ Slots, Bau, Unterhalt, Ruinen). Die Komfortgebäude hier nutzen dieses System
 und kommen in dessen Katalog. Deshalb wird dieses Feature erst nach dem
 Gebäude-Feature umgesetzt.
 
+**Änderung durch den Krieg (`Requirement Krieg.md`, Abschnitt 8):** Ein Aufstand wird nicht mehr direkt ein neues Volk. Die unzufriedenen Siedlungen bleiben normaler Teil des Reichs, bis ihre Stärke zusammen größer ist als die des Mutterlands; dann werden sie ein unabhängiges Volk und erklären den Krieg. „Erfolgreiche Revolution“ gilt, wenn sie den Krieg gewinnen (und unabhängig bleiben). „Verlorene Revolution“ ist das Mutterland, das den Krieg verliert (Rebellen bleiben unabhängig), −5 wie bisher; verlieren die Rebellen, werden sie annektiert. Abgeschnittene Gebiete spalten sich weiter direkt ab, ohne Krieg. Neuer Teilwert „erobert“: −15, klingt über 10 Jahre ab, im eroberten Bezirk. Der Abschnitt „Abspaltung“ unten beschreibt bis zur Umsetzung den heutigen Stand. Offen: „unzufrieden“ = 5-Jahres-Regel oder < 0, Zusammenhang der Gruppe (`Requirement Krieg.md`, Abschnitt 13).
+
 ## 1. Der Wert
 
 - Pro bewohntem Hex gibt es einen Wert von −100 bis +100.

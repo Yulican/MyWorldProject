@@ -281,3 +281,13 @@ haben dann nur 2–3 Sitze für über 80 Siedlungen.
 
 Verbleibende Hauptgründe: Enge 48 %, weiter Weg zum Sitz 30 %, keine
 Straße zum Sitz 10 %.
+
+## 10. Strategische Güter und Truppen (Krieg)
+
+Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht simuliert.
+
+- Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung der Güter zu den Truppenarten: kalibrieren (Simulation), Vorschlag: Pferde → Schock, Marmor/Edelsteine → keine Truppe.
+- Das Gut wird jährlich verbraucht; ohne Gut gilt der Faktor nicht.
+- Völker kaufen strategische Güter, um ihre Armee zu stärken (Bedarf in der Handelsliste), und verkaufen sie nur an Völker, die sie nicht bedrohen (`Requirement Diplomatie.md`).
+- Die gezielte Luxusabbau-Regel (Abschnitt 6) greift auch bei Bedarf der Armee.
+- Neue Gebäude im Katalog: Kaserne (Nahkampf), Schießplatz (Fernkampf), Stall (Schock, braucht Pferde); Kosten und Unterhalt: kalibrieren (Simulation).

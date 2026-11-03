@@ -1,6 +1,6 @@
 # Requirement: Diplomatie, Stufe 1 (Beziehungen, Grenzen, Außenhandel, Migration)
 
-Status: **Umgesetzt auf Branch `feature/diplomacy` mit den Startwerten** (siehe „Umsetzung und Kalibrierung“ am Ende; die Regeln stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
+Status: **Stufe 1 umgesetzt; Stufe 2 (Krieg) ist in `Requirement Krieg.md` entworfen und ändert Abschnitt 6 (Krieg).** Stufe 1 war umgesetzt auf Branch `feature/diplomacy` mit den Startwerten** (siehe „Umsetzung und Kalibrierung“ am Ende; die Regeln stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
 Umsetzung werden sie an 12 Testwelten kalibriert und dir vorgelegt.
 Spieltexte sind Englisch.
 
@@ -57,7 +57,7 @@ Abwanderungen: Sie addieren sich, höchstens bis −20.
 | Nähe | × Nähe (fern = harmlos) |
 
 - Bis Wissen und Spionage kommen, sehen die Völker die echten Werte.
-- Mit dem Krieg ersetzt die Militärstärke der Bündnisse die Bevölkerung.
+- Mit dem Krieg (`Requirement Krieg.md`, Abschnitt 2) gilt: Gefahr = 50 × Stärke des anderen ÷ eigene Stärke, höchstens 100, × Nähe. Die Stärke sind die Soldaten mit Güterfaktoren, Verbündete zählen zur Stärke. Offene Grenzen schließen so auch bei Aufrüstung des Nachbarn (Gefahr > 60); Schwellen kalibrieren (Simulation).
 
 ## 2. Grenzen, Zoll und Migration
 
@@ -208,7 +208,16 @@ Wege und Verluste.
   - Rechenzeit
 - Das Design-Dokument wird aktualisiert.
 
-## Für Stufe 2 (Krieg) notiert
+## Stufe 2 (Krieg): Entscheidungen
+
+Ausführlich in `Requirement Krieg.md`. Hier nur die Änderungen an der Diplomatie:
+- **Gefahr aus Stärke** (siehe Abschnitt 1).
+- **Kriegszustand:** Ein Krieg hebt alle Abkommen und offenen Grenzen zwischen den Kriegsparteien auf; Handel mit dem Gegner ruht. Nach dem Krieg: Vertrauen −30 (klingt in 10 Jahren ab), Grenzen zu, 20 Jahre Waffenstillstand.
+- **Verteidigungspakt** (Vertrauen ≥ 40, gemeinsame Bedrohung, Gefahr ≥ 50 durch dasselbe dritte Volk) und **Bündnis** (Vertrauen ≥ 70, hilft auch bei Angriffen). Auflösen mit Lücke zu den Schwellen. Sie sind eigene Zustände neben Grenzen und Abkommen und werden im Diplomatie-Panel gezeigt. Schließen der Grenze bricht sie ab.
+- **Verkauf strategischer Güter** (Handel und Handelsabkommen): nur an Völker, deren Gefahr für den Verkäufer ≤ X ist (kalibrieren (Simulation), Startwert 40), nie an Kriegsgegner und deren Verbündete.
+- **Beziehung nach einer Revolution:** Rebellen sind Kriegsgegner des Mutterlands.
+
+## Für Stufe 2 (Krieg) notiert, noch offen
 
 - Stärke und Militär; die Gefahr wird dann aus der Stärke von
   Verteidigungs- und Angriffsbündnis berechnet statt aus der Bevölkerung.
