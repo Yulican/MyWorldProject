@@ -1,3 +1,4 @@
+import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
@@ -78,6 +79,9 @@ const SEATS_WEEK = 6;
 const CAPTURE_WEEK = 19;
 const SUPPLY_ROADS_WEEK = 32;
 const DIPLOMACY_WEEK = 45;
+const GOVERNMENT_WEEK = 28;
+const GOVERNMENT_UPKEEP_WEEK = 29;
+const GOVERNMENT_PROJECTS_WEEK = 30;
 /** Settlers cross at most this many hexes of land opened to them to reach free land beyond it. */
 const CROSSING_REACH = 4;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
@@ -175,6 +179,8 @@ export type Simulation = {
   trade: Trade;
   /** Relations between the peoples: trust, danger, borders, agreements (see diplomacy.ts). */
   diplomacy: Diplomacy;
+  /** The central government of every people: districts, taxes, treasuries, its buildings and traders (see government.ts). */
+  government: Government;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -223,6 +229,7 @@ export function createSimulation(world: World): Simulation {
     frontierBlocked: new Uint16Array(n),
     trade: createTrade(world.seed, n),
     diplomacy: createDiplomacy(n),
+    government: createGovernment(n),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -282,6 +289,10 @@ export function stepSimulation(sim: Simulation): void {
   else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, sim.world.owner);
   else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, sim.world.owner);
   else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
+  else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, sim.world.owner, (text, cell) => record(sim, text, cell));
+  else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, sim.world.owner);
+  else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, sim.world.owner);
+  advanceGovernment(sim);
   measureDistances(sim, sim.world.owner);
   updateTransitHubs(sim);
   if (yearEnd) closeYear(sim);
@@ -553,7 +564,7 @@ function settleBeyond(sim: Simulation, source: number, civ: Civilization): boole
     });
     if (canAfford(sim, source, way, tolls, total)) {
       way.forEach((c, i) =>
-        payToll(sim, c, tolls[i], (g) => stockOf(sim.economy, source, g), (g, u) => addStock(sim.economy, source, g, -u), PRICE, source),
+        payToll(sim, c, tolls[i], (g) => stockOf(sim.economy, source, g), (g, u) => addStock(sim.economy, source, g, -u, sim.trade), PRICE, source),
       );
       moveGroup(sim, source, best, civ.id, EXPANSION_GROUP);
       for (let c = best; c !== source; c = prev[c]) {
@@ -869,7 +880,9 @@ function refreshSnapshot(sim: Simulation): void {
       world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
       world.harbors[c] = sim.trade.harbor[c];
     }
+    world.seats[c] = owner && sim.hasBuildings[c] && hasSeat(sim.economy, c) ? 1 : 0;
   }
+  for (const civ of sim.civs) if (civ && civ.capital >= 0) world.seats[civ.capital] = 2;
 
   sim.believers = 0;
   for (let id = 1; id < sim.civSlots; id++) {

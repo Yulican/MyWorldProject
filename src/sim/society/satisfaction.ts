@@ -5,6 +5,7 @@ import { stepCost } from '../world/roads';
 import { GOOD_NAMES, FIRST_LUXURY, Good, LUXURY_COUNT, SLOTS, SlotState, BUILDINGS, type Economy } from './buildings';
 import type { Civilization } from './civilizations';
 import { mayPass } from './diplomacy';
+import { goodsTaxValue, taxValue } from './taxes';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SUPPLY_NAMES } from './supply';
 
@@ -165,6 +166,10 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
     for (let k = 0; k < LUXURY_COUNT; k++) if (covered & (1 << k)) names.push(GOOD_NAMES[FIRST_LUXURY + k]);
     terms.push({ label: `Luxury: ${names.join(', ')}`, value: luxuryValue(covered) });
   }
+  const tax = taxValue(sim.government.cellRate[cell]);
+  if (tax !== 0) terms.push({ label: `Taxes (${Math.round(sim.government.cellRate[cell] * 100)} %)`, value: tax });
+  const goodsTax = goodsTaxValue(sim.government.cellGoodsRate[cell]);
+  if (goodsTax !== 0) terms.push({ label: `Goods taxes (${Math.round(sim.government.cellGoodsRate[cell] * 100)} %)`, value: goodsTax });
   if (civ) {
     for (const mood of civ.moods) {
       const v = moodNow(mood, sim.tick);
@@ -188,6 +193,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   sum += connectionValue(sim.seatCost[cell]);
   sum += comfortValue(comfortServed(sim.economy, cell), people);
   sum += luxuryValue(sim.economy.luxuryCovered[cell]);
+  sum += taxValue(sim.government.cellRate[cell]) + goodsTaxValue(sim.government.cellGoodsRate[cell]);
   if (civ) for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
   return clampSatisfaction(sum);
 }

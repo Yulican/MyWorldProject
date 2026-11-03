@@ -140,8 +140,13 @@ export const BUILDINGS: readonly BuildingType[] = [
   { name: 'Water carriers', good: Good.Barrels, amount: 25, percent: 0, wood: 10, stone: 5, upkeepWood: 1, upkeepStone: 0, years: 1, converts: 1 },
 ];
 
-/** Building slots of the hexes with the most (plains, see economy.ts: usableSlots); the arrays hold this many per hex. */
-export const SLOTS = 6;
+/**
+ * Slots per hex in the arrays: the settlement's (up to SETTLEMENT_SLOTS, see
+ * economy.ts: usableSlots) and from GOV_SLOT on as many for the government.
+ */
+export const SETTLEMENT_SLOTS = 6;
+export const GOV_SLOT = SETTLEMENT_SLOTS;
+export const SLOTS = 2 * SETTLEMENT_SLOTS;
 /** Repairing a ruin costs this share of the building's cost and time. */
 export const REPAIR_SHARE = 0.5;
 /** Years a building survives unpaid upkeep before it becomes a ruin. */

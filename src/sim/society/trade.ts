@@ -4,9 +4,9 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
-import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
 import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
-import { LUXURY_PER_PERSON, hasSeat, yieldFactor } from './satisfaction';
+import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
@@ -212,11 +212,14 @@ export function stockOf(eco: Economy, cell: number, good: number): number {
   return eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury];
 }
 
-export function addStock(eco: Economy, cell: number, good: number, amount: number): void {
+/** Adds to (or takes from) a hex's stock; grain and water change its supply, so with `trade` it is marked for an update. */
+export function addStock(eco: Economy, cell: number, good: number, amount: number, trade?: Trade): void {
   if (good <= TradeGood.Stone) eco.stock[cell * MATERIAL_COUNT + good] += amount;
   else if (good === TradeGood.Money) eco.money[cell] += amount;
-  else if (good <= TradeGood.Water) eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
-  else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
+  else if (good <= TradeGood.Water) {
+    eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
+    if (trade && amount !== 0) markSupply(trade, cell);
+  } else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
 }
 
 /** Grain and water in stock as food and water supply (up to PROVISIONS_MAX people). */
@@ -286,7 +289,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     const good = m === 0 ? Good.Wood : Good.Stone;
     const harvest = withBuildings(economy, cell, good, forageYield(sim.world, cell, good)) * yieldFactor(sim.satisfaction[cell]);
     const yearly = Math.max(0, upkeep - harvest);
-    if (yearly > 0 && hasSeat(economy, cell)) {
+    if (yearly > 0 && settlementSeat(economy, cell)) {
       // A seat of government's upkeep comes first: it keeps SEAT_UPKEEP_YEARS
       // of what its harvest lacks, orders in worthwhile lots before it runs
       // out, and those trips go before all others.
@@ -304,17 +307,21 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   }
 
   // Grain and water: ask when it is the scarcest supply of a hex half full,
-  // up to the next limit; spare what its own people don't need.
+  // up to the next limit; spare only what it would neither need nor ask for.
   const capacity = sim.cellCapacity[cell];
   for (let k = 0; k < 2; k++) {
     const g = TradeGood.Grain + k;
     const stock = economy.provisions[cell * 2 + k];
     const supply = sim.cellSupply[base + k];
     const own = supply - Math.min(stock, PROVISIONS_MAX);
-    trade.surplus[t + g] = Math.max(0, stock - Math.max(0, people - own));
-    if (supply > capacity + 0.01 || people < 0.5 * capacity) continue;
     let next = Infinity;
     for (let j = 0; j < SUPPLY_KINDS; j++) if (j !== k) next = Math.min(next, sim.cellSupply[base + j]);
+    // What it keeps: what its people need, and in a hex at least half full also what it would ask for (up to the
+    // next limit, at most PROVISIONS_MAX), so it never sells what it would buy back.
+    let keep = Math.max(0, people - own);
+    if (people >= 0.5 * capacity) keep = Math.max(keep, Math.min(PROVISIONS_MAX, next - own));
+    trade.surplus[t + g] = Math.max(0, stock - keep);
+    if (supply > capacity + 0.01 || people < 0.5 * capacity) continue;
     const room = Math.min(PROVISIONS_MAX - Math.min(stock, PROVISIONS_MAX), next - supply);
     trade.want[t + g] = Math.max(0, room - trade.incoming[t + g]);
   }
@@ -366,9 +373,10 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   return changed;
 }
 
-function upkeepOf(eco: Economy, cell: number, material: number): number {
+export function upkeepOf(eco: Economy, cell: number, material: number): number {
   let sum = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  // The settlement's own buildings (the government keeps up its own).
+  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
     sum += material === 0 ? b.upkeepWood : b.upkeepStone;
@@ -744,6 +752,14 @@ function isHub(sim: Simulation, cell: number): boolean {
   return trade.hubMark[cell] === 1;
 }
 
+/** Whether the settlement itself keeps up a seat of government (not one in the government's slots). */
+function settlementSeat(eco: Economy, cell: number): boolean {
+  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
+    if (eco.state[s] === SlotState.Standing && BUILDINGS[eco.type[s]].good === Good.Seat) return true;
+  }
+  return false;
+}
+
 /** Bits of the goods `civ` still owes under trade agreements this tick (computed once per tick for all peoples). */
 function owedGoods(sim: Simulation, civ: number): number {
   const trade = sim.trade;
@@ -870,7 +886,7 @@ export function sendMerchants(sim: Simulation, home: number): void {
     for (let g = 0; g < TRADE_GOODS; g++) {
       trade.tripCargo[trip * TRADE_GOODS + g] = dealSell[g];
       if (dealSell[g] > 0) {
-        addStock(economy, home, g, -dealSell[g]);
+        addStock(economy, home, g, -dealSell[g], trade);
         // A trade agreement counts what sets out (the way takes time).
         if (sim.world.owner[home] !== sim.world.owner[target]) {
           const leg = agreementFor(sim.diplomacy, sim.world.owner[home], sim.world.owner[target], g);
@@ -931,7 +947,7 @@ function payCrossings(sim: Simulation, home: number, civ: number): boolean {
       (g, units) => {
         // Taken from home's stock; what came off the load isn't loaded later.
         dealSell[g] -= Math.min(units, dealSell[g]);
-        addStock(economy, home, g, -units);
+        addStock(economy, home, g, -units, sim.trade);
       },
       PRICE,
       home,
@@ -1027,7 +1043,7 @@ export function advanceTrips(sim: Simulation): void {
           const credit = money + owed;
           const amount = Math.min(asked, trade.surplus[target * TRADE_GOODS + g], stockOf(economy, target, g), load / WEIGHT[g], credit / PRICE[g]);
           if (amount <= 0) continue;
-          addStock(economy, target, g, -amount);
+          addStock(economy, target, g, -amount, trade);
           trade.surplus[target * TRADE_GOODS + g] -= amount;
           trade.tripCargo[cargo + g] += amount;
           load -= amount * WEIGHT[g];

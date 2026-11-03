@@ -6,7 +6,9 @@
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
-import { BUILDINGS, SLOTS, SlotState } from '../src/sim/society/buildings';
+import { BUILDINGS, GOV_SLOT, SLOTS, SlotState } from '../src/sim/society/buildings';
+import { GOV_TUNING } from '../src/sim/society/taxes';
+import { PRICE, TradeGood } from '../src/sim/society/trade';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
@@ -15,6 +17,11 @@ const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const options = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 const open = options.open === '1';
+// Government numbers (taxes.ts) by name, e.g. incomeShare=0.3 margin=4; price: factor on all market prices.
+for (const [key, value] of Object.entries(options)) {
+  if (key in GOV_TUNING) (GOV_TUNING as Record<string, number>)[key] = Number(value);
+}
+if (options.price) for (let g = 0; g < PRICE.length; g++) PRICE[g] *= Number(options.price);
 // Why settlements rise up: their satisfaction terms at the moment of the uprising.
 const reasons = new Map<string, { sum: number; main: number }>();
 let rebels = 0;
@@ -65,6 +72,11 @@ for (let seed = 1; seed <= worlds; seed++) {
     let seats = 0;
     let travel = 0;
     let farFromSeat = 0;
+    let govBuildings = 0;
+    let govRuins = 0;
+    let govSeats = 0;
+    let rateSum = 0;
+    let goodsRateSum = 0;
     for (let c = 0; c < sim.world.cellCount; c++) {
       const pop = sim.cellPop[c];
       if (pop > 0) {
@@ -75,6 +87,8 @@ for (let seed = 1; seed <= worlds; seed++) {
         if (sim.economy.luxuryCovered[c]) luxuryCovered++;
         travel += Math.min(sim.seatCost[c], 5);
         if (!(sim.seatCost[c] <= 2)) farFromSeat++;
+        rateSum += sim.government.cellRate[c];
+        goodsRateSum += sim.government.cellGoodsRate[c];
       }
       if (pop >= 50) towns++;
       if (pop >= 150) cities++;
@@ -83,6 +97,11 @@ for (let seed = 1; seed <= worlds; seed++) {
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].deposit !== undefined) luxuryShops++;
         if (sim.economy.state[s] === SlotState.Ruin) ruins++;
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') seats++;
+        if (s - c * SLOTS >= GOV_SLOT) {
+          if (sim.economy.state[s] === SlotState.Standing) govBuildings++;
+          if (sim.economy.state[s] === SlotState.Ruin) govRuins++;
+          if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') govSeats++;
+        }
       }
     }
     const text = (s: string) => sim.chronicle.filter((e) => e.text.includes(s)).length;
@@ -109,6 +128,8 @@ for (let seed = 1; seed <= worlds; seed++) {
       'far from seat (>2) %': (100 * farFromSeat) / Math.max(1, settlements),
       woodTraded: sim.trade.delivered[0],
       stoneTraded: sim.trade.delivered[1],
+      grainTraded: sim.trade.delivered[TradeGood.Grain],
+      waterTraded: sim.trade.delivered[TradeGood.Water],
       allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0),
       deliveredAbroad: abroad,
       transit: sim.trade.transit,
@@ -123,6 +144,23 @@ for (let seed = 1; seed <= worlds; seed++) {
       running: sim.diplomacy.agreements.length,
       ranOut: text('ran out.'),
       uprisings: text('rose up'),
+      'tax rate % (mean)': (100 * rateSum) / Math.max(1, settlements),
+      'goods tax % (mean)': (100 * goodsRateSum) / Math.max(1, settlements),
+      'taxes collected': sim.government.collected,
+      'goods taxed': sim.government.collectedGoods,
+      'gov spent': sim.government.spent,
+      'gov built': sim.government.built,
+      'gov buildings': govBuildings,
+      'gov seats': govSeats,
+      'gov ruins': govRuins,
+      treasuries: sim.government.treasury.reduce((a, v) => a + v, 0),
+      'gov trips running': sim.government.tripCount,
+      'tax changes': text('the taxes'),
+      'gov trips sent': sim.government.sent,
+      'money transfers': sim.government.transfers,
+      'levied on site': sim.government.levied,
+      'money transferred': sim.government.transferred,
+      'starting money': sim.government.startMoney,
       msPerYear: ms / year,
     };
     if (!rows.has(year)) rows.set(year, []);
@@ -136,7 +174,7 @@ for (const [year, list] of rows) {
   const mean = (k: string) => list.reduce((s, r) => s + r[k], 0) / list.length;
   const range = (k: string) => `${Math.min(...list.map((r) => r[k])).toFixed(0)}..${Math.max(...list.map((r) => r[k])).toFixed(0)}`;
   console.log(`\nYear ${year}: mean [min..max]`);
-  for (const k of keys) console.log(`  ${k.padEnd(20)} ${mean(k).toFixed(1).padStart(9)}  [${range(k)}]`);
+  for (const k of keys) console.log(`  ${k.padEnd(26)} ${mean(k).toFixed(1).padStart(9)}  [${range(k)}]`);
 }
 
 if (rebels > 0) {

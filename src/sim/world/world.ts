@@ -59,6 +59,8 @@ export type World = HexGrid & {
   ruins: Uint8Array;
   /** 1 for hexes with a standing harbor (society/trade.ts); the map draws an anchor by it. */
   harbors: Uint8Array;
+  /** 1 for hexes with a standing seat of government, 2 for capitals (society/government.ts); the map marks them. */
+  seats: Uint8Array;
   /**
    * 1 at a * 256 + b when civilization a opened its borders to b
    * (society/diplomacy.ts); the map draws a's side of their border dashed.
@@ -99,6 +101,7 @@ export function allocateWorld(width: number, height: number, seed: number, shape
     buildings: new Uint8Array(n),
     ruins: new Uint8Array(n),
     harbors: new Uint8Array(n),
+    seats: new Uint8Array(n),
     openBorders: new Uint8Array(256 * 256),
     startCell: -1,
   };

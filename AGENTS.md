@@ -46,10 +46,10 @@ Run typecheck and tests before declaring any task done.
 
 ## Mandatory performance test
 
-Every push to a feature branch runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark?scenario=young|aged|cities|unrest|trade|diplomacy`):
+Every push to a feature branch runs the map benchmark in CI (job `benchmark` in `.github/workflows/android-build.yml`, rules in `src/bench/benchmark.ts`; the app starts it when opened with the link `myworld://benchmark?scenario=young|aged|cities|unrest|trade|diplomacy|government`):
 
 - 5 random worlds, zoom ×2, map speed 1500 pt/s, 10 swipes in each of the 8 directions (N, NE, E, SE, S, SW, W, NW) = 80 swipes per world, with the simulation running at its default speed and territories on the map.
-- Six scenarios, run in parallel: `young` (new worlds), `aged` (each world simulated for 300 years first: many peoples, territories and roads), `cities` (aged, and every settlement a big city with ruins around it), `unrest` (aged, and every settlement but the capitals rose up: the most peoples and borders) `trade` (aged, and every settlement a trade center, every coast a harbor and goods to sell: the most merchants) and `diplomacy` (aged, and every border open with free trade between all peoples: dashed borders everywhere, merchants abroad).
+- Seven scenarios, run in parallel: `young` (new worlds), `aged` (each world simulated for 300 years first: many peoples, territories and roads), `cities` (aged, and every settlement a big city with ruins around it), `unrest` (aged, and every settlement but the capitals rose up: the most peoples and borders) `trade` (aged, and every settlement a trade center, every coast a harbor and goods to sell: the most merchants) `diplomacy` (aged, and every border open with free trade between all peoples: dashed borders everywhere, merchants abroad) and `government` (aged, and seats of government and government buildings everywhere: flags on the map, government traders on their way).
 - **Every single swipe** must reach **≥ 60 fps** and have **no frame over 25 ms**.
 
 Rules for every agent and every change:
@@ -65,6 +65,7 @@ Rules for every agent and every change:
 ## Rules
 
 - Discuss every change to game logic (simulation rules, balancing, what the player sees happen) with the user before implementing it: describe the planned rule and its open details, and wait for the user's go. Pure bug fixes that restore agreed behavior, performance work and tooling don't need this.
+- Before starting new measures to change observed behavior (in simulations, prototypes or code), align them with the user: say what you observed, which measures you propose and with which numbers, and wait for the go. This also holds mid-task, e.g. when a simulation shows a problem.
 - Game logic changes go **design → simulation → implementation**:
   1. Design: agree on the rule with the user and write it into the requirement in `Design Documents/`.
   2. Simulation: try it with its numbers as parameters over many worlds (`tools/*Stats.ts`, 12 worlds at least) and show the user how it affects settlement growth, trade and diplomacy, compared with before, so the numbers can be tuned together.
