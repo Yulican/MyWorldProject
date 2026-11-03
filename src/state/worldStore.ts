@@ -5,6 +5,7 @@ import {
   generateWorld,
   randomSeed,
   stepSimulation,
+  type ChronicleEntry,
   type Simulation,
   type World,
 } from '../sim';
@@ -28,8 +29,9 @@ export type GameState = {
   /** Changes with every map snapshot the UI hasn't seen yet. */
   version: number;
   /**
-   * Chronicle entries the player has seen; while there are more, the game
-   * is paused and the chronicle dialog shows the next one.
+   * Chronicle entries the player has seen; while an important one follows,
+   * the game is paused and the chronicle dialog shows it. Other entries are
+   * counted as seen right away (they only go into the chronicle list).
    */
   chronicleSeen: number;
   /** Speed the game continues at once the chronicle dialog is closed (chosen meanwhile in the time controls). */
@@ -122,13 +124,26 @@ export function setChronicleDialogs(enabled: boolean) {
 }
 
 /**
- * The first entry from `from` the dialog shows: the game-over entry has its
- * own screen and is skipped.
+ * Whether the chronicle dialog shows an entry: only important ones, and not
+ * the game-over entry, which has its own screen. The others only go into the
+ * chronicle list.
  */
-function nextShown(sim: Simulation, from: number): number {
+export function shownInDialog(entry: ChronicleEntry): boolean {
+  return entry.important && entry.cell >= 0;
+}
+
+/** The first entry from `from` the dialog shows (the chronicle length if none). */
+export function nextShown(sim: Simulation, from: number): number {
   let i = from;
-  while (i < sim.chronicle.length && sim.chronicle[i].cell < 0) i++;
+  while (i < sim.chronicle.length && !shownInDialog(sim.chronicle[i])) i++;
   return i;
+}
+
+/** How many entries after `seen` the dialog still shows. */
+export function shownAfter(sim: Simulation, seen: number): number {
+  let n = 0;
+  for (let i = seen + 1; i < sim.chronicle.length; i++) if (shownInDialog(sim.chronicle[i])) n++;
+  return n;
 }
 
 /** Simulation, speed and a version that changes whenever the map snapshot does. */
@@ -180,6 +195,8 @@ function runFrame(now: number) {
   pendingTicks = Math.min(pendingTicks, 2);
 
   // Something notable happened: pause and show it (the chronicle dialog).
+  // Other entries only go into the chronicle list: mark them seen silently.
+  let silent: Partial<GameState> | undefined;
   if (state.chronicleDialogs && sim.chronicle.length > entries) {
     const seen = nextShown(sim, state.chronicleSeen);
     if (seen < sim.chronicle.length) {
@@ -188,13 +205,14 @@ function runFrame(now: number) {
       publish({ chronicleSeen: seen, speed: 0, resumeSpeed: speed });
       return;
     }
+    if (seen !== state.chronicleSeen) silent = { chronicleSeen: seen };
   }
 
   if (sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
     notifiedSnapshot = sim.snapshotVersion;
     lastNotify = now;
     countEvent('snapshots');
-    publish({});
-  }
+    publish(silent ?? {});
+  } else if (silent) publish(silent);
   if (!sim.gameOver) frame = requestAnimationFrame(runFrame);
 }

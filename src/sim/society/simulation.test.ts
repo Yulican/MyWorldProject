@@ -335,3 +335,26 @@ test('a people of 100 lacking a luxury good settles a free deposit of it nearby'
   const cell = settled[0].cell!;
   assert.ok(sim.world.deposit[cell] !== 0);
 });
+
+test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact and closed borders are important', () => {
+  const important = [
+    / They pray to you\.$/,
+    /^A new people, /,
+    / rose up against the /,
+    /, cut off from the /,
+    / have vanished\.$/,
+    /^Nobody prays to you anymore\.$/,
+    / met\.$/,
+    / closed their borders to the /,
+  ];
+  const seen = { important: 0, silent: 0 };
+  for (const seed of [5, 16, 102]) {
+    const sim = createSimulation(generateWorld({ seed }));
+    runYears(sim, 200);
+    for (const e of sim.chronicle) {
+      assert.equal(e.important, important.some((p) => p.test(e.text)), e.text);
+      seen[e.important ? 'important' : 'silent']++;
+    }
+  }
+  assert.ok(seen.important > 0 && seen.silent > 0, JSON.stringify(seen));
+});
