@@ -43,6 +43,7 @@ test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=cities'), 'cities');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=unrest'), 'unrest');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=trade'), 'trade');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=government'), 'government');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });
 
@@ -109,4 +110,20 @@ test('the diplomacy scenario opens every border and merchants travel abroad', as
   assert.ok(ids.length > 1);
   for (const a of ids) for (const b of ids) if (a !== b) assert.equal(sim.world.openBorders[a * PAIRS + b], 1);
   assert.equal(SCENARIOS.diplomacy.diplomacy, true);
+});
+
+test('the government scenario puts up seats and government buildings everywhere and sends traders out', async () => {
+  const { createSimulation, generateWorld, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { empowerGovernment } = await import('./empowerGovernment');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  const seatsBefore = sim.world.seats.reduce((n, v) => n + (v ? 1 : 0), 0);
+  empowerGovernment(sim);
+  const seats = sim.world.seats.reduce((n, v) => n + (v ? 1 : 0), 0);
+  assert.ok(seats > seatsBefore + 5, `${seatsBefore} -> ${seats} seats`);
+  let traders = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) traders += sim.government.traders[c];
+  assert.ok(traders > 2 * seatsBefore, `${traders} government traders`);
+  assert.ok(sim.government.tripCount > 0, 'government traders on their way');
+  assert.equal(SCENARIOS.government.government, true);
 });
