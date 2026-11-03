@@ -14,7 +14,7 @@ Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und 
 - **Gebäude:** Kaserne = Nahkampf, Schießplatz = Fernkampf, Stall = Schock (braucht Pferde). Soldaten pro Gebäude und Jahr, Kosten, Unterhalt: kalibrieren (Simulation).
 - **Soldaten sind in der Siedlung**, können aber zu Armeen zusammengestellt und bewegt werden (Abschnitt 4).
 - **Sold:** nur Geld, aus der Kasse des Bezirks (`Requirement Zentralregierung.md`). Keine Nahrung. Der Sold zählt zur Einkommensprüfung (40 %-Regel) wie der Unterhalt der Regierungsgebäude; Höhe pro Soldat: kalibrieren (Simulation). Kann der Bezirk den Sold nicht zahlen: Soldaten desertieren (Anteil kalibrieren).
-- **Strategische Güter:** Je Truppenart und Gut gibt es einen Stärkefaktor (Startwert ×1,5, z. B. Pferde für Schock). Das Gut wird jährlich verbraucht; fehlt es, gilt der Faktor nicht. Zuordnung: Eisen → Nahkampf, Feuerstein → Fernkampf, Pferde → Schock (`Requirement Regionale Rohstoffe.md`, Abschnitt 10). Eisen und Feuerstein müssen erst abgebaut und gehandelt werden können.
+- **Strategische Güter:** Je Truppenart und Gut gibt es einen Stärkefaktor (Startwert ×1,5, z. B. Pferde für Schock). Das Gut wird jährlich verbraucht; fehlt es, gilt der Faktor nicht. Zuordnung: Eisen → Nahkampf, Feuerstein → Fernkampf, Pferde → Schock (`Requirement Regionale Rohstoffe.md`, Abschnitt 10). Eisen und Feuerstein müssen erst abgebaut und gehandelt werden können; sie sind keine Luxusgüter und geben keinen Komfort.
 - **Stärke eines Volks:** Summe der Soldaten, gewichtet mit den Güterfaktoren. Verbündete zählen zur Stärke (Abschnitt 7).
 - **Gefahr:** 50 × Stärke des anderen ÷ eigene Stärke, höchstens 100, × Nähe. Ersetzt die Bevölkerung in der Gefahr-Formel (`Requirement Diplomatie.md`, Abschnitt 1).
 - **Kauf strategischer Güter:** Völker wollen sie kaufen, um ihre Armee zu stärken. Sie verkaufen sie nur an Völker, deren Gefahr für sie ≤ X ist (X: kalibrieren (Simulation), Startwert 40), nie an Kriegsgegner und deren Verbündete.
@@ -83,7 +83,7 @@ Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und 
 
 ## 10. Phasen
 
-0. **Vorstufe:** Abbaugebäude für Eisen und Feuerstein, beide als Handelswaren; Gold wird abgebaut und in Geld umgewandelt.
+0. **Vorstufe:** Abbaugebäude für Eisen und Feuerstein, beide als Handelswaren; Gold wird abgebaut und kommt direkt als Geld in die Siedlung (kein Luxusgut mehr, Luxusgüter 6 → 5).
 1. **Militär ohne Kampf:** Gebäude, Soldaten, Sold, strategische Güter und ihr Verkauf; Gefahr aus Stärke statt Bevölkerung; Anzeige. Simulation: Auswirkung auf Grenzen, Handel, Siedlungswachstum.
 2. **Schlachtrechnung** als reine Funktion mit Tests und Stats-Tool (`warStats`).
 3. **Krieg auf der Karte:** Armeen, Marsch, Belagerung, Besetzung, Kriegserklärung, Frieden, Annexion der Hauptstadt.
@@ -111,6 +111,6 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröße; Rebellen müssen nicht zusammenhängen; bei Sieg ein Volk je zusammenhängender Gruppe, miteinander verbündet; Besetzung behält die 5-Jahres-Regel; Rebellensiedlungen wechseln mit der Erklärung den Besitzer; annektierte Rebellensiedlungen bekommen „erobert“.
 
 Offen:
-- Zuordnung entschieden (Eisen/Feuerstein/Pferde, Marmor ohne Kriegsrolle, Gold wird Geld). Offen: Komfort und `LUXURY_COUNT` für Eisen und Feuerstein; Umrechnung von Gold (Kurs, wer wandelt um, Luxus-/Handelsrolle). Siehe `Requirement Regionale Rohstoffe.md`, Abschnitt 10.
+- Zuordnung entschieden (Eisen/Feuerstein/Pferde, Marmor ohne Kriegsrolle, Gold wird Geld). Entschieden: kein Komfort für Eisen/Feuerstein; Gold wird sofort Geld der Siedlung zum heutigen Handelspreis (kalibrieren (Simulation)) und ist kein Luxusgut mehr (Zufriedenheit in der Simulation prüfen). Siehe `Requirement Regionale Rohstoffe.md`, Abschnitt 10.
 - Alle Zahlen mit „kalibrieren (Simulation)“: Soldaten je Gebäude, Sold, Verlustanteil, Ersatzrollenstrafe, Verteidigerbonus, Aufgabeanteil, Erschöpfungsjahre, Verkaufsgrenze X, Auflösungsschwellen der Bündnisse.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?

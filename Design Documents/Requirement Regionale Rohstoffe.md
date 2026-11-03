@@ -299,6 +299,9 @@ Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Noch nicht si
 - **Gold** wird abgebaut und in Geld umgewandelt (Richtung entschieden, Einzelheiten offen, siehe unten).
 - **Später:** Kupfer + Zinn → Bronze; Meteorit.
 
-**Offen (nicht entschieden):**
-- Geben Eisen und Feuerstein Komfort wie Luxusgüter, oder sind es keine Luxusgüter? Ändert sich `LUXURY_COUNT` (heute 6)?
-- Gold: Umrechnungskurs in Geld; wer wandelt um (Siedlung oder Bezirkskasse); behält Gold seine Rolle als Luxusgut (Komfort +5) und seinen Handelswert?
+**Ebenfalls entschieden (Nutzer):**
+- Eisen und Feuerstein sind keine Luxusgüter und geben keinen Komfort.
+- **Gold wird sofort Geld:** Beim Abbau kommt es direkt als zusätzliches Geld in die Siedlung (kein eigenes Gut zum Lagern oder Handeln). Kurs: der heutige Handelspreis von Gold als Startwert, kalibrieren (Simulation).
+- **Gold ist kein Luxusgut mehr** (kein Komfort +5, kein Handel als Ware). Folge: Die Zahl der Luxusgüter sinkt von 6 auf 5 (`LUXURY_COUNT`); die Auswirkung auf die Zufriedenheit wird in der Simulation geprüft (`Requirement Zufriedenheit.md`, Komfort: Luxusgüter).
+
+**Offen:** nichts zu strategischen Gütern.
