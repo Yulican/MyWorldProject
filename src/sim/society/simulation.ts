@@ -367,6 +367,7 @@ export function stepSimulationPart(sim: Simulation): boolean {
       else if (weekOfYear === MILITARY_WEEK) {
         updateMilitary(sim, owner);
         drawSoldiers(sim);
+        returnSoldiers(sim, owner);
       } else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
@@ -423,6 +424,18 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
   pop.count++;
   sim.cellPop[cell]++;
   sim.cellCivPop[cell * sim.civSlots + civ]++;
+}
+
+/** Soldiers dismissed for lack of pay (MIL.dismiss) go back to their settlement as adults. */
+function returnSoldiers(sim: Simulation, owner: Uint8Array): void {
+  const { military } = sim;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    const n = military.release[c];
+    if (n === 0) continue;
+    military.release[c] = 0;
+    if (owner[c] === 0) continue;
+    for (let k = 0; k < n; k++) addInhabitant(sim, c, owner[c], 30, 0.5);
+  }
 }
 
 /** Takes the adults the military buildings trained (military.train per hex) out of the population; soldiers not found are dropped. */

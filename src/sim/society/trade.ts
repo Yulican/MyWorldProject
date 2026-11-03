@@ -345,7 +345,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
     const stock = economy.luxury[cell * STORED_COUNT + k];
     const army = MIL.enabled ? yearlyGoodNeed(sim, cell, tt) * MIL.keepYears : 0;
     const own = k < LUXURY_COUNT ? keep : 0;
-    trade.want[t + g] = Math.max(0, own + army - stock - trade.incoming[t + g]);
+    trade.want[t + g] = Math.max(0, own + army * (k < LUXURY_COUNT ? 1 : MIL.agreeBoost) - stock - trade.incoming[t + g]);
     trade.surplus[t + g] = Math.max(0, stock - own - army);
   }
   // An export hub asks its people for what its trade agreements still owe;

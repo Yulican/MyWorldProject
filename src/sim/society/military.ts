@@ -37,6 +37,8 @@ import type { Simulation } from './simulation';
  * - `threatDanger`: a people feels threatened (arms) when another's danger for it is at least this (50 = equal strength at nearness 1).
  * - `spareYears`: a seat with this many years of one building's pay in its treasury counts as having resources to spare.
  * - `govGoods`: 1 = the seat's government traders buy iron, flint and horses for soldiers that lack them from the people's settlements that spare them (paid from the treasury, MERCHANT-sized loads per trader).
+ * - `agreeStrategic`: 0 = iron, flint and horses are left out of trade agreements; `agreeBoost`: factor on the strategic goods a people asks for (agreements form from lacks).
+ * - Desertion proposals (all off by default): `trainIncome` 1 = train only while the people's yearly tax income covers the pay; `reserveYears` n = train only while the treasuries hold n years of pay; `dismiss` 1 = unpaid soldiers go back to the population instead of deserting; `graceYears` n = peoples younger than n years never lose soldiers to missing pay; `exactDesert` 1 = unpaid soldiers are spread without rounding up.
  * - `build`: 1 = settlements build military buildings (placeholder rule), 0 = only what a test sets up.
  */
 export const MIL = {
@@ -62,6 +64,13 @@ export const MIL = {
   govBuild: 1,
   threatDanger: 50,
   govGoods: 0,
+  agreeStrategic: 1,
+  agreeBoost: 1,
+  trainIncome: 0,
+  reserveYears: 1,
+  dismiss: 0,
+  graceYears: 0,
+  exactDesert: 0,
   spareYears: 5,
 };
 
@@ -100,6 +109,13 @@ export type Military = {
   goodsNeeded: number;
   goodsBought: number;
   goldTaxed: number;
+  /** Deserted by cause: in peoples younger than 30 years, in older peoples, and soldiers lost to rounding up. */
+  desNew: number;
+  desOld: number;
+  desRound: number;
+  returned: number;
+  /** Soldiers to return to the population per cell (dismiss). */
+  release: Uint16Array;
   uncovered: number;
 };
 
@@ -122,6 +138,11 @@ export function createMilitary(cellCount: number): Military {
     goodsNeeded: 0,
     goodsBought: 0,
     goldTaxed: 0,
+    desNew: 0,
+    desOld: 0,
+    desRound: 0,
+    returned: 0,
+    release: new Uint16Array(cellCount),
     uncovered: 0,
   };
 }
@@ -165,6 +186,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
   const eco = sim.economy;
   const n = sim.world.cellCount;
   m.train.fill(0);
+  m.release.fill(0);
   m.districtCap.fill(0);
   if (m.strength.length !== sim.civSlots) {
     m.strength = new Float64Array(sim.civSlots);
@@ -237,23 +259,39 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       const afford = Math.floor(gov.treasury[s] / MIL.sold);
       gov.treasury[s] -= afford * MIL.sold;
       m.paid += afford * MIL.sold;
+      const youth = sim.civs[owner[s]];
+      if (MIL.graceYears > 0 && youth && sim.tick - youth.foundedTick < MIL.graceYears * 52) continue;
       unpaidShare[s] = (total - afford) / total;
     }
   }
   // Soldiers the treasury can still pay next year beyond those who stay (no training on credit).
   const afford = new Float32Array(n);
+  const rest = new Float32Array(n);
+  if (MIL.exactDesert) {
+    for (let s = 0; s < n; s++) if (unpaidShare[s] > 0) rest[s] = Math.round(unpaidShare[s] * sums[s]);
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (let c = 0; c < n; c++) {
+      const d = gov.district[c];
+      if (d < 0) continue;
+      for (let t = 0; t < TROOP_TYPES; t++) {
+        const i = c * TROOP_TYPES + t;
+        if (pass === 0 && unpaidShare[d] > 0 && m.soldiers[i] > 0) {
+          const exact = m.soldiers[i] * unpaidShare[d];
+          const leave = MIL.exactDesert ? Math.min(m.soldiers[i], Math.floor(exact)) : Math.min(m.soldiers[i], Math.ceil(exact));
+          if (MIL.exactDesert) rest[d] -= leave;
+          leaveSoldiers(sim, m, c, i, leave, exact, owner[c]);
+        } else if (pass === 1 && MIL.exactDesert && rest[d] > 0 && m.soldiers[i] > 0) {
+          rest[d]--;
+          leaveSoldiers(sim, m, c, i, 1, 1, owner[c]);
+        }
+      }
+    }
+  }
   for (let c = 0; c < n; c++) {
     const d = gov.district[c];
     if (d < 0) continue;
-    for (let t = 0; t < TROOP_TYPES; t++) {
-      const i = c * TROOP_TYPES + t;
-      if (unpaidShare[d] > 0) {
-        const leave = Math.min(m.soldiers[i], Math.ceil(m.soldiers[i] * unpaidShare[d]));
-        m.soldiers[i] -= leave;
-        m.deserted += leave;
-      }
-      afford[d] -= m.soldiers[i];
-    }
+    for (let t = 0; t < TROOP_TYPES; t++) afford[d] -= m.soldiers[c * TROOP_TYPES + t];
   }
   for (let c = 0; c < n; c++) {
     const d = gov.district[c];
@@ -274,7 +312,22 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       const civ = owner[c];
       if (civ === 0) continue;
       for (let t = 0; t < TROOP_TYPES; t++) civAfford[civ] -= m.soldiers[c * TROOP_TYPES + t];
-      if (gov.traders[c] > 0) civAfford[civ] += Math.floor(gov.treasury[c] / MIL.sold) * MIL.treasuryShare;
+      if (gov.traders[c] > 0) civAfford[civ] += Math.floor(gov.treasury[c] / MIL.sold / MIL.reserveYears) * MIL.treasuryShare;
+    }
+  }
+  if (MIL.trainIncome) {
+    // Only as many soldiers as the people's yearly tax income pays.
+    const income = new Float32Array(sim.civSlots);
+    const soldiersOfCiv = new Float32Array(sim.civSlots);
+    for (let c = 0; c < n; c++) {
+      const civ = owner[c];
+      if (civ === 0) continue;
+      if (gov.traders[c] > 0) income[civ] += gov.income[c];
+      for (let t = 0; t < TROOP_TYPES; t++) soldiersOfCiv[civ] += m.soldiers[c * TROOP_TYPES + t];
+    }
+    for (let civ = 1; civ < sim.civSlots; civ++) {
+      const byIncome = Math.floor(income[civ] / MIL.sold) - soldiersOfCiv[civ];
+      civAfford[civ] = Math.min(civAfford[civ], byIncome);
     }
   }
   // Training: each building trains MIL.trainShare of its capacity a year, within the settlement's people, its
@@ -440,4 +493,21 @@ function governmentBuys(sim: Simulation, owner: Uint8Array): void {
 function soldiersNeed(m: Military, cell: number, k: number): number {
   const t = TROOP_GOOD.indexOf(k as never);
   return t < 0 ? 0 : m.soldiers[cell * TROOP_TYPES + t] / MIL.perN;
+}
+
+/** Takes `leave` soldiers out of slot i (cell c): they desert, or with MIL.dismiss go back to the population. */
+function leaveSoldiers(sim: Simulation, m: Military, c: number, i: number, leave: number, exact: number, civ: number): void {
+  if (leave <= 0) return;
+  m.soldiers[i] -= leave;
+  if (MIL.dismiss) {
+    m.release[c] += leave;
+    m.returned += leave;
+    return;
+  }
+  m.deserted += leave;
+  const young = sim.civs[civ] ? sim.tick - sim.civs[civ]!.foundedTick < 30 * 52 : false;
+  const real = Math.min(leave, exact);
+  if (young) m.desNew += real;
+  else m.desOld += real;
+  m.desRound += leave - real;
 }

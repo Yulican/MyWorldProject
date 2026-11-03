@@ -64,6 +64,8 @@ export type Government = {
   upkeep: Float32Array;
   /** Per seat cell: money kept back for next year's soldiers' pay (military.ts); the government doesn't spend it. */
   reserve: Float32Array;
+  /** Per seat cell: money tax its district paid into the treasury at the last yearly update. */
+  income: Float32Array;
   /** Per civilization id: its founding tick + 1 once its government got its starting money. */
   funded: number[];
   /** Per seat cell: its traders and how many are away. */
@@ -110,6 +112,7 @@ export function createGovernment(cellCount: number): Government {
     potential: new Float32Array(cellCount),
     upkeep: new Float32Array(cellCount),
     reserve: new Float32Array(cellCount),
+    income: new Float32Array(cellCount),
     funded: [],
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -303,6 +306,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     gov.rate[s] = rate;
     gov.goodsRate[s] = goodsRate;
   }
+  gov.income.fill(0);
   // Taxes: money into the seat's treasury, goods from the settlements' surplus into its stock.
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
@@ -312,6 +316,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     const tax = Math.min(economy.money[c], gov.rate[s] * sim.cellAdults[c] * MONEY_PER_ADULT);
     economy.money[c] -= tax;
     gov.treasury[s] += tax;
+    gov.income[s] += tax;
     gov.collected += tax;
     if (gov.goodsRate[s] > 0) {
       for (let m = 0; m < MATERIAL_COUNT; m++) {

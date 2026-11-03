@@ -664,7 +664,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   dip.agreements = kept;
   rebuildPartners(dip);
   const free = (supplier: number, buyer: number, g: number) =>
-    g !== TradeGood.Money && !agreementFor(dip, supplier, buyer, g) && (g < TradeGood.Luxury + 4 || mayBuyStrategic(sim, supplier, buyer)) && (dip.agreementPause.get(agreementKey(supplier, buyer, g)) ?? -1) <= sim.tick;
+    g !== TradeGood.Money && !agreementFor(dip, supplier, buyer, g) && (g < TradeGood.Luxury + 4 || (MIL.agreeStrategic && mayBuyStrategic(sim, supplier, buyer))) && (dip.agreementPause.get(agreementKey(supplier, buyer, g)) ?? -1) <= sim.tick;
   const leg = (supplier: number, buyer: number, good: number, amount: number, hub: number): TradeLeg => ({
     supplier,
     buyer,
