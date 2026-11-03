@@ -40,11 +40,12 @@ function runYears(sim: Simulation, years: number): void {
 const sumTerms = (terms: { value: number }[]) => terms.reduce((s, t) => s + t.value, 0);
 const pair = (a: number, b: number) => a * PAIRS + b;
 
-/** World 17: the first two peoples meet in year 82. */
+/** World 17, just after its first two peoples met (in year 98, in the diplomacy week). */
 function metWorld(): { sim: Simulation; a: number; b: number } {
   const sim = createSimulation(generateWorld({ seed: 17 }));
-  runYears(sim, 83);
-  const met = sim.chronicle.find((e) => e.text.endsWith(' met.'));
+  const firstMeeting = () => sim.chronicle.find((e) => e.text.endsWith(' met.'));
+  while (!firstMeeting() && sim.tick < 300 * TICKS_PER_YEAR) stepSimulation(sim);
+  const met = firstMeeting();
   assert.ok(met, 'two peoples met');
   const [a, b] = livingCivilizations(sim)
     .filter((c) => met.text.includes(c.name))
@@ -358,7 +359,7 @@ test('the buyer takes what a trade agreement owes even if it asks for nothing no
   let a = -1;
   let b = -1;
   let hub = -1;
-  for (let seed = 1; seed <= 6 && hub < 0; seed++) {
+  for (let seed = 1; seed <= 10 && hub < 0; seed++) {
     sim = createSimulation(generateWorld({ seed }));
     runYears(sim, 300);
     const ids = livingCivilizations(sim).map((c) => c.id);

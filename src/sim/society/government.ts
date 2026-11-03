@@ -1,6 +1,6 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
-import { buildingFits, capacityWith, usableSlots } from './economy';
+import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { GOV_TUNING, TAX_MAX, goodsRateFor, goodsTaxValue, rateFor, taxValue } from './taxes';
@@ -346,6 +346,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
   // Upkeep of government buildings, from the government's stock at their site; two years without it, a ruin.
   for (let c = 0; c < n; c++) {
     if (!sim.hasBuildings[c]) continue;
+    let ruined = false;
     for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
       if (economy.state[s] !== SlotState.Standing) continue;
       const t = economy.type[s];
@@ -356,8 +357,11 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
         economy.unpaid[s] = 0;
       } else if (++economy.unpaid[s] > UPKEEP_GRACE_YEARS) {
         economy.state[s] = SlotState.Ruin;
+        ruined = true;
       }
     }
+    // A ruin no longer supplies its hex.
+    if (ruined) updateCellSupply(sim, c);
   }
   // Projects: start what is paid for, drop what is lost or waited too long, choose the next.
   const year = Math.floor(sim.tick / WEEKS_PER_YEAR);

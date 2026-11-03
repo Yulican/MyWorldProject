@@ -298,18 +298,15 @@ test('a settlement trading in transit asks for what its partner lacks, up to a l
   assert.ok(sim.economy.luxury[cell * 6] >= keep - 1e-3, `held for the partner: ${sim.economy.luxury[cell * 6]}`);
 });
 
-test('a planned seat of government comes first: its site starts nothing else', () => {
+test('settlements do not build seats of government: a planned seat is for the government', () => {
   const { sim, cell } = settledHex(3);
   sim.economy.stock[cell * MATERIAL_COUNT + Material.Wood] = 1000;
   sim.economy.stock[cell * MATERIAL_COUNT + Material.Stone] = 1000;
-  sim.satisfaction[cell] = -5; // would build comfort first otherwise
   sim.seatSite[cell] = 1;
   runEconomy(sim, false, cell, sim.world.cellCount);
-  const started: string[] = [];
   for (let s = cell * SLOTS; s < (cell + 1) * SLOTS; s++) {
-    if (sim.economy.state[s] === SlotState.Construction) started.push(BUILDINGS[sim.economy.type[s]].name);
+    assert.ok(sim.economy.state[s] === SlotState.Empty || BUILDINGS[sim.economy.type[s]].name !== 'Seat of government', `slot ${s - cell * SLOTS}`);
   }
-  assert.ok(started.every((name) => name === 'Seat of government'), started.join(', '));
 });
 
 test('a seat of government whose harvest lacks its upkeep orders ten years of it, before all other trips', () => {

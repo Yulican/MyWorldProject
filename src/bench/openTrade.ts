@@ -1,6 +1,6 @@
 import { TICKS_PER_YEAR, stepSimulation, type Simulation } from '../sim';
 import { BUILDINGS, LUXURY_COUNT, SLOTS, SlotState } from '../sim/society/buildings';
-import { updateCellSupply } from '../sim/society/economy';
+import { updateCellSupply, usableSlots } from '../sim/society/economy';
 import { isCoast, updateTradeBuildings } from '../sim/society/trade';
 
 // The "trade" benchmark scenario: the most trade the map and simulation
@@ -20,8 +20,9 @@ export function openTrade(sim: Simulation): void {
   const { world, economy } = sim;
   for (let c = 0; c < world.cellCount; c++) {
     if (sim.cellPop[c] === 0) continue;
-    putUp(sim, c, CENTER, SLOTS - 1);
-    if (isCoast(world, c)) putUp(sim, c, HARBOR, SLOTS - 2);
+    const slots = usableSlots(sim, c);
+    putUp(sim, c, CENTER, slots - 1);
+    if (isCoast(world, c)) putUp(sim, c, HARBOR, slots - 2);
     updateTradeBuildings(sim, c);
     updateCellSupply(sim, c);
     // Something to sell and money to buy, so merchants actually set out.
@@ -33,11 +34,11 @@ export function openTrade(sim: Simulation): void {
   for (let t = 0; t < halfYear && !sim.gameOver; t++) stepSimulation(sim);
 }
 
-/** A standing building of `type` in a free slot, else in `fallback`. */
+/** A standing building of `type` in a free settlement slot, else in settlement slot `fallback`. */
 function putUp(sim: Simulation, cell: number, type: number, fallback: number): void {
   const { economy } = sim;
   let slot = cell * SLOTS + fallback;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Standing && economy.type[s] === type) return;
     if (economy.state[s] === SlotState.Empty) {
       slot = s;

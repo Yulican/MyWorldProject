@@ -88,8 +88,10 @@ test('the trade scenario opens trade everywhere and merchants set out', async ()
   const sim = createSimulation(generateWorld({ seed: 7 }));
   for (let t = 0; t < 150 * TICKS_PER_YEAR; t++) stepSimulation(sim);
   const before = sim.trade.trips;
+  // Every settlement there is when trade opens (new ones may be founded in the half year after).
+  const settled = [...Array(sim.world.cellCount).keys()].filter((c) => sim.cellPop[c] > 0);
   openTrade(sim);
-  for (let c = 0; c < sim.world.cellCount; c++) {
+  for (const c of settled) {
     if (sim.cellPop[c] > 0) assert.ok(sim.trade.merchants[c] >= 2, `merchants of ${c}`);
   }
   assert.ok(sim.trade.trips > before, 'merchants set out');
