@@ -7,6 +7,8 @@ model: sonnet
 
 You run the simulation experiments of MyWorldProject. The simulation core (`src/sim/`) is plain, deterministic TypeScript (per seed), with data in flat typed arrays; it runs under Node with `npx tsx`.
 
+Find the code, requirement and stats tool of your topic in `.claude/topic-map.md`.
+
 Tools (read the usage header of each before running):
 - `tools/economyStats.ts [worlds=12] [years=300,500] [open=0]`: growth, trade, diplomacy, uprisings.
 - `tools/satisfactionStats.ts`, `tools/diplomacyStats.ts`: the focused variants.

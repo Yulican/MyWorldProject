@@ -8,12 +8,15 @@ The user talks only with the main session about requirements and decisions. To k
 |---|---|
 | Design: requirement in `Design Documents/`, open details | `designer` |
 | Simulation: numbers over 12+ worlds, before/after | `sim-analyst` |
-| Implementation, bug fixes, tooling, tests | `implementer` |
+| Implementation in the simulation core (`src/sim/`, tests, stats tools) | `sim-engineer` |
+| Implementation in the app (map, panels, store, benchmark scenarios, Expo/CI) | `app-engineer` |
 | CI result after a push, "is a run still going?" | `ci-watcher` |
 | Benchmark failures, performance | `perf-engineer` |
 
 - The main session discusses with the user (in German), briefs an agent with everything it needs (agreed rule, numbers, branch, files), and relays the agent's short report. It asks the user before every push and pushes itself; agents only commit locally.
 - Independent tasks run in parallel; a code task and its design question are not split across agents that edit the same files at once.
+- A feature that spans both goes `sim-engineer` first, then `app-engineer` with the former's report; never both at once on the same branch.
+- `.claude/topic-map.md` maps every topic to its code, tests, requirement, stats tool and benchmark scenario; agents read it instead of searching, and keep it up to date.
 - Small questions the main session can answer from the conversation need no agent.
 
 ## Project architecture
