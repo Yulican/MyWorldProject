@@ -25,9 +25,9 @@ import {
   capacityAfterRepair,
   cellModifiers,
   isSettlementTarget,
+  continueEconomy,
   continueSeatPlan,
   rawMaterials,
-  runEconomy,
   startSeatPlan,
   updateCellSupply,
   type SeatPlan,
@@ -86,6 +86,13 @@ const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
 /** Districts whose next seat of government one part of a tick plans (see stepSimulationPart). */
 const SEAT_DISTRICTS_PER_PART = 2;
+/**
+ * Hexes with people or buildings whose quarterly economy one part of a tick
+ * runs (see stepSimulationPart). A hex with merchants sends them and plans
+ * trade roads, so a whole week's share of an aged trade world (about 9 hexes)
+ * cost up to ~10 ms in one frame on the benchmark emulator.
+ */
+const ECONOMY_HEXES_PER_PART = 3;
 /** Settlers cross at most this many hexes of land opened to them to reach free land beyond it. */
 const CROSSING_REACH = 4;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
@@ -215,6 +222,8 @@ export type Simulation = {
   refreshOwner: Uint8Array | null;
   /** The current tick's seat planning while it runs in parts. */
   seatPlan: SeatPlan | null;
+  /** The hex the current tick's economy continues at while it runs in parts; -1 before it starts. */
+  economyCell: number;
 };
 
 /** Settles the player's starting tribe in a freshly generated world. */
@@ -258,6 +267,7 @@ export function createSimulation(world: World): Simulation {
     part: TickPart.Start,
     refreshOwner: null,
     seatPlan: null,
+    economyCell: -1,
   };
   computeCapacity(sim);
 
@@ -282,6 +292,7 @@ export function createSimulation(world: World): Simulation {
 export const TickPart = {
   /** Inhabitants, the year's end for the peoples, merchants on their way. */
   Start: 0,
+  /** The week's share of the quarterly economy, a few hexes per part. */
   Economy: 1,
   /** Quarterly: new settlements, cut-off land, satisfaction. */
   RefreshLand: 2,
@@ -327,8 +338,15 @@ export function stepSimulationPart(sim: Simulation): boolean {
     case TickPart.Economy: {
       // Every hex's economy runs once a quarter, a 13th of the hexes each week;
       // upkeep is due in the year's last quarter.
+      // A few dozen hexes per part, continued in the next part.
       const week = sim.tick - 1;
-      runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
+      const from = sim.economyCell < 0 ? week % REFRESH_TICKS : sim.economyCell;
+      const next = continueEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, from, REFRESH_TICKS, ECONOMY_HEXES_PER_PART);
+      if (next < sim.world.cellCount) {
+        sim.economyCell = next;
+        return false;
+      }
+      sim.economyCell = -1;
       sim.part = isRefresh() ? TickPart.RefreshLand : TickPart.Plan;
       return false;
     }
