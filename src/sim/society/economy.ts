@@ -773,6 +773,22 @@ export type HexEconomy = {
   buildings: BuildingInfo[];
   slots: number;
   trade: HexTrade;
+  /** The government on this hex (Requirement Zentralregierung): its district, taxes, stock and buildings. */
+  government: HexGovernment;
+};
+
+export type HexGovernment = {
+  /** The seat whose district the hex is in, -1 if none; whether that is the capital. */
+  seat: number;
+  capital: boolean;
+  /** Money and goods tax rates the settlement pays (0..1). */
+  rate: number;
+  goodsRate: number;
+  /** Wood and stone the government keeps on this hex. */
+  wood: number;
+  stone: number;
+  buildings: BuildingInfo[];
+  slots: number;
 };
 
 /** A hex's trade for the hex info: money, grain and barrels, merchants, and what it asks for and spares. */
@@ -793,15 +809,19 @@ export type HexTrade = {
 const STATE_NAMES = ['standing', 'construction', 'standing', 'ruin', 'repair'] as const;
 
 export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
-  const { economy, world } = sim;
+  const { economy, world, government: gov } = sim;
   const buildings: BuildingInfo[] = [];
+  const govBuildings: BuildingInfo[] = [];
   for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
     const st = economy.state[s];
     if (st === SlotState.Empty) continue;
     const b = BUILDINGS[economy.type[s]];
     const good = GOOD_NAMES[b.good].toLowerCase();
-    const upkeep = [b.upkeepWood ? `${b.upkeepWood} wood` : '', b.upkeepStone ? `${b.upkeepStone} stone` : ''].filter(Boolean);
-    buildings.push({
+    const isGov = s >= cell * SLOTS + GOV_SLOT;
+    // Seats in government slots cost GOV_TUNING.seatUpkeep of the usual upkeep.
+    const factor = isGov && b.good === Good.Seat ? GOV_TUNING.seatUpkeep : 1;
+    const upkeep = [b.upkeepWood ? `${b.upkeepWood * factor} wood` : '', b.upkeepStone ? `${b.upkeepStone * factor} stone` : ''].filter(Boolean);
+    (isGov ? govBuildings : buildings).push({
       name: b.name,
       state: STATE_NAMES[st],
       workLeft: economy.work[s],
@@ -822,6 +842,16 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
     buildings,
     slots: usableSlots(sim, cell),
     trade: hexTrade(sim, cell),
+    government: {
+      seat: gov.district[cell],
+      capital: gov.district[cell] >= 0 && sim.civs[world.owner[cell]]?.capital === gov.district[cell],
+      rate: gov.cellRate[cell],
+      goodsRate: gov.cellGoodsRate[cell],
+      wood: gov.stock[cell * MATERIAL_COUNT + Material.Wood],
+      stone: gov.stock[cell * MATERIAL_COUNT + Material.Stone],
+      buildings: govBuildings,
+      slots: usableSlots(sim, cell),
+    },
   };
 }
 

@@ -880,7 +880,9 @@ function refreshSnapshot(sim: Simulation): void {
       world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
       world.harbors[c] = sim.trade.harbor[c];
     }
+    world.seats[c] = owner && sim.hasBuildings[c] && hasSeat(sim.economy, c) ? 1 : 0;
   }
+  for (const civ of sim.civs) if (civ && civ.capital >= 0) world.seats[civ.capital] = 2;
 
   sim.believers = 0;
   for (let id = 1; id < sim.civSlots; id++) {

@@ -24,6 +24,9 @@ const DOT_RADIUS = [0.14, 0.21, 0.28];
 const RUIN_COLOR = '#9a9284';
 const OUTLINE_COLOR = '#1b1b1b';
 const ANCHOR_COLOR = '#1f3b63';
+/** Flags of seats of government and capitals (world.seats). */
+const SEAT_COLOR = '#e3b23c';
+const CAPITAL_COLOR = '#b3262e';
 
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
@@ -112,6 +115,7 @@ export function territoryTileSignature(
       mix(cityLevel(world.buildings[c]));
       mix(openEdges(world, c, owner));
       mix(world.harbors[c]);
+      mix(world.seats[c]);
       const color = colorOf(owner);
       for (let k = 1; k < color.length; k++) mix(color.charCodeAt(k));
     }
@@ -164,6 +168,9 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   const outlines = Skia.PathBuilder.Make();
   const ruins = Skia.PathBuilder.Make();
   const anchors = Skia.PathBuilder.Make();
+  const poles = Skia.PathBuilder.Make();
+  const seatFlags = Skia.PathBuilder.Make();
+  const capitalFlags = Skia.PathBuilder.Make();
   const pathFor = (paths: Map<number, SkPathBuilder>, civ: number) => {
     let path = paths.get(civ);
     if (!path) {
@@ -224,6 +231,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     }
 
     if (world.harbors[c]) addAnchor(anchors, world, c, x, y);
+    if (world.seats[c]) addFlag(poles, world.seats[c] === 2 ? capitalFlags : seatFlags, x, y, world.seats[c] === 2);
     const level = cityLevel(world.buildings[c]);
     if (level > 0) {
       addCity(pathFor(dots, owner), x, y, level);
@@ -243,6 +251,22 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   for (const [civ, path] of dots) canvas.drawPath(path.detach(), fillPaint(colorOf(civ)));
   canvas.drawPath(outlines.detach(), strokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
   canvas.drawPath(anchors.detach(), strokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
+  canvas.drawPath(poles.detach(), strokePaint(OUTLINE_COLOR, HEX_PX * 0.06));
+  canvas.drawPath(seatFlags.detach(), fillPaint(SEAT_COLOR));
+  canvas.drawPath(capitalFlags.detach(), fillPaint(CAPITAL_COLOR));
+}
+
+/** A seat of government's flag in the hex's upper left: a pole and a pennant (larger for a capital). */
+function addFlag(pole: SkPathBuilder, flag: SkPathBuilder, x: number, y: number, capital: boolean) {
+  const u = HEX_PX * (capital ? 0.2 : 0.16);
+  const px = x - HEX_PX * 0.48;
+  const top = y - HEX_PX * 0.62;
+  pole.moveTo(px, top);
+  pole.lineTo(px, top + u * 3);
+  flag.moveTo(px, top);
+  flag.lineTo(px + u * 1.8, top + u * 0.6);
+  flag.lineTo(px, top + u * 1.2);
+  flag.close();
 }
 
 /** A harbor's anchor, towards the first water next to the hex. */

@@ -6,6 +6,7 @@ import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
 import { ChronicleDialog } from '../components/ChronicleDialog';
 import { CivPanel } from '../components/CivPanel';
 import { DiplomacyPanel } from '../components/DiplomacyPanel';
+import { GovernmentPanel } from '../components/GovernmentPanel';
 import { HexInfoPanel } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
@@ -25,7 +26,7 @@ const buildLabel = process.env.EXPO_PUBLIC_BUILD_LABEL ?? 'local dev build';
 // CI opens the app with this link to start the benchmark (scripts/run-benchmark.sh).
 const BENCHMARK_URL = 'myworld://benchmark';
 
-type OpenPanel = { kind: 'none' } | { kind: 'hex'; cell: number } | { kind: 'peoples' } | { kind: 'diplomacy' };
+type OpenPanel = { kind: 'none' } | { kind: 'hex'; cell: number } | { kind: 'peoples' } | { kind: 'diplomacy' } | { kind: 'government' };
 
 export function WorldScreen() {
   const { sim, speed, chronicleSeen, resumeSpeed, chronicleDialogs } = useGameState();
@@ -133,9 +134,15 @@ export function WorldScreen() {
           />
         )}
         {sim && panel.kind === 'peoples' && (
-          <CivPanel sim={sim} onClose={closePanel} onDiplomacy={() => setPanel({ kind: 'diplomacy' })} />
+          <CivPanel
+            sim={sim}
+            onClose={closePanel}
+            onDiplomacy={() => setPanel({ kind: 'diplomacy' })}
+            onGovernment={() => setPanel({ kind: 'government' })}
+          />
         )}
         {sim && panel.kind === 'diplomacy' && <DiplomacyPanel sim={sim} onClose={closePanel} />}
+        {sim && panel.kind === 'government' && <GovernmentPanel sim={sim} onClose={closePanel} />}
         {sim && entry && (
           <ChronicleDialog
             entry={entry}

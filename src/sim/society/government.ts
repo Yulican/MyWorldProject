@@ -673,3 +673,95 @@ export function advanceGovernment(sim: Simulation): void {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Panel
+
+/** A government building or project for the panel. */
+export type GovBuilding = { cell: number; name: string; state: 'standing' | 'building' | 'ruin' };
+
+/** One district for the "Government" panel. */
+export type District = {
+  seat: number;
+  capital: boolean;
+  settlements: number;
+  people: number;
+  /** Money and goods tax rates (0..1). */
+  rate: number;
+  goodsRate: number;
+  treasury: number;
+  wood: number;
+  stone: number;
+  /** Yearly upkeep of its government buildings in money, and the most the income check allows. */
+  upkeep: number;
+  budget: number;
+  buildings: GovBuilding[];
+  /** Its project, null if none: what, where, and its materials (in stock and on the way) against what it needs. */
+  project: { name: string; cell: number; wood: number; stone: number; needWood: number; needStone: number } | null;
+  traders: number;
+  away: number;
+};
+
+/** A people's districts, the capital's first, then by size. */
+export function governmentOf(sim: Simulation, civ: number): District[] {
+  const gov = sim.government;
+  const { economy, world } = sim;
+  const n = world.cellCount;
+  const capital = sim.civs[civ]?.capital ?? -1;
+  const byCell = new Map<number, District>();
+  for (let s = 0; s < n; s++) {
+    if (!gov.traders[s] || world.owner[s] !== civ) continue;
+    byCell.set(s, {
+      seat: s,
+      capital: s === capital,
+      settlements: 0,
+      people: 0,
+      rate: gov.rate[s],
+      goodsRate: gov.goodsRate[s],
+      treasury: gov.treasury[s],
+      wood: gov.stock[s * MATERIAL_COUNT],
+      stone: gov.stock[s * MATERIAL_COUNT + 1],
+      upkeep: 0,
+      budget: GOV_TUNING.incomeShare * gov.potential[s],
+      buildings: [],
+      project: null,
+      traders: gov.traders[s],
+      away: gov.away[s],
+    });
+  }
+  for (let c = 0; c < n; c++) {
+    const d = byCell.get(gov.district[c]);
+    if (!d) continue;
+    d.settlements++;
+    d.people += sim.cellPop[c];
+    if (!sim.hasBuildings[c]) continue;
+    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+      const st = economy.state[s];
+      if (st === SlotState.Empty) continue;
+      const t = economy.type[s];
+      const state = st === SlotState.Standing ? 'standing' : st === SlotState.Ruin ? 'ruin' : 'building';
+      d.buildings.push({ cell: c, name: BUILDINGS[t].name, state });
+      if (state !== 'ruin') d.upkeep += upkeepGold(t);
+    }
+  }
+  for (const d of byCell.values()) {
+    const site = gov.projectSite[d.seat];
+    if (site < 0) continue;
+    const t = gov.projectType[d.seat];
+    const w = site * MATERIAL_COUNT;
+    d.project = {
+      name: BUILDINGS[t].name,
+      cell: site,
+      wood: gov.stock[w] + gov.incoming[w],
+      stone: gov.stock[w + 1] + gov.incoming[w + 1],
+      needWood: costOf(t, 0) + upkeepReserve(sim, site, 0, UPKEEP_RESERVE_YEARS - 1),
+      needStone: costOf(t, 1) + upkeepReserve(sim, site, 1, UPKEEP_RESERVE_YEARS - 1),
+    };
+  }
+  return [...byCell.values()].sort((a, b) => Number(b.capital) - Number(a.capital) || b.people - a.people || a.seat - b.seat);
+}
+
+/** The seat whose district a hex is in, -1 if none (for the hex info). */
+export function districtOf(sim: Simulation, cell: number): number {
+  return sim.government.district[cell];
+}
