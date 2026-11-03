@@ -5,6 +5,8 @@ import {
   generateWorld,
   randomSeed,
   stepSimulation,
+  stepSimulationPart,
+  TickPart,
   type ChronicleEntry,
   type Simulation,
   type World,
@@ -18,8 +20,13 @@ import { countEvent, recordSimWork } from './perfStats';
 /** Simulation ticks (weeks) per second for each speed level; 0 = paused. */
 export const SPEEDS = [0, 6, 26, 104] as const;
 const DEFAULT_SPEED = 1;
-/** Simulation time per frame, so the UI stays smooth even at top speed. */
-const FRAME_BUDGET_MS = 8;
+/**
+ * Simulation time per frame for each speed level, so the UI stays smooth
+ * even at top speed. Slower speeds need far less, so a long tick is spread
+ * over several frames there (one part of it per frame at least, see
+ * stepSimulationPart) instead of costing one frame its smoothness.
+ */
+const FRAME_BUDGET_MS = [0, 3, 4, 8] as const;
 /** React is told about new map snapshots at most this often. */
 const NOTIFY_INTERVAL_MS = 400;
 
@@ -167,37 +174,73 @@ function startClock() {
 }
 
 /**
- * Runs as many ticks as the speed asks for, within the frame budget. Stops
- * itself while paused or after game over; the clock doesn't run in the
- * background, so there is no offline progress (design doc, section 3).
+ * The longest recent run of each tick part (ms, decaying), by part and week
+ * of the year (the yearly plans differ by week), to stop before a part that
+ * would overrun the frame budget.
+ */
+const partMs = new Float64Array(8 * TICKS_PER_YEAR);
+const partKey = (sim: Simulation) => sim.part * TICKS_PER_YEAR + (sim.tick % TICKS_PER_YEAR);
+
+/**
+ * Runs as many ticks as the speed asks for, within the frame budget, part
+ * by part: a long tick continues in the next frame. A tick that has begun is
+ * always finished, also after pausing. A new map snapshot is handed to the
+ * map and React in a frame without simulation work. Stops itself while
+ * paused or after game over; the clock doesn't run in the background, so
+ * there is no offline progress (design doc, section 3).
  */
 function runFrame(now: number) {
   frame = null;
   const { sim, speed } = state;
+  if (!sim) return;
   const ticksPerSecond = SPEEDS[speed];
-  if (!sim || ticksPerSecond === 0 || sim.gameOver) return;
+  const betweenTicks = sim.part === TickPart.Start;
 
   // Cap the step after long pauses (e.g. the app was in the background).
   const seconds = Math.min(0.25, (now - lastFrameTime) / 1000);
   lastFrameTime = now;
+
+  // A new snapshot (complete after its tick) gets a frame of its own.
+  if (betweenTicks && sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
+    notifiedSnapshot = sim.snapshotVersion;
+    lastNotify = now;
+    countEvent('snapshots');
+    pendingTicks += ticksPerSecond * seconds;
+    publish({});
+    if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
+    return;
+  }
+  if (betweenTicks && (ticksPerSecond === 0 || sim.gameOver)) return;
+
   pendingTicks += ticksPerSecond * seconds;
   const start = performance.now();
-  const deadline = start + FRAME_BUDGET_MS;
+  const budget = Math.max(FRAME_BUDGET_MS[speed], FRAME_BUDGET_MS[1]);
   let ticks = 0;
+  let parts = 0;
   const entries = sim.chronicle.length;
-  while (pendingTicks >= 1 && !sim.gameOver && performance.now() < deadline && sim.chronicle.length === entries) {
-    stepSimulation(sim);
-    pendingTicks--;
-    ticks++;
+  for (;;) {
+    // A new tick only while the speed asks for one and nothing notable happened in this frame (or is waiting to be shown).
+    if (sim.part === TickPart.Start) {
+      if (pendingTicks < 1 || sim.gameOver || ticksPerSecond === 0 || sim.chronicle.length !== entries) break;
+      if (state.chronicleDialogs && nextShown(sim, state.chronicleSeen) < sim.chronicle.length) break;
+    }
+    const key = partKey(sim);
+    const partStart = performance.now();
+    if (parts > 0 && partStart - start + partMs[key] > budget) break;
+    if (sim.part === TickPart.Start) pendingTicks--;
+    const done = stepSimulationPart(sim);
+    const ms = performance.now() - partStart;
+    partMs[key] = Math.max(ms, partMs[key] * 0.9);
+    parts++;
+    if (done) ticks++;
   }
   recordSimWork(performance.now() - start, ticks);
   // Drop what didn't fit instead of piling up a backlog.
   pendingTicks = Math.min(pendingTicks, 2);
 
-  // Something notable happened: pause and show it (the chronicle dialog).
+  // Something notable happened: pause and show it (the chronicle dialog) once its tick is complete.
   // Other entries only go into the chronicle list: mark them seen silently.
-  let silent: Partial<GameState> | undefined;
-  if (state.chronicleDialogs && sim.chronicle.length > entries) {
+  if (state.chronicleDialogs && sim.part === TickPart.Start) {
     const seen = nextShown(sim, state.chronicleSeen);
     if (seen < sim.chronicle.length) {
       notifiedSnapshot = sim.snapshotVersion;
@@ -205,14 +248,10 @@ function runFrame(now: number) {
       publish({ chronicleSeen: seen, speed: 0, resumeSpeed: speed });
       return;
     }
-    if (seen !== state.chronicleSeen) silent = { chronicleSeen: seen };
+    if (seen !== state.chronicleSeen) publish({ chronicleSeen: seen });
   }
 
-  if (sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
-    notifiedSnapshot = sim.snapshotVersion;
-    lastNotify = now;
-    countEvent('snapshots');
-    publish(silent ?? {});
-  } else if (silent) publish(silent);
-  if (!sim.gameOver) frame = requestAnimationFrame(runFrame);
+  // Game over: the last snapshot is still shown in the next frame.
+  const more = sim.gameOver ? sim.snapshotVersion !== notifiedSnapshot : ticksPerSecond > 0;
+  if (sim.part !== TickPart.Start || more) frame = requestAnimationFrame(runFrame);
 }

@@ -635,6 +635,29 @@ const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
  * (buildPlannedSeat); a plan not built within SAVE_UP_YEARS goes elsewhere.
  */
 export function planSeats(sim: Simulation, owner: Uint8Array): void {
+  const plan = startSeatPlan(sim, owner);
+  while (!continueSeatPlan(sim, plan, Infinity));
+}
+
+/**
+ * planSeats in parts, so it can be spread over frames: the candidates
+ * (startSeatPlan), then the districts' sites a few at a time
+ * (continueSeatPlan). Districts don't affect each other's choice, so the
+ * parts give the same result as one go, as long as nothing else changes the
+ * simulation in between.
+ */
+export type SeatPlan = {
+  owner: Uint8Array;
+  year: number;
+  busy: Uint8Array;
+  candidates: number[][];
+  again: Int32Array;
+  civOf: Uint8Array;
+  /** The next district (by seat cell) to plan. */
+  next: number;
+};
+
+export function startSeatPlan(sim: Simulation, owner: Uint8Array): SeatPlan {
   const { economy, world } = sim;
   const n = world.cellCount;
   // One planned seat per government district (by its seat cell).
@@ -669,13 +692,23 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
     if (sim.seatRetry[c] > year + 1) continue;
     (candidates[g] ??= []).push(c);
   }
-  const field = scratchField(n);
-  for (let g = 0; g < groups; g++) {
+  return { owner, year, busy, candidates, again, civOf, next: 0 };
+}
+
+/** Plans the sites of up to `districts` more districts; true once all are done. */
+export function continueSeatPlan(sim: Simulation, plan: SeatPlan, districts: number): boolean {
+  const { owner, year, busy, candidates, again, civOf } = plan;
+  const groups = busy.length;
+  const field = scratchField(groups);
+  let planned = 0;
+  for (; plan.next < groups && planned < districts; plan.next++) {
+    const g = plan.next;
     const id = civOf[g];
     const list = candidates[g];
     // A queued site keeps its plan while another seat is being built.
     if (again[g] >= 0 && busy[g]) sim.seatSite[again[g]] = year + 1;
     if (!sim.civs[id] || busy[g] || !list) continue;
+    planned++;
     // Held back by the expansion stop first, then the worst connected.
     const held = (c: number) => (sim.frontierBlocked[c] && year + 1 - sim.frontierBlocked[c] <= 1 ? 1 : 0);
     list.sort((a, b) => held(b) - held(a) || sim.seatCost[b] - sim.seatCost[a] || a - b);
@@ -706,6 +739,7 @@ export function planSeats(sim: Simulation, owner: Uint8Array): void {
     if (best >= 0) sim.seatSite[best] = year + 1;
     if (again[g] >= 0 && best !== again[g]) sim.seatRetry[again[g]] = year + SEAT_RETRY_YEARS + 1;
   }
+  return plan.next >= groups;
 }
 
 let scratch = new Float32Array(0);
