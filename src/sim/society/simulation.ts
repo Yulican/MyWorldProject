@@ -1,4 +1,13 @@
-import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
+import {
+  advanceGovernment,
+  createGovernment,
+  prepareGovernment,
+  updateGovernment,
+  updateGovernmentProjects,
+  updateGovernmentUpkeep,
+  type Government,
+  type GovernmentYear,
+} from './government';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
@@ -18,18 +27,19 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
-import { BUILDINGS, FIRST_LUXURY, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, cityTier, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
   EXPAND_MIN_CONNECTION,
   capacityAfterRepair,
   cellModifiers,
   isSettlementTarget,
+  continueEconomy,
   continueSeatPlan,
   rawMaterials,
-  runEconomy,
   startSeatPlan,
   updateCellSupply,
+  usableSlots,
   type SeatPlan,
 } from './economy';
 import {
@@ -86,6 +96,13 @@ const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
 /** Districts whose next seat of government one part of a tick plans (see stepSimulationPart). */
 const SEAT_DISTRICTS_PER_PART = 2;
+/**
+ * Hexes with people or buildings whose quarterly economy one part of a tick
+ * runs (see stepSimulationPart). A hex with merchants sends them and plans
+ * trade roads, so a whole week's share of an aged trade world (about 9 hexes)
+ * cost up to ~10 ms in one frame on the benchmark emulator.
+ */
+const ECONOMY_HEXES_PER_PART = 3;
 /** Settlers cross at most this many hexes of land opened to them to reach free land beyond it. */
 const CROSSING_REACH = 4;
 /** Faith from which an inhabitant counts as a believer who prays to the player. */
@@ -128,8 +145,14 @@ const NEW_TRIBE_CHANCE = 0.02;
 /** New tribes appear at least this many hexes from anyone else. */
 const NEW_TRIBE_DISTANCE = 8;
 
-/** A notable event; `cell` is where it happened (-1 for none), so the player can jump there. */
-export type ChronicleEntry = { tick: number; text: string; cell: number };
+/**
+ * A notable event; `cell` is where it happened (-1 for none), so the player
+ * can jump there. `important` ones (founding, new people, uprising,
+ * secession, a people vanished, game end, first contact, border closed) open
+ * the chronicle dialog and pause the game; the others only go into the
+ * chronicle list (Requirement Zufriedenheit, section 5).
+ */
+export type ChronicleEntry = { tick: number; text: string; cell: number; important: boolean };
 
 export type Simulation = {
   world: World;
@@ -209,6 +232,10 @@ export type Simulation = {
   refreshOwner: Uint8Array | null;
   /** The current tick's seat planning while it runs in parts. */
   seatPlan: SeatPlan | null;
+  /** The current tick's government year (districts, taxes) while it runs in parts. */
+  governmentYear: GovernmentYear | null;
+  /** The hex the current tick's economy continues at while it runs in parts; -1 before it starts. */
+  economyCell: number;
 };
 
 /** Settles the player's starting tribe in a freshly generated world. */
@@ -252,6 +279,8 @@ export function createSimulation(world: World): Simulation {
     part: TickPart.Start,
     refreshOwner: null,
     seatPlan: null,
+    governmentYear: null,
+    economyCell: -1,
   };
   computeCapacity(sim);
 
@@ -261,7 +290,7 @@ export function createSimulation(world: World): Simulation {
   for (let i = 0; i < START_TRIBE_SIZE; i++) {
     addInhabitant(sim, start, tribe.id, 2 + Math.floor(sim.rng() * 36), 0.75 + 0.25 * sim.rng());
   }
-  record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`, start);
+  record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`, start, true);
   updateSatisfaction(sim, cellOwners(sim));
   refreshSnapshot(sim);
   return sim;
@@ -274,17 +303,26 @@ export function createSimulation(world: World): Simulation {
  * nothing to do in a tick are skipped.
  */
 export const TickPart = {
-  /** Inhabitants, the year's end for the peoples, merchants on their way. */
+  /** Inhabitants (and merchants on their way, except at the year's end). */
   Start: 0,
-  Economy: 1,
-  /** Quarterly: new settlements, cut-off land, satisfaction. */
-  RefreshLand: 2,
-  /** Quarterly: wants, migration, breakaways, the map snapshot. */
-  RefreshPeople: 3,
+  /** The year's end for the peoples, then merchants on their way. */
+  YearEnd: 1,
+  /** The week's share of the quarterly economy, a few hexes per part. */
+  Economy: 2,
+  /** Quarterly: new settlements and the owner of every hex. */
+  RefreshLand: 3,
+  /** Quarterly: land cut off from its people. */
+  RefreshCutOff: 4,
+  /** Quarterly: satisfaction and the peoples' wants. */
+  RefreshSatisfaction: 5,
+  /** Quarterly: migration and breakaways. */
+  RefreshPeople: 6,
+  /** Quarterly: the map snapshot. */
+  RefreshSnapshot: 7,
   /** The yearly plan of this week (seats of government in several parts). */
-  Plan: 4,
+  Plan: 8,
   /** Government traders, distances, transit hubs, the year's totals. */
-  Finish: 5,
+  Finish: 9,
 } as const;
 export type TickPart = (typeof TickPart)[keyof typeof TickPart];
 
@@ -311,36 +349,63 @@ export function stepSimulationPart(sim: Simulation): boolean {
         if (pop.alive[i]) updateInhabitant(sim, i);
       }
       sim.tick++;
-      if (sim.tick % TICKS_PER_YEAR === 0) updateCivilizations(sim);
-      advanceTrips(sim);
-      for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
-      sim.trade.supplyDirtyCount = 0;
+      // The peoples' year's end gets a part of its own.
+      if (sim.tick % TICKS_PER_YEAR === 0) {
+        sim.part = TickPart.YearEnd;
+        return false;
+      }
+      moveMerchants(sim);
+      sim.part = TickPart.Economy;
+      return false;
+    }
+    case TickPart.YearEnd: {
+      updateCivilizations(sim);
+      moveMerchants(sim);
       sim.part = TickPart.Economy;
       return false;
     }
     case TickPart.Economy: {
       // Every hex's economy runs once a quarter, a 13th of the hexes each week;
       // upkeep is due in the year's last quarter.
+      // A few hexes per part, continued in the next part.
       const week = sim.tick - 1;
-      runEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, week % REFRESH_TICKS, REFRESH_TICKS);
+      const from = sim.economyCell < 0 ? week % REFRESH_TICKS : sim.economyCell;
+      const next = continueEconomy(sim, Math.floor(week / REFRESH_TICKS) % 4 === 3, from, REFRESH_TICKS, ECONOMY_HEXES_PER_PART);
+      if (next < sim.world.cellCount) {
+        sim.economyCell = next;
+        return false;
+      }
+      sim.economyCell = -1;
       sim.part = isRefresh() ? TickPart.RefreshLand : TickPart.Plan;
       return false;
     }
     case TickPart.RefreshLand: {
       expandSettlements(sim);
-      const owner = cellOwners(sim);
-      splitCutOffLand(sim, owner);
+      sim.refreshOwner = cellOwners(sim);
+      sim.part = TickPart.RefreshCutOff;
+      return false;
+    }
+    case TickPart.RefreshCutOff: {
+      splitCutOffLand(sim, sim.refreshOwner!);
+      sim.part = TickPart.RefreshSatisfaction;
+      return false;
+    }
+    case TickPart.RefreshSatisfaction: {
+      const owner = sim.refreshOwner!;
       updateSatisfaction(sim, owner);
-      sim.refreshOwner = owner;
+      sumCivWants(sim, owner);
       sim.part = TickPart.RefreshPeople;
       return false;
     }
     case TickPart.RefreshPeople: {
       const owner = sim.refreshOwner!;
       sim.refreshOwner = null;
-      sumCivWants(sim, owner);
       emigrate(sim, owner);
       breakAway(sim, owner);
+      sim.part = TickPart.RefreshSnapshot;
+      return false;
+    }
+    case TickPart.RefreshSnapshot: {
       refreshSnapshot(sim);
       sim.part = TickPart.Plan;
       return false;
@@ -349,6 +414,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
       // The people's yearly plans each get a week of their own, away from the
       // refreshes, so no single tick carries them all.
       const owner = sim.world.owner;
+      // The government's year: districts, then what they have and need, a part each; the taxes below.
+      if (weekOfYear === GOVERNMENT_WEEK && !prepareGovernment(sim, owner)) return false;
       if (weekOfYear === SEATS_WEEK) {
         // A part for the candidates, then a few districts per part.
         if (!sim.seatPlan) {
@@ -359,8 +426,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
         sim.seatPlan = null;
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
-      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
-      else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell, important) => record(sim, text, cell, important));
+      else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell, important) => record(sim, text, cell, important));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
       sim.part = TickPart.Finish;
@@ -375,6 +442,13 @@ export function stepSimulationPart(sim: Simulation): boolean {
       return true;
     }
   }
+}
+
+/** Merchants on their way, and the supply of the hexes they changed. */
+function moveMerchants(sim: Simulation): void {
+  advanceTrips(sim);
+  for (let i = 0; i < sim.trade.supplyDirtyCount; i++) updateCellSupply(sim, sim.trade.supplyDirty[i]);
+  sim.trade.supplyDirtyCount = 0;
 }
 
 /** Keeps the year's totals for the trend chart and starts new faith ledgers. */
@@ -748,7 +822,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
       moveGroup(sim, source, first, civ.id, group);
       addRoad(world, source, dir);
       owner[first] = civ.id;
-      if (first === found) record(sim, `The ${civ.name} settled the ${GOOD_NAMES[BUILDINGS[WORKSHOP_OF[world.deposit[found]]].good].toLowerCase()} of the ${biomeName(world, found)}.`, found);
+      if (first === found) record(sim, `The ${civ.name} settled the ${GOOD_NAMES[BUILDINGS[WORKSHOP_OF[world.deposit[found]]].good].toLowerCase()} of the ${biomeName(world, found)}.`, found, false);
     }
     for (const c of touched) prev[c] = -2;
   }
@@ -875,7 +949,7 @@ function splitCutOffLandOnce(sim: Simulation, owner: Uint8Array): void {
         owner[c] = civ.id;
         dip.cutOffSince[c] = -1;
       }
-      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital);
+      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital, true);
     }
   }
 }
@@ -956,6 +1030,7 @@ function refreshSnapshot(sim: Simulation): void {
     if (owner) territory[owner]++;
     if (sim.hasBuildings[c]) {
       world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);
+      world.cityTier[c] = cityTier(world.buildings[c], usableSlots(sim, c));
       world.ruins[c] = countSlots(sim.economy, c, SlotState.Ruin) + countSlots(sim.economy, c, SlotState.Repair);
       world.harbors[c] = sim.trade.harbor[c];
     }
@@ -973,7 +1048,7 @@ function refreshSnapshot(sim: Simulation): void {
     civ.averageFaith = civ.population > 0 ? civFaithSum[id] / civ.population : 0;
     sim.believers += believers[id];
     if (civ.population === 0) {
-      record(sim, `The ${civ.name} have vanished.`, civ.capital);
+      record(sim, `The ${civ.name} have vanished.`, civ.capital, true);
       sim.civs[id] = null;
       continue;
     }
@@ -984,7 +1059,7 @@ function refreshSnapshot(sim: Simulation): void {
 
   if (sim.believers === 0) {
     sim.gameOver = true;
-    record(sim, 'Nobody prays to you anymore.', -1);
+    record(sim, 'Nobody prays to you anymore.', -1, true);
   }
   sim.snapshotVersion++;
 }
@@ -1198,7 +1273,7 @@ function breakAway(sim: Simulation, owner: Uint8Array): void {
       addMood(civ, 'Won its revolution', MOOD_REVOLUTION_WON, sim.tick);
       addMood(parent, 'Lost a revolution', MOOD_REVOLUTION_LOST, sim.tick);
       const who = cells.length === 1 ? 'A settlement' : `${cells.length} settlements`;
-      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital);
+      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital, true);
     }
   }
 }
@@ -1232,7 +1307,7 @@ function tryNewTribe(sim: Simulation): void {
   if (!civ) return;
   const size = 15 + Math.floor(rng() * 10);
   for (let i = 0; i < size; i++) addInhabitant(sim, best, civ.id, 2 + Math.floor(rng() * 36), rng() * 0.1);
-  record(sim, `A new people, the ${civ.name}, appeared in the ${biomeName(world, best)}.`, best);
+  record(sim, `A new people, the ${civ.name}, appeared in the ${biomeName(world, best)}.`, best, true);
 }
 
 /**
@@ -1327,6 +1402,6 @@ function biomeName(world: World, cell: number): string {
   return BIOMES[world.biome[cell]].name.toLowerCase();
 }
 
-function record(sim: Simulation, text: string, cell: number): void {
-  sim.chronicle.push({ tick: sim.tick, text, cell });
+function record(sim: Simulation, text: string, cell: number, important: boolean): void {
+  sim.chronicle.push({ tick: sim.tick, text, cell, important });
 }

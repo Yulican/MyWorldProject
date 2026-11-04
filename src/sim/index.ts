@@ -13,7 +13,7 @@ export { MAX_CIVS, MAX_CIV_ID, ledgerNet, type CivOrigin, type Civilization } fr
 export { CULTURE_COUNT, CULTURE_NAMES, Culture } from './society/culture';
 export { SUPPLY_KINDS, SUPPLY_NAMES, SupplyKind, type SupplyModifier } from './society/supply';
 export { sumTerms, type Term } from './terms';
-export { BUILDINGS, GOOD_NAMES, Good, SLOTS, isLuxury, type BuildingType } from './society/buildings';
+export { BUILDINGS, CityTier, GOOD_NAMES, Good, SLOTS, cityTier, isLuxury, type BuildingType } from './society/buildings';
 export { hexSatisfaction, type HexSatisfaction } from './society/satisfaction';
 export { relationsOf, type Relation } from './society/diplomacy';
 export { governmentOf, type District, type GovBuilding } from './society/government';

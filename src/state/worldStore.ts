@@ -7,6 +7,7 @@ import {
   stepSimulation,
   stepSimulationPart,
   TickPart,
+  type ChronicleEntry,
   type Simulation,
   type World,
 } from '../sim';
@@ -28,6 +29,15 @@ const DEFAULT_SPEED = 1;
 const FRAME_BUDGET_MS = [0, 3, 4, 8] as const;
 /** React is told about new map snapshots at most this often. */
 const NOTIFY_INTERVAL_MS = 400;
+/**
+ * After a new world appears, the previous world is garbage once the map has
+ * let go of it (its tiles are disposed when it re-renders). A forced
+ * collection then, while the new world loads, frees it at once; left to the
+ * collector, freeing it came during the first minute of panning the new
+ * world and cost single frames of 30+ ms (the benchmark's second world).
+ * Shorter than the benchmark's settle time (useBenchmark WORLD_SETTLE_MS).
+ */
+const OLD_WORLD_GC_DELAY_MS = 800;
 
 export type GameState = {
   sim: Simulation | null;
@@ -35,8 +45,9 @@ export type GameState = {
   /** Changes with every map snapshot the UI hasn't seen yet. */
   version: number;
   /**
-   * Chronicle entries the player has seen; while there are more, the game
-   * is paused and the chronicle dialog shows the next one.
+   * Chronicle entries the player has seen; while an important one follows,
+   * the game is paused and the chronicle dialog shows it. Other entries are
+   * counted as seen right away (they only go into the chronicle list).
    */
   chronicleSeen: number;
   /** Speed the game continues at once the chronicle dialog is closed (chosen meanwhile in the time controls). */
@@ -84,6 +95,7 @@ export function createNewWorld(seed: number = randomSeed()): World {
     resumeSpeed: DEFAULT_SPEED,
   });
   startClock();
+  collectOldWorld();
   return sim.world;
 }
 
@@ -99,6 +111,8 @@ export function advanceYears(years: number, prepare?: (sim: Simulation) => void)
   prepare?.(sim);
   notifiedSnapshot = sim.snapshotVersion;
   publish(state.chronicleDialogs ? {} : { chronicleSeen: sim.chronicle.length });
+  // Simulating years at once leaves garbage of its own.
+  collectOldWorld();
 }
 
 export function setSpeed(speed: number) {
@@ -129,13 +143,26 @@ export function setChronicleDialogs(enabled: boolean) {
 }
 
 /**
- * The first entry from `from` the dialog shows: the game-over entry has its
- * own screen and is skipped.
+ * Whether the chronicle dialog shows an entry: only important ones, and not
+ * the game-over entry, which has its own screen. The others only go into the
+ * chronicle list.
  */
-function nextShown(sim: Simulation, from: number): number {
+export function shownInDialog(entry: ChronicleEntry): boolean {
+  return entry.important && entry.cell >= 0;
+}
+
+/** The first entry from `from` the dialog shows (the chronicle length if none). */
+export function nextShown(sim: Simulation, from: number): number {
   let i = from;
-  while (i < sim.chronicle.length && sim.chronicle[i].cell < 0) i++;
+  while (i < sim.chronicle.length && !shownInDialog(sim.chronicle[i])) i++;
   return i;
+}
+
+/** How many entries after `seen` the dialog still shows. */
+export function shownAfter(sim: Simulation, seen: number): number {
+  let n = 0;
+  for (let i = seen + 1; i < sim.chronicle.length; i++) if (shownInDialog(sim.chronicle[i])) n++;
+  return n;
 }
 
 /** Simulation, speed and a version that changes whenever the map snapshot does. */
@@ -152,6 +179,21 @@ export const snapshotStore = {
   getVersion: (): number => notifiedSnapshot,
 };
 
+let gcTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Runs a full garbage collection shortly after a world was created or
+ * simulated ahead (see OLD_WORLD_GC_DELAY_MS), on the JS thread while the map
+ * keeps running on the UI thread. Hermes provides gc(); elsewhere a no-op.
+ */
+function collectOldWorld() {
+  if (gcTimer !== null) clearTimeout(gcTimer);
+  gcTimer = setTimeout(() => {
+    gcTimer = null;
+    (globalThis as { gc?: () => void }).gc?.();
+  }, OLD_WORLD_GC_DELAY_MS);
+}
+
 function startClock() {
   if (frame !== null) return;
   lastFrameTime = performance.now();
@@ -163,7 +205,7 @@ function startClock() {
  * of the year (the yearly plans differ by week), to stop before a part that
  * would overrun the frame budget.
  */
-const partMs = new Float64Array(8 * TICKS_PER_YEAR);
+const partMs = new Float64Array(Object.keys(TickPart).length * TICKS_PER_YEAR);
 const partKey = (sim: Simulation) => sim.part * TICKS_PER_YEAR + (sim.tick % TICKS_PER_YEAR);
 
 /**
@@ -224,6 +266,7 @@ function runFrame(now: number) {
   pendingTicks = Math.min(pendingTicks, 2);
 
   // Something notable happened: pause and show it (the chronicle dialog) once its tick is complete.
+  // Other entries only go into the chronicle list: mark them seen silently.
   if (state.chronicleDialogs && sim.part === TickPart.Start) {
     const seen = nextShown(sim, state.chronicleSeen);
     if (seen < sim.chronicle.length) {
@@ -232,6 +275,7 @@ function runFrame(now: number) {
       publish({ chronicleSeen: seen, speed: 0, resumeSpeed: speed });
       return;
     }
+    if (seen !== state.chronicleSeen) publish({ chronicleSeen: seen });
   }
 
   // Game over: the last snapshot is still shown in the next frame.

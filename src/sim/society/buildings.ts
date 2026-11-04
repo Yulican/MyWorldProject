@@ -157,6 +157,25 @@ const FORAGE_PER_RESOURCE = 5;
 
 export const SlotState = { Empty: 0, Construction: 1, Standing: 2, Ruin: 3, Repair: 4 } as const;
 
+/** What a settlement looks like by its used building slots (Requirement Regionale Rohstoffe, section 10). Display only. */
+export const CityTier = { Tribe: 0, SmallCity: 1, BigCity: 2 } as const;
+/** Share (percent) of a hex's usable slots a small or big city has standing. */
+const SMALL_CITY_PERCENT = 50;
+const BIG_CITY_PERCENT = 80;
+
+/**
+ * City tier of a hex with `used` standing buildings (settlement and
+ * government) and `slots` usable settlement slots: from 50 % a small city,
+ * from 80 % a big one, integer compare, no hysteresis. Over 100 % (government
+ * buildings) is a big city; no buildings is always a tribe.
+ */
+export function cityTier(used: number, slots: number): number {
+  if (used <= 0) return CityTier.Tribe;
+  if (used * 100 >= BIG_CITY_PERCENT * slots) return CityTier.BigCity;
+  if (used * 100 >= SMALL_CITY_PERCENT * slots) return CityTier.SmallCity;
+  return CityTier.Tribe;
+}
+
 /** Wood and stone stock and building slots of every hex. */
 export type Economy = {
   /** cell * MATERIAL_COUNT + material. Stays on the ground when a hex is lost. */

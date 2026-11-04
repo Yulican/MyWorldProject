@@ -486,8 +486,12 @@ export function measureDistances(sim: Simulation, owner: Uint8Array): void {
   }
 }
 
-/** A chronicle entry at a hex (simulation.ts: record), passed in to avoid an import cycle. */
-export type Record = (text: string, cell: number) => void;
+/**
+ * A chronicle entry at a hex (simulation.ts: record), passed in to avoid an
+ * import cycle. `important` entries open the chronicle dialog and pause the
+ * game; the others only go into the chronicle list.
+ */
+export type Record = (text: string, cell: number, important: boolean) => void;
 
 /**
  * Yearly: who meets whom, peaceful neighborhood, trust and danger; then
@@ -514,7 +518,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       if (!dip.known[k] && dip.distance[k] <= SIGHT_RANGE) {
         dip.known[k] = 1;
         dip.known[pair(b, a)] = 1;
-        record(`The ${name(a)} and the ${name(b)} met.`, capital(b));
+        record(`The ${name(a)} and the ${name(b)} met.`, capital(b), true);
       }
       if (!dip.known[k]) continue;
       const near = nearness(dip.distance[k]);
@@ -543,7 +547,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         dip.open[k] = 1;
         dip.bordersVersion++;
         addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
-        record(`The ${name(a)} opened their borders to the ${name(b)}.`, capital(a));
+        record(`The ${name(a)} opened their borders to the ${name(b)}.`, capital(a), false);
       } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST || danger(a, b) > CLOSE_DANGER)) {
         closeBorders(sim, a, b, record);
       }
@@ -559,15 +563,15 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       if (!dip.freeTrade[k] && both && mutual(a, b, FREE_TRADE_TRUST)) {
         setSymmetric(dip.freeTrade, a, b, 1);
         celebrate(dip, a, b, 'Signed free trade with us', sim.tick);
-        record(`The ${name(a)} and the ${name(b)} agreed on free trade.`, capital(a));
+        record(`The ${name(a)} and the ${name(b)} agreed on free trade.`, capital(a), false);
       }
       if (!dip.migration[k] && mutual(a, b, MIGRATION_TRUST)) {
         setSymmetric(dip.migration, a, b, 1);
         celebrate(dip, a, b, 'Signed a migration agreement with us', sim.tick);
-        record(`The ${name(a)} and the ${name(b)} agreed that their people may settle with each other.`, capital(a));
+        record(`The ${name(a)} and the ${name(b)} agreed that their people may settle with each other.`, capital(a), false);
       } else if (dip.migration[k] && (trust(a, b) < MIGRATION_END_TRUST || trust(b, a) < MIGRATION_END_TRUST)) {
         setSymmetric(dip.migration, a, b, 0);
-        record(`The migration agreement between the ${name(a)} and the ${name(b)} ended.`, capital(a));
+        record(`The migration agreement between the ${name(a)} and the ${name(b)} ended.`, capital(a), false);
       }
     }
   }
@@ -619,7 +623,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     if (broken) {
       // Only the side that got too little holds it against the other.
       addMood(dip, broken.buyer, broken.supplier, 'Broke a trade agreement with us', CLOSED_TRUST, sim.tick);
-      record(`The trade agreement for ${what} broke: too little ${lower(broken.good)} arrived.`, capital(broken.buyer));
+      record(`The trade agreement for ${what} broke: too little ${lower(broken.good)} arrived.`, capital(broken.buyer), false);
       pause(t);
       continue;
     }
@@ -630,7 +634,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       second.amount = value / PRICE[second.good];
     }
     if (shrunk && t.legs.some((l) => l.amount < AGREEMENT_MIN_AMOUNT)) {
-      record(`The trade agreement for ${what} ended: too little could be delivered.`, capital(first.buyer));
+      record(`The trade agreement for ${what} ended: too little could be delivered.`, capital(first.buyer), false);
       pause(t);
       continue;
     }
@@ -642,7 +646,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
       const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
       if (!ok || !mutual(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
-        record(`The trade agreement for ${what} ran out.`, capital(first.buyer));
+        record(`The trade agreement for ${what} ran out.`, capital(first.buyer), false);
         pause(t);
         continue;
       }
@@ -725,11 +729,12 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           record(
             `The ${name(b)} and the ${name(a)} agreed to trade ${Math.round(bestAmounts[0])} ${lower(g)} for ${Math.round(bestAmounts[1])} ${lower(best)} a year.`,
             capital(a),
+            false,
           );
         } else if (mutual(a, b, TRADE_AGREEMENT_TRUST)) {
           dip.agreements.push({ a, b, since: sim.tick, legs: [leg(b, a, g, amount, hub)] });
           celebrate(dip, a, b, 'Signed a trade agreement with us', sim.tick);
-          record(`The ${name(b)} agreed to deliver ${Math.round(amount)} ${lower(g)} a year to the ${name(a)}.`, capital(a));
+          record(`The ${name(b)} agreed to deliver ${Math.round(amount)} ${lower(g)} a year to the ${name(a)}.`, capital(a), false);
         } else continue;
         rebuildPartners(dip);
       }
@@ -817,7 +822,7 @@ export function closeBorders(sim: Simulation, a: number, b: number, record: Reco
   addMood(dip, b, a, 'Closed their borders to us', CLOSED_TRUST, sim.tick);
   dip.peace[pair(b, a)] = 0;
   rebuildPartners(dip);
-  record(`The ${sim.civs[a]!.name} closed their borders to the ${sim.civs[b]!.name}.`, sim.civs[a]!.capital);
+  record(`The ${sim.civs[a]!.name} closed their borders to the ${sim.civs[b]!.name}.`, sim.civs[a]!.capital, true);
 }
 
 /** Trust and danger of every known pair (the sums of their terms, computed without allocating). */

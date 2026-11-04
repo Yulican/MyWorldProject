@@ -11,7 +11,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | Roads | `world/roads.ts` | – | Requirement Handel | – | aged |
 | Inhabitants, aging, births, migration, settling (main loop, 1320 lines; a tick runs in parts, `stepSimulationPart`, which the game clock in `src/state/worldStore.ts` spreads over frames) | `society/simulation.ts`, `population.ts` | `simulation.test.ts` | Game Design doc | `economyStats.ts` | aged |
 | Food, water, space per hex | `society/supply.ts` | – | Requirement Regionale Rohstoffe | `economyStats.ts` | – |
-| Harvest, buildings, construction, upkeep (912 lines) | `society/economy.ts`, `buildings.ts` | `economy.test.ts` | Requirement Regionale Rohstoffe | `economyStats.ts` | cities |
+| Harvest, buildings, construction, upkeep (912 lines); city tier by used slots (`cityTier()` in `buildings.ts`, `world.cityTier` set in `simulation.ts`) | `society/economy.ts`, `buildings.ts` | `economy.test.ts` | Requirement Regionale Rohstoffe | `economyStats.ts` | cities |
 | Peoples, culture, names | `society/civilizations.ts`, `culture.ts` | – | Game Design doc | – | – |
 | Satisfaction, uprisings | `society/satisfaction.ts` (+ uprisings in `simulation.ts`) | `satisfaction.test.ts` | Requirement Zufriedenheit | `satisfactionStats.ts` | unrest |
 | Trade, merchants, harbors, goods (1280 lines) | `society/trade.ts` | `trade.test.ts` | Requirement Handel (+ Diplomatie for foreign trade) | `economyStats.ts` | trade |
@@ -25,10 +25,11 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 |---|---|---|
 | Simulation outside React, snapshots for the map | `src/state/worldStore.ts` | components subscribe; Context only for UI state (`src/context/AppContext.tsx`, `src/hooks/useApp.ts`) |
 | Map rendering (Skia), gestures, zoom | `src/map/WorldMap.tsx`, `viewport.ts`, `mapGeometry.ts` | `viewport.test.ts` |
-| Map pictures, tile cache | `src/map/worldPicture.ts`, `tileImages.ts`, `hexIcons.ts`, `palette.ts`, `paints.ts` | hot path for the benchmark |
-| Territories, borders (dashed = open), seat flags | `src/map/territoryLayers.ts` | unrest, diplomacy, government scenarios |
+| Map pictures, tile cache | `src/map/worldPicture.ts`, `tileImages.ts`, `hexIcons.ts`, `palette.ts`, `paints.ts` | hot path for the benchmark; `tileImages.test.ts` |
+| Territories, borders (dashed = open), seat flags, city icons (from `world.cityTier`) | `src/map/territoryLayers.ts` | cities, unrest, diplomacy, government scenarios |
 | FPS meter, perf counters | `src/map/MapPerfMeter.tsx`, `motionStats.ts`, `src/state/perfStats.ts` | `motionStats.test.ts` |
 | Screen, panels, dialogs (English texts) | `src/screens/WorldScreen.tsx`, `src/components/HexInfoPanel.tsx`, `CivPanel.tsx`, `DiplomacyPanel.tsx`, `GovernmentPanel.tsx`, `ChronicleDialog.tsx`, `TimeControls.tsx`, `Screen.tsx`, `src/theme/` | – |
+| Chronicle dialog: which entries pause the game (`important` flag set at each `record()` site in `src/sim/`) | `src/state/worldStore.ts` (`shownInDialog`, `nextShown`), `src/components/ChronicleDialog.tsx`, `src/screens/WorldScreen.tsx` | `src/sim/society/simulation.test.ts` (list of important entries); Requirement Zufriedenheit §5 |
 | Benchmark rules and scenarios | `src/bench/benchmark.ts` (rules), `useBenchmark.ts` (in-app runner), `fillBuildings.ts` (cities), `stirUnrest.ts` (unrest), `openTrade.ts` (trade), `openDiplomacy.ts` (diplomacy), `empowerGovernment.ts` (government) | `benchmark.test.ts`; scenario list also in `.github/workflows/android-build.yml` and `AGENTS.md` |
 | Build, CI, native config | `app.json`, `eas.json`, `.github/workflows/android-build.yml`, `scripts/swap-js-bundle.sh` | `android/` is generated, never edit |
 
