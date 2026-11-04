@@ -11,7 +11,7 @@ import {
   type Simulation,
   type World,
 } from '../sim';
-import { countEvent, recordSimWork } from './perfStats';
+import { countEvent, markTimeline, recordSimWork, TimelineKind } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
 // simulation state lives outside React, components subscribe to what they
@@ -223,6 +223,8 @@ function runFrame(now: number) {
   const ticksPerSecond = SPEEDS[speed];
   const betweenTicks = sim.part === TickPart.Start;
 
+  // A long gap between frames means the JS thread was busy elsewhere or stalled (benchmark diagnostics).
+  if (now - lastFrameTime > 20) markTimeline(TimelineKind.jsGap, now - lastFrameTime);
   // Cap the step after long pauses (e.g. the app was in the background).
   const seconds = Math.min(0.25, (now - lastFrameTime) / 1000);
   lastFrameTime = now;
@@ -232,6 +234,7 @@ function runFrame(now: number) {
     notifiedSnapshot = sim.snapshotVersion;
     lastNotify = now;
     countEvent('snapshots');
+    markTimeline(TimelineKind.snapshot, 1);
     pendingTicks += ticksPerSecond * seconds;
     publish({});
     if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
@@ -261,7 +264,9 @@ function runFrame(now: number) {
     parts++;
     if (done) ticks++;
   }
-  recordSimWork(performance.now() - start, ticks);
+  const simMs = performance.now() - start;
+  recordSimWork(simMs, ticks);
+  if (parts > 0) markTimeline(TimelineKind.sim, simMs);
   // Drop what didn't fit instead of piling up a backlog.
   pendingTicks = Math.min(pendingTicks, 2);
 

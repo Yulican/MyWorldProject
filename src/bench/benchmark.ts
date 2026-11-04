@@ -84,7 +84,33 @@ export function swipePlan(): Swipe[] {
 }
 
 /** Frames measured during one swipe. */
-export type SwipeStats = { frames: number; timeMs: number; worstMs: number };
+export type SwipeStats = { frames: number; timeMs: number; worstMs: number; ui?: SwipeUiStats };
+
+/**
+ * Diagnostics from the UI thread for one swipe (they don't affect whether it
+ * passes): times are Date.now() values, the counts are the UI runtime's
+ * garbage collections and the tile layer's work over the whole swipe, and
+ * `worst*` the tile layer's work in the interval that ended with the
+ * slowest frame.
+ */
+export type SwipeUiStats = {
+  startedAt: number;
+  worstAt: number;
+  /** Index of the slowest frame in the swipe (1 = first). */
+  worstFrame: number;
+  /** Frames over 20 ms (a missed vsync at 60 Hz). */
+  slowFrames: number;
+  uiGcCount: number;
+  uiGcMs: number;
+  uiPictures: number;
+  uiAhead: number;
+  uiFresh: number;
+  uiDrawMs: number;
+  worstPictures: number;
+  worstAhead: number;
+  worstFresh: number;
+  worstDrawMs: number;
+};
 
 export type SwipeResult = {
   world: number;

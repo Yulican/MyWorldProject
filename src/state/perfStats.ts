@@ -47,3 +47,68 @@ export function takePerfSample(): { simMs: number; ticks: number; mapBuildMs: nu
   ticks = 0;
   return sample;
 }
+
+/**
+ * Garbage collections of the calling runtime's JS engine so far and their
+ * time in ms (Hermes; zeros elsewhere). A worklet, so the benchmark can also
+ * read the UI runtime's collector, which runs on the thread that draws the
+ * frames and isn't covered by the JS runtime's numbers.
+ */
+export function gcStats(): { gcCount: number; gcMs: number } {
+  'worklet';
+  const hermes = (globalThis as { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> } })
+    .HermesInternal;
+  const stats = hermes?.getInstrumentedStats?.();
+  // Hermes reports the GC time in seconds.
+  return { gcCount: stats?.js_numGCs ?? 0, gcMs: (stats?.js_gcTime ?? 0) * 1000 };
+}
+
+/**
+ * What the JS thread did recently, with wall-clock times (Date.now(), the
+ * same clock on the UI thread), so the benchmark can line it up with a
+ * swipe's slowest UI frame. A fixed ring buffer: recording allocates nothing.
+ */
+export const TimelineKind = {
+  /** Simulation work in one game-clock frame (value: ms). */
+  sim: 0,
+  /** A new society snapshot handed to the map and React. */
+  snapshot: 1,
+  /** A slice of tile images rendered (value: tiles). */
+  tiles: 2,
+  /** A tile set handed to the UI thread (value: 1). */
+  handover: 3,
+  /** A gap between two game-clock frames over 20 ms: the JS thread was busy or stalled (value: ms). */
+  jsGap: 4,
+} as const;
+const KIND_NAMES = ['sim', 'snapshot', 'tiles', 'handover', 'jsGap'] as const;
+const TIMELINE_SIZE = 2048;
+const timelineAt = new Float64Array(TIMELINE_SIZE);
+const timelineKind = new Uint8Array(TIMELINE_SIZE);
+const timelineValue = new Float64Array(TIMELINE_SIZE);
+let timelineNext = 0;
+let timelineCount = 0;
+
+export function markTimeline(kind: (typeof TimelineKind)[keyof typeof TimelineKind], value: number) {
+  timelineAt[timelineNext] = Date.now();
+  timelineKind[timelineNext] = kind;
+  timelineValue[timelineNext] = value;
+  timelineNext = (timelineNext + 1) % TIMELINE_SIZE;
+  if (timelineCount < TIMELINE_SIZE) timelineCount++;
+}
+
+/**
+ * Sums of the timeline's values per kind between two Date.now() times
+ * (inclusive); `jsGap` is the longest gap instead of a sum.
+ */
+export function timelineBetween(from: number, to: number): Record<(typeof KIND_NAMES)[number], number> {
+  const out = { sim: 0, snapshot: 0, tiles: 0, handover: 0, jsGap: 0 };
+  for (let n = 0; n < timelineCount; n++) {
+    const i = (timelineNext - 1 - n + TIMELINE_SIZE) % TIMELINE_SIZE;
+    const at = timelineAt[i];
+    if (at < from) break;
+    if (at > to) continue;
+    const name = KIND_NAMES[timelineKind[i]];
+    out[name] = name === 'jsGap' ? Math.max(out[name], timelineValue[i]) : out[name] + timelineValue[i];
+  }
+  return out;
+}

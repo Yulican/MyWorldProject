@@ -1,4 +1,5 @@
 import type { SkImage } from '@shopify/react-native-skia';
+import { markTimeline, TimelineKind } from '../state/perfStats';
 import type { TileRef } from './viewport';
 
 /** JS time spent rendering tiles before yielding, so view updates aren't held up. */
@@ -171,8 +172,11 @@ export class TileImages {
       rendered++;
     }
     this.evict();
-    if (rendered > 0) gate.lastSliceAt = performance.now();
-    if (rendered > 0) this.onReady();
+    if (rendered > 0) {
+      gate.lastSliceAt = performance.now();
+      markTimeline(TimelineKind.tiles, rendered);
+      this.onReady();
+    }
     if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(rendered > 0 ? SLICE_PAUSE_MS : 0, wait));
   };
 

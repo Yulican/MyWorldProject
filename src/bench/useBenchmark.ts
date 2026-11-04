@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
-import { perfEvents } from '../state/perfStats';
+import { gcStats, perfEvents, timelineBetween } from '../state/perfStats';
 import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
@@ -17,6 +17,7 @@ import {
   type BenchmarkSummary,
   type ScenarioName,
   type SwipeResult,
+  type SwipeUiStats,
 } from './benchmark';
 
 /** Log prefix CI looks for in logcat (scripts/run-benchmark.sh). */
@@ -25,6 +26,8 @@ const LOG = 'MYWORLD_BENCH';
 const WORLD_SETTLE_MS = 1500;
 const ZOOM_SETTLE_MS = 500;
 const PAUSE_MS = 250;
+/** Margin around the slowest frame when looking for JS work near it (two frames). */
+const NEAR_MS = 34;
 
 export type BenchmarkStatus =
   | { running: true; scenario: ScenarioName; world: number; swipe: number; failed: number }
@@ -81,6 +84,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
         for (const [k, v] of Object.entries({ ...perfEvents, ...gcStats() })) {
           events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
         }
+        if (stats.ui) Object.assign(events, uiEvents(stats.ui, stats.worstMs));
         const result = { world, seed, direction: plan[i].direction, ...evaluateSwipe(stats), events };
         results.push(result);
         console.log(`${LOG}_SWIPE ${JSON.stringify(result)}`);
@@ -98,14 +102,34 @@ export function useBenchmark(controller: { current: MapController | null }) {
 }
 
 /**
- * Garbage collections of the JS engine so far and their time in ms (Hermes;
- * zeros elsewhere). The collector also runs on other threads, so it can cost
- * frames without any app work.
+ * Diagnostics for a swipe from the UI thread (see SwipeUiStats), and what the
+ * JS thread did around the slowest frame: in the interval that ended with it,
+ * widened by two frames on each side (the clocks of the two threads only
+ * agree to the millisecond, and work late in one frame delays the next).
  */
-function gcStats(): { gcCount: number; gcMs: number } {
-  const hermes = (globalThis as { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> } })
-    .HermesInternal;
-  const stats = hermes?.getInstrumentedStats?.();
-  // Hermes reports the GC time in seconds.
-  return { gcCount: stats?.js_numGCs ?? 0, gcMs: (stats?.js_gcTime ?? 0) * 1000 };
+function uiEvents(ui: SwipeUiStats, worstMs: number): Record<string, number> {
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const near = timelineBetween(ui.worstAt - worstMs - NEAR_MS, ui.worstAt + NEAR_MS);
+  const all = timelineBetween(ui.startedAt, Date.now());
+  return {
+    uiGcCount: ui.uiGcCount,
+    uiGcMs: round(ui.uiGcMs),
+    slowFrames: ui.slowFrames,
+    worstFrame: ui.worstFrame,
+    worstAtMs: Math.round(ui.worstAt - ui.startedAt),
+    uiPictures: ui.uiPictures,
+    uiAhead: ui.uiAhead,
+    uiFresh: ui.uiFresh,
+    uiDrawMs: round(ui.uiDrawMs),
+    worstPictures: ui.worstPictures,
+    worstAhead: ui.worstAhead,
+    worstFresh: ui.worstFresh,
+    worstDrawMs: round(ui.worstDrawMs),
+    jsMaxGapMs: round(all.jsGap),
+    nearSimMs: round(near.sim),
+    nearSnapshots: near.snapshot,
+    nearTiles: near.tiles,
+    nearHandovers: near.handover,
+    nearJsGapMs: round(near.jsGap),
+  };
 }
