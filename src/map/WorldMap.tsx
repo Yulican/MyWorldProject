@@ -382,17 +382,6 @@ type TileSet = {
 const EMPTY_TILE_SET: TileSet = { terrain: {}, territory: {}, overview: null };
 const EMPTY_PICTURE = createPicture(() => {});
 
-/** Whether two tile sets hold the same images for the same tiles. */
-function sameTiles(a: TileSet, b: TileSet): boolean {
-  return a.overview === b.overview && sameImages(a.terrain, b.terrain) && sameImages(a.territory, b.territory);
-}
-
-function sameImages(a: Record<number, SkImage>, b: Record<number, SkImage>): boolean {
-  for (const k in b) if (a[k] !== b[k]) return false;
-  for (const k in a) if (!(k in b)) return false;
-  return true;
-}
-
 /**
  * The detail tile images near the screen and the territories above them,
  * drawn as one picture that the UI thread records again whenever the view
@@ -410,8 +399,6 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
   const tileSet = useSharedValue<TileSet>(EMPTY_TILE_SET);
   const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
   const current = useRef<ViewTiles>(NO_TILES);
-  /** The tile set last handed to the UI thread. */
-  const shown = useRef<TileSet>(EMPTY_TILE_SET);
   const publish = useRef<() => void>(() => {});
   const onReady = useCallback(() => publish.current(), []);
   const scales = useMemo(() => TIER_ZOOMS.map((zoom) => zoom * PixelRatio.get()), []);
@@ -554,11 +541,6 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
   // ...and when JS hands over new images: applied and drawn on the UI thread
   // right away, without waiting for the next movement.
   function showTiles(set: TileSet) {
-    // The same images again (the view crossed a tile border into the
-    // prefetched ring): the UI thread has redrawn with them already, and
-    // another copy to its runtime would only leave garbage there.
-    if (sameTiles(shown.current, set)) return;
-    shown.current = set;
     scheduleOnUI((next: TileSet) => {
       'worklet';
       tileSet.value = next;
