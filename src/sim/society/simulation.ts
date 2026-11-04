@@ -145,8 +145,14 @@ const NEW_TRIBE_CHANCE = 0.02;
 /** New tribes appear at least this many hexes from anyone else. */
 const NEW_TRIBE_DISTANCE = 8;
 
-/** A notable event; `cell` is where it happened (-1 for none), so the player can jump there. */
-export type ChronicleEntry = { tick: number; text: string; cell: number };
+/**
+ * A notable event; `cell` is where it happened (-1 for none), so the player
+ * can jump there. `important` ones (founding, new people, uprising,
+ * secession, a people vanished, game end, first contact, border closed) open
+ * the chronicle dialog and pause the game; the others only go into the
+ * chronicle list (Requirement Zufriedenheit, section 5).
+ */
+export type ChronicleEntry = { tick: number; text: string; cell: number; important: boolean };
 
 export type Simulation = {
   world: World;
@@ -284,7 +290,7 @@ export function createSimulation(world: World): Simulation {
   for (let i = 0; i < START_TRIBE_SIZE; i++) {
     addInhabitant(sim, start, tribe.id, 2 + Math.floor(sim.rng() * 36), 0.75 + 0.25 * sim.rng());
   }
-  record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`, start);
+  record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`, start, true);
   updateSatisfaction(sim, cellOwners(sim));
   refreshSnapshot(sim);
   return sim;
@@ -420,8 +426,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
         sim.seatPlan = null;
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
-      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
-      else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell, important) => record(sim, text, cell, important));
+      else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell, important) => record(sim, text, cell, important));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
       sim.part = TickPart.Finish;
@@ -816,7 +822,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
       moveGroup(sim, source, first, civ.id, group);
       addRoad(world, source, dir);
       owner[first] = civ.id;
-      if (first === found) record(sim, `The ${civ.name} settled the ${GOOD_NAMES[BUILDINGS[WORKSHOP_OF[world.deposit[found]]].good].toLowerCase()} of the ${biomeName(world, found)}.`, found);
+      if (first === found) record(sim, `The ${civ.name} settled the ${GOOD_NAMES[BUILDINGS[WORKSHOP_OF[world.deposit[found]]].good].toLowerCase()} of the ${biomeName(world, found)}.`, found, false);
     }
     for (const c of touched) prev[c] = -2;
   }
@@ -943,7 +949,7 @@ function splitCutOffLandOnce(sim: Simulation, owner: Uint8Array): void {
         owner[c] = civ.id;
         dip.cutOffSince[c] = -1;
       }
-      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital);
+      record(sim, `The ${civ.name} in the ${biomeName(world, capital)}, cut off from the ${parent.name}, became their own people.`, capital, true);
     }
   }
 }
@@ -1042,7 +1048,7 @@ function refreshSnapshot(sim: Simulation): void {
     civ.averageFaith = civ.population > 0 ? civFaithSum[id] / civ.population : 0;
     sim.believers += believers[id];
     if (civ.population === 0) {
-      record(sim, `The ${civ.name} have vanished.`, civ.capital);
+      record(sim, `The ${civ.name} have vanished.`, civ.capital, true);
       sim.civs[id] = null;
       continue;
     }
@@ -1053,7 +1059,7 @@ function refreshSnapshot(sim: Simulation): void {
 
   if (sim.believers === 0) {
     sim.gameOver = true;
-    record(sim, 'Nobody prays to you anymore.', -1);
+    record(sim, 'Nobody prays to you anymore.', -1, true);
   }
   sim.snapshotVersion++;
 }
@@ -1267,7 +1273,7 @@ function breakAway(sim: Simulation, owner: Uint8Array): void {
       addMood(civ, 'Won its revolution', MOOD_REVOLUTION_WON, sim.tick);
       addMood(parent, 'Lost a revolution', MOOD_REVOLUTION_LOST, sim.tick);
       const who = cells.length === 1 ? 'A settlement' : `${cells.length} settlements`;
-      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital);
+      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital, true);
     }
   }
 }
@@ -1301,7 +1307,7 @@ function tryNewTribe(sim: Simulation): void {
   if (!civ) return;
   const size = 15 + Math.floor(rng() * 10);
   for (let i = 0; i < size; i++) addInhabitant(sim, best, civ.id, 2 + Math.floor(rng() * 36), rng() * 0.1);
-  record(sim, `A new people, the ${civ.name}, appeared in the ${biomeName(world, best)}.`, best);
+  record(sim, `A new people, the ${civ.name}, appeared in the ${biomeName(world, best)}.`, best, true);
 }
 
 /**
@@ -1396,6 +1402,6 @@ function biomeName(world: World, cell: number): string {
   return BIOMES[world.biome[cell]].name.toLowerCase();
 }
 
-function record(sim: Simulation, text: string, cell: number): void {
-  sim.chronicle.push({ tick: sim.tick, text, cell });
+function record(sim: Simulation, text: string, cell: number, important: boolean): void {
+  sim.chronicle.push({ tick: sim.tick, text, cell, important });
 }

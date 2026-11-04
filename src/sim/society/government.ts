@@ -189,8 +189,8 @@ function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_
   return sum * years;
 }
 
-/** A chronicle entry at a hex (simulation.ts: record). */
-export type Record = (text: string, cell: number) => void;
+/** A chronicle entry at a hex (simulation.ts: record); see diplomacy.ts: Record. */
+export type Record = (text: string, cell: number, important: boolean) => void;
 
 /**
  * Yearly: districts, tax rates and taxes (then updateGovernmentUpkeep and
@@ -381,7 +381,7 @@ function levyTaxes(sim: Simulation, owner: Uint8Array, year: GovernmentYear, rec
     for (let m = 0; m < MATERIAL_COUNT; m++) goodsValue += goodsSpare[s * MATERIAL_COUNT + m] * PRICE[m];
     gov.potential[s] = Math.max(moneyOnly, Math.min(goodsFlow[s], goodsLimit * goodsValue));
     if (Math.abs(rate - gov.rate[s]) >= 0.1) {
-      record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s);
+      record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s, false);
     }
     gov.rate[s] = rate;
     gov.goodsRate[s] = goodsRate;

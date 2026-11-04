@@ -29,6 +29,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | Territories, borders (dashed = open), seat flags, city icons (from `world.cityTier`) | `src/map/territoryLayers.ts` | cities, unrest, diplomacy, government scenarios |
 | FPS meter, perf counters | `src/map/MapPerfMeter.tsx`, `motionStats.ts`, `src/state/perfStats.ts` | `motionStats.test.ts` |
 | Screen, panels, dialogs (English texts) | `src/screens/WorldScreen.tsx`, `src/components/HexInfoPanel.tsx`, `CivPanel.tsx`, `DiplomacyPanel.tsx`, `GovernmentPanel.tsx`, `ChronicleDialog.tsx`, `TimeControls.tsx`, `Screen.tsx`, `src/theme/` | – |
+| Chronicle dialog: which entries pause the game (`important` flag set at each `record()` site in `src/sim/`) | `src/state/worldStore.ts` (`shownInDialog`, `nextShown`), `src/components/ChronicleDialog.tsx`, `src/screens/WorldScreen.tsx` | `src/sim/society/simulation.test.ts` (list of important entries); Requirement Zufriedenheit §5 |
 | Benchmark rules and scenarios | `src/bench/benchmark.ts` (rules), `useBenchmark.ts` (in-app runner), `fillBuildings.ts` (cities), `stirUnrest.ts` (unrest), `openTrade.ts` (trade), `openDiplomacy.ts` (diplomacy), `empowerGovernment.ts` (government) | `benchmark.test.ts`; scenario list also in `.github/workflows/android-build.yml` and `AGENTS.md` |
 | Build, CI, native config | `app.json`, `eas.json`, `.github/workflows/android-build.yml`, `scripts/swap-js-bundle.sh` | `android/` is generated, never edit |
 
