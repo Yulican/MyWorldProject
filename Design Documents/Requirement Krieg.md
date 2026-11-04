@@ -81,7 +81,7 @@ Entschieden (Nutzer), Phase 3a.
 
 - **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt (ein Krieg je Volk).
 - **Zielsitz:** Unter den Sitzen, deren Bezirke Siedlungen an der Grenze des Angreifers enthalten, wählt er den mit dem größten Nutzen bei Eroberung. **Nutzen** (entschieden) = gewichtete Summe aus Einwohnern und Ressourcen des Bezirks (strategische Güter und Luxusvorkommen zählen doppelt), geteilt durch die Verteidiger im Bezirk. Es gibt ein Kriegsziel je Krieg.
-- **Aufgabe** (Interpretation, zu bestätigen): Der Verteidiger gibt erst auf, wenn das Kriegsziel (Zielsitz) besetzt ist; dann gilt die 40-%-Regel. Offen: Gilt die 40-%-Bedingung nach der Besetzung weiter, oder gibt er mit der Besetzung sofort auf? Für den Angreifer bleibt die einfache 40-%-Regel (noch zu bestätigen). Die ursprüngliche Regel lautete: Eine Seite gibt auf, wenn sie weniger als 40 % der Stärke des Gegners hat (entschieden, für beide Seiten), jährlich geprüft, ohne dass eine Schlacht nötig ist. Der Verlierer tritt den Zielsitz samt Bezirk ab. Es gibt keine Mindeststärke für Kriegsziele: Auch gegen schwache Splittervölker oder Völker ohne Soldaten darf erklärt werden.
+- **Aufgabe** (entschieden): Vor der Besetzung des Kriegsziels (Zielsitz) gibt der Verteidiger nie auf. Ist der Zielsitz besetzt, gibt er nur auf, wenn er weniger als 40 % der Stärke des Gegners hat; sonst geht der Krieg (mit besetztem Sitz) weiter bis zur Aufgabe, zur Erschöpfung (10 Jahre) oder bis zum Entsatz. Für den Angreifer gilt die einfache 40-%-Regel. Geprüft wird jährlich, ohne dass eine Schlacht nötig ist.
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
 - **Erschöpfung:** Nach 10 Jahren ohne Besetzung oder Sieg endet der Krieg ohne Gebietsänderung (Frieden).
 - **Nach dem Krieg:** Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
@@ -144,14 +144,13 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröße; Rebellen müssen nicht zusammenhängen; bei Sieg ein Volk je zusammenhängender Gruppe, miteinander verbündet; Besetzung: Belagerung ≥ 2 Jahre und Zufriedenheit < 0 (ersetzt die 5-Jahres-Regel, Abschnitt 5); Rebellensiedlungen wechseln mit der Erklärung den Besitzer; annektierte Rebellensiedlungen bekommen „erobert“. Zuordnung der strategischen Güter, Gold, Beschaffung von Eisen und Feuerstein sowie die Zahlen von Phase 0 und 1: siehe Abschnitt 2 und 14.
 
-Aufgabe-Änderung: siehe Abschnitt 6 (Interpretation, offen). Welt und Völker: Abschnitt 15.
+Aufgabe nach Besetzung: entschieden (Abschnitt 6). Welt und Völker: Abschnitt 15.
 
 Phase 3, entschieden (nach der Simulation, Abschnitt 14): keine Mindeststärke für Kriegsziele, Aufgabe unverändert, Annexion eines Ein-Bezirk-Volks, Eroberungsstraße; weniger Völker durch Annexionen und damit weniger Außenhandel und Abkommen sind eine bewusst akzeptierte Folge.
 
 Phase 3, entschieden: siehe Abschnitte 4 bis 6 (Nutzen der Zielwahl, Besetzung, Hauptstadt ohne Annexion, ein Kriegsziel je Krieg, Zeitpunkt der Verteidigung).
 
 Offen:
-- Aufgabe nach Besetzung: Bedingung 40 % weiter nötig? Gilt für den Angreifer die einfache 40-%-Regel? (Abschnitt 6)
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
@@ -206,7 +205,7 @@ Zusätzlich gewählt: Eisen- und Feuerstein-Vorkommen sind bei der Weltgenerieru
 
 ## 15. Welt und Völker (Entscheidung nach der Simulation)
 
-Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`Game Design Gott einer Zivilisation.docx/.pdf`, Welt und Zivilisationen); dort sind sie noch nachzuziehen. Neu:
+Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`Game Design Gott einer Zivilisation.docx/.pdf`, Welt und Zivilisationen); dort sind sie nachgezogen. Neu:
 
 - **Karte:** 46 × 44 Hexfelder statt 64 × 64 (etwa halb so groß).
 - **Völker:** bis zu 9 lebende Völker (weiche Grenze) statt 6. Abspaltungen dürfen darüber hinausgehen.
@@ -221,3 +220,21 @@ Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`
 | Siedlungen | 226 | 240 |
 | Aufstände | 2,1 | 6,9 |
 | Rechenzeit (ms pro Jahr) | – | +9 % |
+
+### Welt, Völker und Aufgaberegel (Runde 3)
+
+24 Welten, Jahr 500, neue Welt 46 × 44 / 9 Völker / 3 %, mit der Aufgaberegel „erst nach Besetzung, dann < 40 %“:
+
+| Kennzahl | Ergebnis (heute) |
+|---|---|
+| Kriege je Welt | 11,3 (davon 8,1 gegen gewachsene Völker) |
+| Dauer | 3,9 Jahre |
+| Schlachten | 5,7 |
+| Besetzungen | 8,0 |
+| Annektierte Völker | 6,8 |
+| Siedlungen, die den Besitzer wechseln | 33 |
+| Siedlungen | 237 (226) |
+| Aufstände | 4,4 (0,5) |
+| Abkommen | 2,8 (4,6) |
+| Rechenzeit | etwas niedriger als heute (kleinere Karte) |
+| Schlimmste Kriegswoche | ca. 2 ms |
