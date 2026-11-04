@@ -189,8 +189,8 @@ export function districtPay(sim: Simulation, seat: number): number {
  * Hook for war (phase 3+): whether `a` and `b` are at war, or `b` is allied to
  * an enemy of `a`. Strategic goods are never sold then. No wars yet.
  */
-export function hostile(_sim: Simulation, _a: number, _b: number): boolean {
-  return false;
+export function hostile(sim: Simulation, a: number, b: number): boolean {
+  return sim.war.enemy[a] === b;
 }
 
 /** Whether `buyer` may buy strategic goods of `seller`: its danger for the seller is at most MIL.saleDanger, and they are not hostile. */

@@ -207,7 +207,7 @@ export function resetCivRelations(dip: Diplomacy, id: number): void {
 }
 
 /** Every people's trade partners and the flat list of legs, after agreements changed. */
-function rebuildPartners(dip: Diplomacy): void {
+export function rebuildPartners(dip: Diplomacy): void {
   const partners: number[][] = [];
   for (let a = 1; a <= dip.maxId; a++) {
     for (let b = 1; b <= dip.maxId; b++) if (dip.freeTrade[pair(a, b)]) (partners[a] ??= []).push(b);
@@ -258,7 +258,7 @@ function moodNow(mood: CivMood, tick: number): number {
 }
 
 /** a's new mood towards b; one of the same label replaces the old one. */
-function addMood(dip: Diplomacy, a: number, b: number, label: string, value: number, tick: number): void {
+export function addMood(dip: Diplomacy, a: number, b: number, label: string, value: number, tick: number): void {
   const k = pair(a, b);
   const list = (dip.moods.get(k) ?? []).filter((m) => m.label !== label);
   list.push({ label, value, tick });
@@ -540,7 +540,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       if (a === b || !dip.known[pair(a, b)]) continue;
       // Borders: open to those we trust and don't fear; close when that ends.
       const k = pair(a, b);
-      if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER) {
+      if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER && sim.war.enemy[a] !== b) {
         dip.open[k] = 1;
         dip.bordersVersion++;
         addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
@@ -557,6 +557,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       if (a >= b || !dip.known[pair(a, b)]) continue;
       const k = pair(a, b);
       const both = dip.open[k] && dip.open[pair(b, a)];
+      if (sim.war.enemy[a] === b) continue;
       if (!dip.freeTrade[k] && both && mutual(a, b, FREE_TRADE_TRUST)) {
         setSymmetric(dip.freeTrade, a, b, 1);
         celebrate(dip, a, b, 'Signed free trade with us', sim.tick);
@@ -678,7 +679,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   });
   for (const a of living) {
     for (const b of living) {
-      if (a === b || !dip.known[pair(a, b)] || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
+      if (a === b || !dip.known[pair(a, b)] || sim.war.enemy[a] === b || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;

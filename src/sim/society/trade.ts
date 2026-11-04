@@ -278,6 +278,8 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   trade.surplus.fill(0, t, t + TRADE_GOODS);
   trade.interest[cell] = 0;
   if (people === 0) return changed;
+  // A besieged seat's settlement does not trade (war phase 3b).
+  if (sim.war.siege[cell] === 1) return changed;
 
   // Wood and stone: ask for what the next building lacks, spare what is
   // beyond it and a reserve for upkeep.

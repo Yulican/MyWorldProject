@@ -1,3 +1,4 @@
+import { advanceWar, createWar, reconcileWar, runWarYear, type WarState } from './war';
 import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
@@ -86,6 +87,8 @@ const DIPLOMACY_WEEK = 45;
 const MILITARY_WEEK = 40;
 /** Age of a dismissed soldier who goes back to the population (soldiers don't age). */
 const SOLDIER_RETURN_AGE = 30;
+/** The war's yearly part: end checks, new armies, declarations (war.ts). */
+const WAR_WEEK = 47;
 const GOVERNMENT_WEEK = 28;
 const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
@@ -192,6 +195,8 @@ export type Simulation = {
   government: Government;
   /** Soldiers and strengths (see military.ts). */
   military: Military;
+  /** Wars, armies and sieges (see war.ts). */
+  war: WarState;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -248,6 +253,7 @@ export function createSimulation(world: World): Simulation {
     diplomacy: createDiplomacy(n),
     government: createGovernment(n),
     military: createMilitary(n),
+    war: createWar(world.seed, n),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -368,6 +374,7 @@ export function stepSimulationPart(sim: Simulation): boolean {
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
       else if (weekOfYear === MILITARY_WEEK) runMilitaryYear(sim);
+      else if (weekOfYear === WAR_WEEK) runWarYear(sim);
       else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
@@ -377,6 +384,7 @@ export function stepSimulationPart(sim: Simulation): boolean {
     }
     case TickPart.Finish: {
       advanceGovernment(sim);
+      advanceWar(sim);
       measureDistances(sim, sim.world.owner);
       updateTransitHubs(sim);
       if (weekOfYear === 0) closeYear(sim);
@@ -432,6 +440,7 @@ export function runMilitaryYear(sim: Simulation): void {
   updateMilitary(sim, owner);
   drawSoldiers(sim);
   returnSoldiers(sim, owner);
+  reconcileWar(sim);
 }
 
 /**
@@ -514,7 +523,7 @@ function moveInhabitant(sim: Simulation, i: number, to: number): void {
   pop.cell[i] = to;
 }
 
-function changeCiv(sim: Simulation, i: number, civ: number): void {
+export function changeCiv(sim: Simulation, i: number, civ: number): void {
   const { pop } = sim;
   const cell = pop.cell[i];
   sim.cellCivPop[cell * sim.civSlots + pop.civ[i]]--;
@@ -1406,6 +1415,6 @@ function biomeName(world: World, cell: number): string {
   return BIOMES[world.biome[cell]].name.toLowerCase();
 }
 
-function record(sim: Simulation, text: string, cell: number): void {
+export function record(sim: Simulation, text: string, cell: number): void {
   sim.chronicle.push({ tick: sim.tick, text, cell });
 }

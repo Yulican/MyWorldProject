@@ -22,6 +22,15 @@ export const SATISFACTION_MAX = 100;
 const FOLLOW_PER_YEAR = 0.25;
 /** The same per quarter (the value is updated with every refresh). */
 const FOLLOW_PER_QUARTER = 1 - Math.pow(1 - FOLLOW_PER_YEAR, 1 / 4);
+/** War (war.ts): the "Conquered" part of a settlement, fading linearly over its years. */
+function conqueredNow(sim: Simulation, cell: number): number {
+  const w = sim.war;
+  const v = w.conqValue[cell];
+  if (v === 0) return 0;
+  const age = (sim.tick - w.conqTick[cell]) / (TICKS_PER_YEAR * w.conqYears);
+  return age >= 1 ? 0 : v * (1 - age);
+}
+
 /** Satisfaction per share of the people whose food, water or space is missing. */
 const SHORTAGE = 100;
 /** From this share of its capacity a hex feels crowded, down to CROWDING_MAX at full capacity. */
@@ -170,6 +179,9 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
   if (tax !== 0) terms.push({ label: `Taxes (${Math.round(sim.government.cellRate[cell] * 100)} %)`, value: tax });
   const goodsTax = goodsTaxValue(sim.government.cellGoodsRate[cell]);
   if (goodsTax !== 0) terms.push({ label: `Goods taxes (${Math.round(sim.government.cellGoodsRate[cell] * 100)} %)`, value: goodsTax });
+  if (sim.war.siegeValue[cell] !== 0) terms.push({ label: 'Besieged', value: sim.war.siegeValue[cell] });
+  const conquered = conqueredNow(sim, cell);
+  if (conquered !== 0) terms.push({ label: 'Conquered', value: conquered });
   if (civ) {
     for (const mood of civ.moods) {
       const v = moodNow(mood, sim.tick);
@@ -194,6 +206,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   sum += comfortValue(comfortServed(sim.economy, cell), people);
   sum += luxuryValue(sim.economy.luxuryCovered[cell]);
   sum += taxValue(sim.government.cellRate[cell]) + goodsTaxValue(sim.government.cellGoodsRate[cell]);
+  sum += sim.war.siegeValue[cell] + conqueredNow(sim, cell);
   if (civ) for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
   return clampSatisfaction(sum);
 }

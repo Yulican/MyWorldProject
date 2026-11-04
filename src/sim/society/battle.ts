@@ -75,6 +75,10 @@ export function givesUp(own: number, enemy: number): boolean {
 }
 
 const EPS = 1e-9;
+/** Soldiers of `side` (0 = A, 1 = B) and troop type `t` left after the last fightBattle (war phase 3 applies the losses to its armies). */
+export function remainingSoldiers(side: number, t: number): number {
+  return cnt[side * 3 + t];
+}
 // Scratch: current soldiers of both sides (A melee, ranged, shock, B melee, ranged, shock).
 const cnt = new Float64Array(6);
 
