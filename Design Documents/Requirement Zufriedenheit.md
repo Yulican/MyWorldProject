@@ -158,7 +158,7 @@ vorerst immer auf; später entscheidet die Außenpolitik.
 - Die Hauptstadt des neuen Volks ist der lokale Regierungssitz mit den
   meisten Einwohnern im Bund, sonst die größte Siedlung (siehe 3b).
 - Der Glaube bleibt unverändert. Das neue Volk zählt nicht zum Limit von
-  6 Völkern.
+  6 Völkern (ab Krieg Phase 3: 9 Völker, `Requirement Krieg.md`, Abschnitt 15).
 - Teilwerte: siehe Neuer Stamm und Revolution in Abschnitt 2.
 - Einzelne abtrünnige Siedlungen ohne Bund spalten sich nicht ab. Sie
   verlieren Leute durch Abwanderung.
