@@ -118,3 +118,15 @@ export function timelineBetween(from: number, to: number): Record<(typeof KIND_N
   }
   return out;
 }
+
+/** The largest single value of one kind between two Date.now() times (inclusive). */
+export function timelineMax(kind: (typeof TimelineKind)[keyof typeof TimelineKind], from: number, to: number): number {
+  let max = 0;
+  for (let n = 0; n < timelineCount; n++) {
+    const i = (timelineNext - 1 - n + TIMELINE_SIZE) % TIMELINE_SIZE;
+    const at = timelineAt[i];
+    if (at < from) break;
+    if (at <= to && timelineKind[i] === kind && timelineValue[i] > max) max = timelineValue[i];
+  }
+  return max;
+}

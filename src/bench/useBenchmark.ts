@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
-import { gcStats, perfEvents, timelineBetween } from '../state/perfStats';
+import { gcStats, perfEvents, timelineBetween, timelineMax, TimelineKind } from '../state/perfStats';
 import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
@@ -108,6 +108,9 @@ export function useBenchmark(controller: { current: MapController | null }) {
   return { status, run };
 }
 
+/** The longest single JS task of a kind since `from`. */
+const maxOf = (kind: (typeof TimelineKind)[keyof typeof TimelineKind], from: number) => timelineMax(kind, from, Date.now());
+
 /**
  * Diagnostics for a swipe from the UI thread (see SwipeUiStats), and what the
  * JS thread did around the slowest frame: in the interval that ended with it,
@@ -138,5 +141,10 @@ function uiEvents(ui: SwipeUiStats, worstMs: number): Record<string, number> {
     nearTiles: near.tiles,
     nearHandovers: near.handover,
     nearJsGapMs: round(near.jsGap),
+    nearTileMs: round(near.tileMs),
+    nearHandoverMs: round(near.handoverMs),
+    nearPublishMs: round(near.publishMs),
+    maxTileSliceMs: round(maxOf(TimelineKind.tileMs, ui.startedAt)),
+    maxPublishMs: round(maxOf(TimelineKind.publishMs, ui.startedAt)),
   };
 }
