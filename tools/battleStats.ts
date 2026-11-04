@@ -1,27 +1,16 @@
 // War phase 2: the battle function (src/sim/society/battle.ts) on real armies
 // of neighboring peoples and on synthetic compositions.
-// Usage: npx tsx tools/battleStats.ts [worlds=24] [years=300,500] [key=value ...]
-//   key=value sets BATTLE parameters (rounds, loss, penalty, defend, defendArmy, retreat) for the base run.
-// Prints: win rate and losses by strength ratio and defender bonus, rounds to decision, the strength metric
-// vs composition, parameter sweeps and cost per battle.
+// Usage: npx tsx tools/battleStats.ts [worlds=24] [years=300,500]
+// Prints: win rate and losses by strength ratio and defense situation (field, seat +25 %, seat with army +50 %),
+// rounds and retreats, the strength metric vs composition, and the cost per battle. Numbers are the fixed BATTLE.
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { MIL, TROOP_TYPES } from '../src/sim/society/military';
-import { BATTLE, BO, fightBattle } from '../src/sim/society/battle';
+import { BATTLE, BO, Defense, fightBattle, givesUp } from '../src/sim/society/battle';
 
 const worlds = Number(process.argv[2] ?? 24);
 const years = (process.argv[3] ?? '300,500').split(',').map(Number);
-const BASE = { ...BATTLE };
-for (const kv of process.argv.slice(4)) {
-  const [k, v] = kv.split('=');
-  if (!(k in BATTLE)) throw new Error(`unknown key ${k}`);
-  (BASE as Record<string, number>)[k] = Number(v);
-}
-function setParams(over: Partial<typeof BATTLE> = {}): void {
-  Object.assign(BATTLE, BASE, over);
-}
-
 let seedState = 12345;
 function rnd(): number {
   seedState = (seedState + 0x6d2b79f5) | 0;
@@ -38,7 +27,7 @@ const scaled = (a: Army, k: number): Army => ({ n: a.n.map((x) => x * k), f: a.f
 
 const inp = new Float64Array(12);
 const out = new Float64Array(BO.SIZE);
-function fight(a: Army, b: Army, bonus: number): number {
+function fight(a: Army, b: Army, bonus: Defense): number {
   for (let t = 0; t < 3; t++) {
     inp[t] = a.n[t];
     inp[3 + t] = a.f[t];
@@ -107,10 +96,10 @@ function synth(shares: number[], strength: number, supplied: boolean): Army {
 }
 
 // ---------- Aggregation ----------
-type Agg = { n: number; win: number; lossA: number; lossB: number; rounds: number; undecided: number; strLossA: number; strLossB: number };
-const newAgg = (): Agg => ({ n: 0, win: 0, lossA: 0, lossB: 0, rounds: 0, undecided: 0, strLossA: 0, strLossB: 0 });
+type Agg = { n: number; win: number; lossA: number; lossB: number; rounds: number; undecided: number; strLossA: number; strLossB: number; retreat: number; lossW: number; lossL: number };
+const newAgg = (): Agg => ({ n: 0, win: 0, lossA: 0, lossB: 0, rounds: 0, undecided: 0, strLossA: 0, strLossB: 0, retreat: 0, lossW: 0, lossL: 0 });
 /** A is the (stronger) attacker, B the defender with `bonus`. Undecided: the loser kept more than `Y` of its strength. */
-function add(g: Agg, a: Army, b: Army, bonus: number, Y: number): void {
+function add(g: Agg, a: Army, b: Army, bonus: Defense, Y: number): void {
   const r = fight(a, b, bonus);
   g.n++;
   g.win += r > 0 ? 1 : r === 0 ? 0.5 : 0;
@@ -119,19 +108,23 @@ function add(g: Agg, a: Army, b: Army, bonus: number, Y: number): void {
   g.strLossA += out[BO.strLostA] / out[BO.startA];
   g.strLossB += out[BO.strLostB] / out[BO.startB];
   g.rounds += out[BO.rounds];
+  if (out[BO.retreat]) g.retreat++;
+  const lA = out[BO.lostA] / Math.max(1e-9, soldiersOf(a));
+  const lB = out[BO.lostB] / Math.max(1e-9, soldiersOf(b));
+  g.lossW += r >= 0 ? lA : lB;
+  g.lossL += r >= 0 ? lB : lA;
   const loserShare = r >= 0 ? out[BO.remB] / out[BO.startB] : out[BO.remA] / out[BO.startA];
   if (loserShare > Y) g.undecided++;
 }
 const pct = (x: number, n: number) => ((100 * x) / Math.max(1, n)).toFixed(0).padStart(4);
 function line(label: string, g: Agg): string {
-  return `${label.padEnd(26)} n=${String(g.n).padStart(5)} win ${pct(g.win, g.n)}%  lossA ${pct(g.lossA, g.n)}%  lossB ${pct(g.lossB, g.n)}%  rounds ${(g.rounds / Math.max(1, g.n)).toFixed(1)}  undecided ${pct(g.undecided, g.n)}%`;
+  return `${label.padEnd(26)} n=${String(g.n).padStart(5)} win ${pct(g.win, g.n)}%  lossA ${pct(g.lossA, g.n)}%  lossB ${pct(g.lossB, g.n)}%  lossWinner ${pct(g.lossW, g.n)}%  lossLoser ${pct(g.lossL, g.n)}%  rounds ${(g.rounds / Math.max(1, g.n)).toFixed(1)}  retreat ${pct(g.retreat, g.n)}%  undecided ${pct(g.undecided, g.n)}%`;
 }
 
 const RATIOS = [1, 1.5, 2, 3];
-const BONUSES: [string, number][] = [['no bonus', 0], ['def +25%', 0.25], ['def +50%', 0.5]];
+const BONUSES: [string, Defense][] = [['field', Defense.Field], ['seat +25%', Defense.Seat], ['seat+army +50%', Defense.SeatArmy]];
 
-function synthTable(title: string, over: Partial<typeof BATTLE>, Y = 0.5, supplied = false): void {
-  setParams(over);
+function synthTable(title: string, Y = 0.5, supplied = false): void {
   console.log(`\n--- ${title} (synthetic, all ${COMPS.length}x${COMPS.length} composition pairs, ${supplied ? 'supplied' : 'unsupplied'}, attacker = stronger) ---`);
   for (const [bn, bonus] of BONUSES) {
     for (const ratio of RATIOS) {
@@ -142,8 +135,7 @@ function synthTable(title: string, over: Partial<typeof BATTLE>, Y = 0.5, suppli
   }
 }
 
-setParams();
-console.log(`Params: ${JSON.stringify(BASE)}; ${real.length} real neighbor pairs from ${worlds} worlds at years ${years.join(',')}`);
+console.log(`BATTLE: ${JSON.stringify(BATTLE)}; ${real.length} real neighbor pairs from ${worlds} worlds at years ${years.join(',')}`);
 
 // Real armies.
 {
@@ -180,28 +172,18 @@ console.log(`Params: ${JSON.stringify(BASE)}; ${real.length} real neighbor pairs
   }
 }
 
-synthTable('A. base parameters, unsupplied', {});
-synthTable('A2. base parameters, supplied', {}, 0.5, true);
+synthTable('unsupplied');
+synthTable('supplied', 0.5, true);
 
-// Rounds to decision: long battle with retreat at Y (rounds=30).
-console.log('\n--- rounds until decided (synthetic, retreat below Y of start, up to 30 rounds, no bonus / +25%) ---');
-for (const Y of [0.5, 0.3]) {
-  for (const ratio of RATIOS) {
-    const g = newAgg();
-    const g2 = newAgg();
-    setParams({ rounds: 30, retreat: Y });
-    for (const [, ca] of COMPS) for (const [, cb] of COMPS) {
-      add(g, synth(ca, 1000 * ratio, false), synth(cb, 1000, false), 0, Y);
-      add(g2, synth(ca, 1000 * ratio, false), synth(cb, 1000, false), 0.25, Y);
-    }
-    console.log(line(`Y=${Y} ${ratio}:1 nobonus`, g));
-    console.log(line(`Y=${Y} ${ratio}:1 +25%`, g2));
-  }
+// Give-up check (war phase 3): share of real neighbor pairs where the weaker side would give up.
+{
+  let n = 0;
+  for (const p of real) if (givesUp(strengthOf(p.b), strengthOf(p.a))) n++;
+  console.log(`\nReal neighbor pairs where the weaker gives up (< ${BATTLE.giveUp * 100}% of the stronger): ${pct(n, real.length)}%`);
 }
 
 // Does the strength metric predict? Random compositions at random strength ratio.
 console.log('\n--- metric vs composition: stronger (by metric) wins, random compositions, ratio 1.0-1.5 / 1.5-2 / 2-3 ---');
-setParams();
 const randComp = (): number[] => {
   const x = [rnd() ** 2, rnd() ** 2, rnd() ** 2];
   const s = x[0] + x[1] + x[2] || 1;
@@ -230,7 +212,7 @@ console.log(''.padEnd(10) + COMPS.map(([n]) => n.slice(0, 8).padStart(9)).join('
 for (const [na, ca] of COMPS) {
   let row = na.padEnd(10);
   for (const [, cb] of COMPS) {
-    const r = fight(synth(ca, 1000, false), synth(cb, 1000, false), 0);
+    const r = fight(synth(ca, 1000, false), synth(cb, 1000, false), Defense.Field);
     row += (r > 0 ? '100' : r === 0 ? '50' : '0').padStart(9);
   }
   console.log(row);
@@ -239,7 +221,7 @@ console.log('Pure types: margin (remaining strength share of winner) at equal st
 for (const [na, ca] of COMPS.slice(0, 3)) {
   let row = na.padEnd(10);
   for (const [, cb] of COMPS.slice(0, 3)) {
-    fight(synth(ca, 1000, false), synth(cb, 1000, false), 0);
+    fight(synth(ca, 1000, false), synth(cb, 1000, false), Defense.Field);
     row += `${(out[BO.remA] / 1000).toFixed(2)}/${(out[BO.remB] / 1000).toFixed(2)}`.padStart(12);
   }
   console.log(row);
@@ -247,7 +229,7 @@ for (const [na, ca] of COMPS.slice(0, 3)) {
 
 // Fit per-type weights of the strength metric: strength' = sum w_t * n_t * f_t. Accuracy = stronger' wins.
 {
-  const accOf = (w: number[], bonus: number): number => {
+  const accOf = (w: number[], bonus: Defense): number => {
     let ok = 0;
     let tot = 0;
     for (const s of samples) {
@@ -263,12 +245,11 @@ for (const [na, ca] of COMPS.slice(0, 3)) {
     return ok / tot;
   };
   // Samples with equal metric ratio window would hide the effect: use all samples with ratio < 3 and also a pairwise-equal set.
-  setParams();
   console.log('\nMetric weights (melee, ranged, shock) -> share of clear battles where the higher weighted strength wins (no bonus):');
   let best = [1, 1, 1];
   let bestAcc = 0;
   for (const wr of [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5]) for (const ws of [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5]) {
-    const acc = accOf([1, wr, ws], 0);
+    const acc = accOf([1, wr, ws], Defense.Field);
     if (acc > bestAcc) { bestAcc = acc; best = [1, wr, ws]; }
     if (wr === 1 && ws === 1) console.log(`  w=1,1,1: ${(100 * acc).toFixed(1)}%`);
   }
@@ -277,19 +258,12 @@ for (const [na, ca] of COMPS.slice(0, 3)) {
   const g = newAgg();
   const eq: { a: Army; b: Army }[] = [];
   for (let i = 0; i < 4000; i++) eq.push({ a: synth(randComp(), 1000 * (1 + 0.15 * rnd()), false), b: synth(randComp(), 1000, false) });
-  for (const s of eq) add(g, s.a, s.b, 0, 0.5);
+  for (const s of eq) add(g, s.a, s.b, Defense.Field, 0.5);
   console.log(`  metric ratio 1.0-1.15 random compositions: stronger wins ${pct(g.win, g.n)}%`);
-  const wins = [0, 0, 0];
-  const cnt = [0, 0, 0];
-  for (const s of eq) {
-    const r = fight(s.a, s.b, 0);
-    for (let t = 0; t < 3; t++) { wins[t] += (r > 0 ? 1 : 0) * (s.a.n[t] - s.b.n[t]); cnt[t] += s.a.n[t] - s.b.n[t]; }
-  }
 }
 
-// Composition multiplier: strength a composition needs to tie (50 % share-of-strength left) against 1000 pure melee / a 1/3 mix, no bonus.
-setParams();
-function tieStrength(shares: number[], ref: number[], bonus: number): number {
+// Composition multiplier: strength a composition needs to beat 1000 of a reference composition.
+function tieStrength(shares: number[], ref: number[], bonus: Defense): number {
   let lo = 200;
   let hi = 5000;
   for (let i = 0; i < 30; i++) {
@@ -302,7 +276,7 @@ function tieStrength(shares: number[], ref: number[], bonus: number): number {
 }
 console.log('\nStrength an army needs to beat 1000 of: pure melee | mix(1/3 each) | mel-heavy (metric says 1000 = equal):');
 for (const [n, c] of COMPS) {
-  console.log(`  ${n.padEnd(10)} ${COMPS.slice(0, 1).concat(COMPS.slice(6, 8)).map(([, ref]) => tieStrength(c, ref, 0).toFixed(0).padStart(6)).join('')}`);
+  console.log(`  ${n.padEnd(10)} ${COMPS.slice(0, 1).concat(COMPS.slice(6, 8)).map(([, ref]) => tieStrength(c, ref, Defense.Field).toFixed(0).padStart(6)).join('')}`);
 }
 // Worst-case ratio over all composition pairs at which the stronger always wins (flip point), by defender bonus.
 console.log('Ratio needed so the attacker wins vs ANY composition (max over 10x10 pairs) / vs 95 % of pairs:');
@@ -315,68 +289,14 @@ for (const [bn, bonus] of BONUSES) {
   console.log(`  ${bn}: max ${need[need.length - 1].toFixed(2)}  p95 ${need[Math.floor(need.length * 0.95)].toFixed(2)}  median ${need[need.length >> 1].toFixed(2)}`);
 }
 
-// Candidate end rules/loss shares: attacker win, losses, rounds, with retreat Y.
-console.log('\n--- candidate sets (synthetic 10x10, unsupplied): win% / lossWinner% / lossLoser% / rounds, attacker ratio 1.5 | 2 | 3, bonus +25% ---');
-for (const set of [
-  { loss: 0.1, retreat: 0, rounds: 5 }, { loss: 0.1, retreat: 0.5, rounds: 5 }, { loss: 0.1, retreat: 0.5, rounds: 10 },
-  { loss: 0.15, retreat: 0, rounds: 5 }, { loss: 0.15, retreat: 0.5, rounds: 5 }, { loss: 0.2, retreat: 0.5, rounds: 5 }, { loss: 0.2, retreat: 0, rounds: 5 },
-]) {
-  setParams(set);
-  let row = `${JSON.stringify(set)}`.padEnd(46);
-  for (const ratio of [1.5, 2, 3]) {
-    const g = newAgg();
-    for (const [, ca] of COMPS) for (const [, cb] of COMPS) add(g, synth(ca, 1000 * ratio, false), synth(cb, 1000, false), 0.25, 0.5);
-    row += `${pct(g.win, g.n)}/${pct(g.lossA, g.n)}/${pct(g.lossB, g.n)}/${(g.rounds / g.n).toFixed(1)}  `;
-  }
-  console.log(row);
-}
-setParams();
-
-// Parameter sweeps.
-synthTable('P1. loss 10%', { loss: 0.1 });
-synthTable('P1. loss 30%', { loss: 0.3 });
-for (const penalty of [0.25, 0.75]) {
-  setParams({ penalty });
-  const gM = newAgg();
-  // Penalty matters when melee dies: ranged/shock-heavy vs melee.
-  for (const ratio of RATIOS) for (const [, ca] of COMPS) for (const [, cb] of COMPS) add(gM, synth(ca, 1000 * ratio, false), synth(cb, 1000, false), 0, 0.5);
-  console.log(line(`penalty ${penalty} all ratios`, gM));
-}
-setParams();
-{
-  const g = newAgg();
-  for (const ratio of RATIOS) for (const [, ca] of COMPS) for (const [, cb] of COMPS) add(g, synth(ca, 1000 * ratio, false), synth(cb, 1000, false), 0, 0.5);
-  console.log(line('penalty base all ratios', g));
-}
-
-// Compact sweep: ratio x (loss, penalty, bonus), attacker win / lossA / lossB / undecided, synthetic unsupplied.
-console.log('\n--- sweep: attacker win %, loser strength share left after 5 rounds (mean), per ratio ---');
-for (const loss of [0.1, 0.2, 0.3]) {
-  for (const penalty of [0.25, 0.5, 0.75]) {
-    let row = `loss ${loss} pen ${penalty}`.padEnd(20);
-    for (const [, bonus] of BONUSES) {
-      for (const ratio of [1.5, 2, 3]) {
-        setParams({ loss, penalty });
-        const g = newAgg();
-        for (const [, ca] of COMPS) for (const [, cb] of COMPS) add(g, synth(ca, 1000 * ratio, false), synth(cb, 1000, false), bonus, 0.5);
-        row += `${pct(g.win, g.n)}/${pct(g.undecided, g.n)}  `;
-      }
-      row += '| ';
-    }
-    console.log(row);
-  }
-}
-console.log('(columns: no bonus 1.5/2/3 | +25% 1.5/2/3 | +50% 1.5/2/3 ; cell = attacker win % / undecided %)');
-
 // Cost.
-setParams();
 {
   const a = synth(COMPS[6][1], 2000, true);
   const b = synth(COMPS[7][1], 1000, false);
   const N = 300000;
   const t0 = performance.now();
   let sink = 0;
-  for (let i = 0; i < N; i++) sink += fight(a, b, 0.25);
+  for (let i = 0; i < N; i++) sink += fight(a, b, Defense.Seat);
   const us = ((performance.now() - t0) * 1000) / N;
   console.log(`\nCost: ${us.toFixed(2)} us per battle (5 rounds, ${N} battles, sink ${sink})`);
 }
