@@ -38,7 +38,7 @@ Schwerpunkte dazu (Krieg und andere Mechaniken).
 
 **Krieg (`Requirement Krieg.md`):**
 - **Sold:** Der Sold der Soldaten kommt aus der Kasse des Bezirks, in dem sie ausgebildet sind, und zählt zur Einkommensprüfung (40 %-Regel, Abschnitt 5). Reicht sie nicht, decken die anderen Sitze des Volks die Lücke (gemeinsamer Topf); Soldaten werden nur ausgebildet, wenn der Sold des nächsten Jahres gedeckt ist. Die Regierung hält die Sold-Reserve zurück und gibt sie nicht für Vorhaben aus; ohne Sold werden Soldaten entlassen und kommen in die Bevölkerung zurück. Regierungshändler bringen fehlende strategische Güter (Eisen, Feuerstein, Pferde) von eigenen Siedlungen zu den Soldaten. Abgebautes Gold ist Geld der Siedlung und wird besteuert wie anderes erzeugtes Geld. Höhe: Startwert 0,1 je Soldat und Jahr, kalibrieren (Simulation).
-- **Eroberte Sitze:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben. Der ganze Bezirk wechselt den Besitzer. Wird die Hauptstadt besetzt, wird das Volk annektiert.
+- **Eroberte Sitze:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben. Der ganze Bezirk wechselt den Besitzer. Eine besetzte Hauptstadt: offen (`Requirement Krieg.md`, Abschnitt 13); ein besetzter Sitz wechselt erst am Kriegsende und nur als Kriegsziel den Besitzer.
 - Belagerte Sitze: Kapazitäten halbiert, Handel ruht.
 - Das Startgeld für Abgespaltene bleibt vorerst unverändert; Rebellenvölker aus einem Krieg behalten ihre Siedlungen.
 

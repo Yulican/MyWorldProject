@@ -49,29 +49,42 @@ Simuliert und vom Nutzer gewählt (Abschnitt 14).
 
 ## 4. Armeen
 
-- Eine Armee ist ein Zähler (Nahkampf / Fernkampf / Schock) mit Position. Die Soldaten werden aus der Heimatsiedlung abgezogen.
-- Armeen marschieren über Straßen nach Reisekosten. Eine Armee darf im ganzen Land frei zu jedem Ort ziehen; sie muss nur hinkommen.
-- Zusammenführen mehrerer Armeen und Marschgeschwindigkeit: kalibrieren (Simulation).
+Entschieden (Nutzer), Phase 3; Zahlen sind Startwerte (kalibrieren (Simulation)).
+
+- Eine Armee ist ein Zähler (Nahkampf / Fernkampf / Schock) mit Position und Volk. Die Soldaten werden aus der Heimatsiedlung abgezogen.
+- **Wer marschiert:** Bei Kriegsbeginn stellen alle Siedlungen des Volks 70 % ihrer Soldaten für die Armeen, 30 % bleiben zu Hause.
+- **Zahl der Armeen:** höchstens 4 je Volk (1 Hauptarmee, 3 Entsatzarmeen), höchstens 32 Armeen auf der Welt.
+- **Marsch:** 1 Reisekosteneinheit pro Woche (ein Straßenhex kostet meist 0,5). Der Weg geht über Straßen und freies Gelände, durch feindliches Land immer, durch befreundetes nur bei offener Grenze. Keine Schiffe. Der Weg wird nur bei Zielwechsel neu berechnet.
+- **Versorgung:** keine; der Sold läuft weiter aus der Heimatkasse (Entlassung bei leerer Kasse wie in Abschnitt 2). Hat eine Armee 2 Jahre lang kein Ziel, kehrt sie heim.
+- **Schlachten:** Treffen sich Armeen auf einem Hex, kämpfen sie (Abschnitt 3). Eine Entsatzarmee greift bei der Ankunft an. Ausweichen gibt es nicht.
+- Anzeige und Grenzen: Abschnitte 9 und 11.
 
 ## 5. Belagerung und Besetzung
 
-- **Belagert werden können Regierungssitze,** auch die Hauptstadt.
-- **Während der Belagerung:** alle Kapazitäten der Siedlung (Ernte, Bau, Bevölkerung) halbiert; der Handel mit der Siedlung ruht.
-- **Entsatz:** Die Armee der Siedlung oder Armeen anderer Siedlungen des Volks (und von Verbündeten) können die Belagerung brechen. Es gibt keine Entfernungsgrenze, die Armee muss den Weg zurücklegen.
+Entschieden (Nutzer), Phase 3b.
+
+- **Belagert werden können Regierungssitze.** Eine Belagerung beginnt, wenn eine feindliche Armee den Sitz-Hex erreicht hat.
+- **Während der Belagerung:** alle Kapazitäten (Ernte, Bau, Bevölkerung) der Siedlung des Sitzes sind halbiert, nicht die des Bezirks. Der Handel mit der Siedlung ruht. Die Siedlung bekommt den Teilwert „Besieged“ −40 (`Requirement Zufriedenheit.md`).
+- **Verteidiger müssen nicht sofort kämpfen:** Die Armee am Sitz darf warten, bis genug Armeen aus Nachbarsiedlungen angekommen sind, und kämpft dann gemeinsam. Sie kämpft früher, wenn sie gewinnen kann, und spätestens kurz vor der Besetzung.
+- **Entsatz:** Armeen des Volks (und von Verbündeten) können die Belagerung brechen, ohne Entfernungsgrenze; sie müssen den Weg zurücklegen. Greift die Entsatzarmee an, kämpft sie bei der Ankunft.
 - **Verteidigerbonus:** +25 % in einem belagerten Sitz, +50 % mit eigener Armee im Sitz (entschieden).
-- **Besetzung:** Erreicht die Unzufriedenheit der Siedlung den Wert, bei dem sie sich abspalten würde, wird sie besetzt statt abtrünnig. Für die Besetzung gilt weiter die 5-Jahres-Regel (5 Jahre am Stück unter 0), anders als beim Aufstand (Abschnitt 8).
+- **Besetzung** (Interpretation, bitte bestätigen): Der Sitz wird besetzt, wenn die Belagerung mindestens 2 Jahre gedauert hat und die Siedlung des Sitzes auf Aufstandsniveau ist (Zufriedenheit < 0). Das ersetzt die 5-Jahres-Regel für die Besetzung. Der Teilwert „Besieged“ −40 wirkt wegen der Trägheit (25 % des Abstands pro Jahr) erst nach und nach; in der Simulation prüfen, ob Sitze in 2 Jahren tatsächlich unter 0 fallen.
 - **Beute:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben stehen.
-- **Hauptstadt:** Wird die Hauptstadt besetzt, wird das Volk annektiert und ausgelöscht; sein ganzes Gebiet fällt an den Eroberer.
+- **Besetzt heißt nicht erobert:** Ein besetzter Sitz wechselt den Besitzer erst am Ende des Krieges, und nur, wenn er Kriegsziel war; sonst wird er nach dem Krieg zurückgegeben.
+- **Hauptstadt:** offen (siehe Abschnitt 13).
 
 ## 6. Kriegserklärung, Frieden, Eroberung
 
-- **Erklärung:** Ein Volk darf erklären, wenn seine Stärke das ≥2-Fache des Nachbarn ist. Ziel: einen Regierungssitz samt Bezirk erobern. Der Sitz muss besetzt werden können, und der Feind darf nicht glauben, ihn zurückzuerobern (Aufgabe: siehe unten).
-- Höchstens **ein Krieg** je Volk gleichzeitig.
-- **Aufgabe:** Eine Seite gibt auf, wenn sie weniger als 40 % der Stärke des Gegners hat (entschieden).
+Entschieden (Nutzer), Phase 3a.
+
+- **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt (ein Krieg je Volk).
+- **Zielsitz:** Unter den Sitzen, deren Bezirke Siedlungen an der Grenze des Angreifers enthalten, wählt er den mit dem größten Nutzen bei Eroberung. Was „Nutzen“ ist, ist offen (Abschnitt 13). Nach einer Eroberung wählt er ein neues Ziel, bis Frieden ist.
+- **Aufgabe:** Eine Seite gibt auf, wenn sie weniger als 40 % der Stärke des Gegners hat (entschieden, für beide Seiten). Der Verlierer tritt den Zielsitz samt Bezirk ab.
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
-- **Ende:** Der Krieg endet, wenn das Kriegsziel erreicht ist oder nach N Jahren Erschöpfung (N: kalibrieren (Simulation)). Danach: Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
-- **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer. Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
-- Chronik: Kriegserklärung, Belagerung, Besetzung, Frieden, Annexion, mit Dialog und „Go to“.
+- **Erschöpfung:** Nach 10 Jahren ohne Besetzung oder Sieg endet der Krieg ohne Gebietsänderung (Frieden).
+- **Nach dem Krieg:** Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
+- **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer (am Kriegsende, Abschnitt 5). Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
+- Chronik: Kriegserklärung, Belagerung, Besetzung, Frieden, mit Dialog und „Go to“; Annexion siehe Abschnitt 13.
 
 ## 7. Bündnisse
 
@@ -103,7 +116,9 @@ Simuliert und vom Nutzer gewählt (Abschnitt 14).
 0. **Vorstufe:** Abbaugebäude für Eisen und Feuerstein, beide als Handelswaren (Vorkommen bei der Weltgenerierung doppelt so häufig); Gold wird abgebaut und kommt direkt als Geld in die Siedlung (kein Luxusgut mehr, Luxusgüter 6 → 5). Simuliert, Zahlen gewählt (Abschnitt 14).
 1. **Militär ohne Kampf:** Gebäude, Soldaten, Sold, strategische Güter und ihr Verkauf; Gefahr aus Stärke statt Bevölkerung; Anzeige. Simuliert, Zahlen gewählt (Abschnitt 14).
 2. **Schlachtrechnung** als reine Funktion mit Tests und Stats-Tool (`warStats`). Simuliert, Zahlen gewählt (Abschnitt 14).
-3. **Krieg auf der Karte:** Armeen, Marsch, Belagerung, Besetzung, Kriegserklärung, Frieden, Annexion der Hauptstadt.
+3. **Krieg auf der Karte** (aufgeteilt, vom Nutzer bestätigt):
+   - **3a:** Kriegserklärung, Armeen, Marsch, Schlachten, Kriegsanzeige (Armee-Marker mit Flagge in Volksfarbe, rote gestrichelte Kriegsgrenzen, keine Marschlinie), Chronik, Kriegs-Panel, Ende durch Aufgabe oder Erschöpfung, Benchmark-Szenario `war`.
+   - **3b:** Belagerung, Besetzung, Eroberung des Bezirks am Kriegsende; Annexion der Hauptstadt erst nach Klärung (Abschnitt 13).
 4. **Bündnisse und Verteidigungspakte.**
 5. **Aufstände als Krieg** (Abschnitt 8).
 
@@ -113,7 +128,7 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 - Stärke und Gefahr jährlich pro Volkspaar (Zähler); Schlachten pro Schlacht, nicht pro Soldat; Armeen als wenige Zähler.
 - Ziel: ein simuliertes Jahr höchstens 1,3-mal so teuer wie heute.
-- **Neues Benchmark-Szenario `war`:** 300 Jahre gealtert, danach Kriege überall: Armeen unterwegs, belagerte Sitze, Rebellenkriege. Marker und Rahmen erscheinen überall auf der Karte. Alle Szenarien müssen bestehen.
+- **Neues Benchmark-Szenario `war`:** 300 Jahre gealtert, danach Kriege überall: 3 bis 5 Armeen je Volk unterwegs, alle Völker im Krieg (ab 3b belagerte Sitze, ab Phase 5 Rebellenkriege). Marker und Rahmen erscheinen überall auf der Karte. Alle Szenarien müssen bestehen.
 
 ## 12. Abhängigkeiten
 
@@ -127,7 +142,11 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröße; Rebellen müssen nicht zusammenhängen; bei Sieg ein Volk je zusammenhängender Gruppe, miteinander verbündet; Besetzung behält die 5-Jahres-Regel; Rebellensiedlungen wechseln mit der Erklärung den Besitzer; annektierte Rebellensiedlungen bekommen „erobert“. Zuordnung der strategischen Güter, Gold, Beschaffung von Eisen und Feuerstein sowie die Zahlen von Phase 0 und 1: siehe Abschnitt 2 und 14.
 
+Phase 3, entschieden: siehe Abschnitte 4 bis 6.
+
 Offen:
+- **Nutzen eines Sitzes für die Zielwahl:** (a) Einwohner des Bezirks; (b) Zahl der Siedlungen; (c) Ressourcen/strategische Güter (Eisen, Feuerstein, Pferde, Gold) im Bezirk; (d) eine gewichtete Summe, geteilt durch die Verteidiger. Empfehlung (d): Einwohner + 50 je strategischem Vorkommen, geteilt durch die Verteidigerstärke im Umkreis.
+- **Annexion der Hauptstadt:** Die frühere Entscheidung „Hauptstadt besetzt → Volk annektiert“ passt nicht zu „besetzt, aber erst am Kriegsende erobert, nur wenn Kriegsziel“. Der Vorschlag „1 Jahr besetzt → Annexion“ wurde abgelehnt. Offen: Ist die Hauptstadt als Zielsitz erlaubt, und wird dann nur ihr Bezirk abgetreten, oder das ganze Volk? Auch Abschnitt 8 (Rebellenkrieg: alle Sitze des Neuen erobern) hängt davon ab.
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
