@@ -30,7 +30,7 @@ export const WAR = {
   /** Declaration: own strength at least this times the target's; yearly chance; own strength floor (prototype addition, 0 = none). */
   ratio: 2,
   chance: 0.1,
-  minStrength: 20,
+  minStrength: 0,
   /** Added to both strengths in the ratio test (like MIL.floor in the danger formula; 0 = the plain 2x of the requirement). */
   ratioFloor: 0,
   /** Neighbors: 0 = settlements on adjacent hexes, else the people's travel-cost distance (diplomacy) at most this. */
@@ -39,7 +39,7 @@ export const WAR = {
   resPop: 50,
   resMul: 2,
   /** 1: the goal district must not be the target's only district (no annexation of a whole people). */
-  noAnnex: 1,
+  noAnnex: 0,
   /** Armies: share of the soldiers that march, armies per people, armies worldwide, smallest army, anchor spacing (hexes). */
   sendShare: 0.7,
   maxArmies: 4,
@@ -48,7 +48,7 @@ export const WAR = {
   anchorSep: 3,
   /** Travel cost per week, cost limit of the path search, weeks without a path before an army goes home. */
   speed: 1,
-  fieldMax: 80,
+  fieldMax: 25,
   noTargetWeeks: 104,
   /** Raise armies again each year while the war runs (1 = yes). */
   reraise: 1,
@@ -67,8 +67,10 @@ export const WAR = {
   /** A side gives up below this share of the enemy's strength (battle.ts: BATTLE.giveUp = 0.4; 0 = never), and not before the war is this many weeks old. */
   giveUp: 0.4,
   giveUpAfter: 0,
+  /** Defender's give-up: 0 = whenever below giveUp (old), 1 = only once the goal seat is occupied, then only below giveUp (the war goes on, occupied, until give-up, exhaustion or relief), 2 = occupying the goal ends the war at once, no give-up before. The attacker always gives up at the plain rule. */
+  giveUpMode: 1,
   /** 1: a road joins a conquered district to the conqueror's land (else it is cut off from the conqueror's capital and becomes a people of its own). */
-  conquestRoad: 0,
+  conquestRoad: 1,
   /** Exhaustion (years without attacker success), truce (years), trust lost after the war. */
   exhaustYears: 10,
   truceYears: 20,
@@ -99,6 +101,8 @@ export type War = {
   sieges: number;
   maxArmies: number;
   slot: number;
+  /** 3b, giveUpMode 1: the goal seat is occupied (the siege goes on). */
+  occupied: boolean;
   /** The target arose from the attacker (secession, revolution, cut-off land). */
   splinter: boolean;
 };
@@ -258,6 +262,12 @@ function gaveUp(own: number, enemy: number, age: number): boolean {
   return WAR.giveUp > 0 && age >= WAR.giveUpAfter && own < WAR.giveUp * enemy;
 }
 
+/** Whether the defender gives up now. */
+function defenderGaveUp(war: War, sd: number, sa: number, age: number): boolean {
+  if (WAR.giveUpMode !== 0 && WAR.phase >= 2 && !war.occupied) return false;
+  return gaveUp(sd, sa, age);
+}
+
 const pairKey = (a: number, b: number) => (a < b ? a * PAIRS + b : b * PAIRS + a);
 
 /** Whether a new war between a and b is barred by a truce. */
@@ -302,7 +312,7 @@ export function runWarYear(sim: Simulation): void {
     const sa = m.strength[war.att] ?? 0;
     const sd = m.strength[war.def] ?? 0;
     const age = sim.tick - war.start;
-    if (gaveUp(sd, sa, age)) endWar(sim, war, EndType.GaveUp);
+    if (defenderGaveUp(war, sd, sa, age)) endWar(sim, war, EndType.GaveUp);
     else if (gaveUp(sa, sd, age)) endWar(sim, war, EndType.AttackerGaveUp);
     else if (sim.tick - war.lastGain >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, war, EndType.Exhausted);
     else if (WAR.reraise) {
@@ -471,6 +481,7 @@ function startWar(sim: Simulation, att: number, def: number, goal: number): void
     sieges: 0,
     maxArmies: 0,
     slot,
+    occupied: false,
     splinter: sim.civs[def]!.parentName === sim.civs[att]!.name,
   };
   w.slots[slot] = war;
@@ -842,7 +853,7 @@ function fight(sim: Simulation, war: War, cell: number, na: number, nb: number):
   const sa = m.strength[war.att] ?? 0;
   const sd = m.strength[war.def] ?? 0;
   const age = sim.tick - war.start;
-  if (gaveUp(sd, sa, age)) queueEnd(war, EndType.GaveUp);
+  if (defenderGaveUp(war, sd, sa, age)) queueEnd(war, EndType.GaveUp);
   else if (gaveUp(sa, sd, age)) queueEnd(war, EndType.AttackerGaveUp);
 }
 
@@ -901,6 +912,7 @@ function endSiege(sim: Simulation, war: War): void {
   const w = sim.war;
   if (war.siegeStart < 0) return;
   war.siegeStart = -1;
+  war.occupied = false;
   w.siege[war.goal] = 0;
   w.siegeValue[war.goal] = 0;
   const old = sim.supplyModifiers.get(war.goal);
@@ -944,6 +956,7 @@ function updateSiege(sim: Simulation, war: War): void {
     return;
   }
   if (war.siegeStrength < here) war.siegeStrength = here;
+  if (war.occupied) return;
   const age = sim.tick - war.siegeStart;
   if (age < WAR.occupyWeeks || (age - WAR.occupyWeeks) % WAR.occupyCheck !== 0) return;
   const cell = war.goal;
@@ -959,7 +972,8 @@ function updateSiege(sim: Simulation, war: War): void {
     w.stats.occupations++;
     if (!war.splinter) w.stats.estOcc++;
     war.lastGain = sim.tick;
-    queueEnd(war, EndType.Conquered);
+    if (WAR.giveUpMode === 1) war.occupied = true;
+    else queueEnd(war, EndType.Conquered);
   }
 }
 
