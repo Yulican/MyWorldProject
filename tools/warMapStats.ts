@@ -11,11 +11,15 @@ import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { WAR, END_NAMES } from '../src/sim/society/war';
+import { TRIBE_TUNING } from '../src/sim/society/simulation';
 
 const worlds = Number(process.argv[2] ?? 24);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const variants = process.argv.slice(4).length ? process.argv.slice(4) : ['base:phase=0', '3a:phase=1', '3ab:phase=2'];
 const defaults = { ...WAR };
+const tribeDefaults = { ...TRIBE_TUNING };
+// Non-WAR keys of a variant: map size in hex columns/rows (default 64 x 64), maxCivs and chance of new tribes (TRIBE_TUNING).
+const WORLD_KEYS = ['width', 'height'];
 
 type Row = Record<string, number>;
 
@@ -34,6 +38,18 @@ function measure(sim: Simulation, ms: number, year: number): Row {
   }
   const dip = sim.diplomacy;
   const living = sim.civs.filter(Boolean).map((c) => c!.id);
+  const adjPairs = new Set<number>();
+  for (let c = 0; c < w.cellCount; c++) {
+    const a = w.owner[c];
+    if (!a || sim.cellPop[c] === 0) continue;
+    for (let d = 0; d < 6; d++) {
+      const nb = w.neighbors[c * 6 + d];
+      const b = nb >= 0 ? w.owner[nb] : 0;
+      if (b && b > a && sim.cellPop[nb] > 0) adjPairs.add(a * PAIRS + b);
+    }
+  }
+  let knownPairs = 0;
+  for (const a of living) for (const b of living) if (a < b && sim.diplomacy.known[a * PAIRS + b]) knownPairs++;
   let open = 0;
   let known = 0;
   for (const a of living) {
@@ -64,7 +80,15 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'unhappy (<0) %': (100 * satNeg) / Math.max(1, settlements),
     'uprisings (total)': text('rose up'),
     'cut off (total)': text('cut off from'),
+    'known pairs': knownPairs,
+    'neighbor pairs (adjacent)': adjPairs.size,
     'wars declared': st.declared,
+    'wars vs established peoples': st.estDeclared,
+    'wars vs own splinters': st.declared - st.estDeclared,
+    'est.: battles': st.estBattles,
+    'est.: sieges': st.estSieges,
+    'est.: occupations': st.estOcc,
+    'est.: whole people annexed': st.estAnnexed,
     'wars ongoing': sim.war.wars,
     'blocked by army cap': st.capBlocked,
     'annex-blocked goals (checks)': st.annexBlocked,
@@ -110,16 +134,20 @@ const results: { name: string; rows: Map<number, Row[]>; extra: Map<number, stri
 for (const spec of variants) {
   const [name, rest = ''] = spec.split(':');
   Object.assign(WAR, defaults);
+  Object.assign(TRIBE_TUNING, tribeDefaults);
+  const worldOpt: Record<string, number> = {};
   WAR.profile = 1;
   for (const kv of rest.split(',').filter(Boolean)) {
     const [k, v] = kv.split('=');
-    if (!(k in WAR)) throw new Error(`unknown key ${k}`);
-    (WAR as Record<string, number>)[k] = Number(v);
+    if (WORLD_KEYS.includes(k)) worldOpt[k] = Number(v);
+    else if (k in TRIBE_TUNING) (TRIBE_TUNING as Record<string, number>)[k] = Number(v);
+    else if (!(k in WAR)) throw new Error(`unknown key ${k}`);
+    else (WAR as Record<string, number>)[k] = Number(v);
   }
   const rows = new Map<number, Row[]>();
   const extra = new Map<number, string[]>();
   for (let seed = 1; seed <= worlds; seed++) {
-    const sim = createSimulation(generateWorld({ seed }));
+    const sim = createSimulation(generateWorld({ seed, ...worldOpt }));
     let ms = 0;
     for (const year of checkpoints) {
       const t0 = performance.now();

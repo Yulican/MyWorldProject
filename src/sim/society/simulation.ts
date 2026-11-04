@@ -133,6 +133,8 @@ const GOOD_LAND_PEOPLE = 150;
 const HISTORY_YEARS = 200;
 const NEW_TRIBE_MIN_YEAR = 25;
 const NEW_TRIBE_CHANCE = 0.02;
+/** Tool-tunable (tools/warMapStats.ts): soft cap on living peoples and yearly chance of a new tribe; defaults are the game's. */
+export const TRIBE_TUNING = { maxCivs: MAX_CIVS, tribeChance: NEW_TRIBE_CHANCE };
 /** New tribes appear at least this many hexes from anyone else. */
 const NEW_TRIBE_DISTANCE = 8;
 
@@ -1297,8 +1299,8 @@ export const UPRISING_HOOK: { fn: ((sim: Simulation, cells: readonly number[], p
 /** Occasionally a new people appears in empty, livable land far from everyone. */
 function tryNewTribe(sim: Simulation): void {
   const { world, rng } = sim;
-  if (simulationYear(sim) < NEW_TRIBE_MIN_YEAR || livingCivilizations(sim).length >= MAX_CIVS) return;
-  if (rng() >= NEW_TRIBE_CHANCE) return;
+  if (simulationYear(sim) < NEW_TRIBE_MIN_YEAR || livingCivilizations(sim).length >= TRIBE_TUNING.maxCivs) return;
+  if (rng() >= TRIBE_TUNING.tribeChance) return;
 
   const settled: number[] = [];
   for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > 0) settled.push(c);

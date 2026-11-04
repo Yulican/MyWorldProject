@@ -99,6 +99,8 @@ export type War = {
   sieges: number;
   maxArmies: number;
   slot: number;
+  /** The target arose from the attacker (secession, revolution, cut-off land). */
+  splinter: boolean;
 };
 
 export type WarStats = {
@@ -142,6 +144,12 @@ export type WarStats = {
   ratioHigh: number;
   /** Wars whose goal district was not a neighbor-adjacent... (unused) / roads built for conquered districts. */
   roads: number;
+  /** Wars (and their battles, sieges, occupations, annexed peoples) against established peoples, i.e. not against the attacker's own splinters. */
+  estDeclared: number;
+  estBattles: number;
+  estSieges: number;
+  estOcc: number;
+  estAnnexed: number;
   /** Durations (ticks) of the wars that ended, and their battles. */
   durations: number[];
 };
@@ -235,6 +243,11 @@ export function createWar(seed: number, cellCount: number): WarState {
       zeroDefender: 0,
       ratioHigh: 0,
       roads: 0,
+      estDeclared: 0,
+      estBattles: 0,
+      estSieges: 0,
+      estOcc: 0,
+      estAnnexed: 0,
       durations: [],
     },
   };
@@ -458,12 +471,14 @@ function startWar(sim: Simulation, att: number, def: number, goal: number): void
     sieges: 0,
     maxArmies: 0,
     slot,
+    splinter: sim.civs[def]!.parentName === sim.civs[att]!.name,
   };
   w.slots[slot] = war;
   w.wars++;
   w.enemy[att] = def;
   w.enemy[def] = att;
   w.stats.declared++;
+  if (!war.splinter) w.stats.estDeclared++;
   const sdef = sim.military.strength[def] ?? 0;
   if (sdef <= 0) w.stats.zeroDefender++;
   if (sdef * 2.5 < (sim.military.strength[att] ?? 0)) w.stats.ratioHigh++;
@@ -810,6 +825,7 @@ function fight(sim: Simulation, war: War, cell: number, na: number, nb: number):
   }
   war.battles++;
   w.stats.battles++;
+  if (!war.splinter) w.stats.estBattles++;
   const str = (side: number) => (side === 0 ? out[BO.strLostA] : out[BO.strLostB]);
   w.stats.battleWins[result > 0 ? 0 : result < 0 ? 1 : 2]++;
   if (result > 0) war.lastGain = sim.tick;
@@ -868,6 +884,7 @@ function startSiege(sim: Simulation, war: War): void {
   war.siegeStart = sim.tick;
   war.sieges++;
   w.stats.sieges++;
+  if (!war.splinter) w.stats.estSieges++;
   w.siege[war.goal] = 1;
   w.siegeValue[war.goal] = -WAR.siegeMalus;
   w.stats.startSat += sim.satisfaction[war.goal];
@@ -940,6 +957,7 @@ function updateSiege(sim: Simulation, war: War): void {
   const value = WAR.occupyOnTarget ? satTarget(sim, cell) : sat;
   if (value < 0) {
     w.stats.occupations++;
+    if (!war.splinter) w.stats.estOcc++;
     war.lastGain = sim.tick;
     queueEnd(war, EndType.Conquered);
   }
@@ -1008,7 +1026,10 @@ function transferDistrict(sim: Simulation, war: War): void {
     people += sim.cellPop[c];
   }
   if (cells === 0) return;
-  if (cells === all) w.stats.annexed++;
+  if (cells === all) {
+    w.stats.annexed++;
+    if (!war.splinter) w.stats.estAnnexed++;
+  }
   w.stats.cellsMoved += cells;
   w.stats.peopleMoved += people;
   // The loser's armies lose the soldiers of the cells (they stay as the conqueror's garrison).
