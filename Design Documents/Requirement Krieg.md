@@ -1,6 +1,6 @@
 # Requirement: Krieg
 
-Stand: **Phase 0 und 1 umgesetzt, Phase 2 (Schlacht) simuliert und in Umsetzung, Phasen 3 bis 5 vom Nutzer entschieden, aber noch nicht simuliert** (Branch `feature/war`). Ablauf: Design → Simulation → Umsetzung. Alle Zahlen sind Startwerte; was noch gerechnet werden muss, ist mit „kalibrieren (Simulation)“ markiert. Spieltexte sind Englisch.
+Stand: **Phase 0 und 1 umgesetzt, Phase 2 (Schlacht) umgesetzt, Phasen 3 bis 5 vom Nutzer entschieden, aber noch nicht simuliert** (Branch `feature/war`). Ablauf: Design → Simulation → Umsetzung. Alle Zahlen sind Startwerte; was noch gerechnet werden muss, ist mit „kalibrieren (Simulation)“ markiert. Spieltexte sind Englisch.
 
 Baut auf Diplomatie (`Requirement Diplomatie.md`, Stufe 2), Zufriedenheit (`Requirement Zufriedenheit.md`), Zentralregierung (`Requirement Zentralregierung.md`), regionalen Rohstoffen (`Requirement Regionale Rohstoffe.md`, strategische Güter) und Handel auf.
 
@@ -43,7 +43,7 @@ Simuliert und vom Nutzer gewählt (Abschnitt 14).
 - **Vorderste Linie ohne Nahkampf:** Kämpft mit −50 % und nutzt in dieser Runde nicht ihre eigene Rolle.
 - **Ablauf je Runde:** Fernkampf → Nahkampf → Schock. Innerhalb einer Phase wirken beide Seiten gleichzeitig, zwischen den Phasen nacheinander.
 - **Dauer:** höchstens 5 Runden.
-- **Rückzug:** Eine Seite zieht ab, sobald ihre Stärke unter 50 % der Anfangsstärke fällt.
+- **Rückzug:** Eine Seite zieht ab, wenn ihre Stärke zu Beginn einer Runde unter 50 % der Anfangsstärke liegt (geprüft am Rundenanfang, nicht nach jeder Phase; vom Nutzer bestätigt).
 - **Sieger:** Die Seite, die den größeren Anteil ihrer Anfangsstärke behält.
 - Gerechnet wird pro Schlacht mit Zählern, nicht pro Soldat (Rechenzeit).
 
@@ -159,6 +159,7 @@ Zusätzlich gewählt: Eisen- und Feuerstein-Vorkommen sind bei der Weltgenerieru
 | 3 : 1 | 64 % | 7 % |
 
 - Ab 1,5-facher Stärke gewinnt fast immer die stärkere Seite; nur nahe Gleichstand entscheidet die Zusammensetzung. Die Stärkeformel (Soldaten × Faktoren) sagt den Ausgang gut voraus. Armeen ohne Nahkampf sind schwächer als ihre Stärke (bewusst akzeptiert).
-- Die Kriegserklärung ab 2-facher Stärke gewinnt gegen jede Zusammensetzung, auch gegen +50 % Verteidigerbonus (nötig wären 1,94-fach).
+- Die Kriegserklärung ab 2-facher Stärke gewinnt gegen jede Zusammensetzung, auch gegen +50 % Verteidigerbonus (mit dem Produktionscode gemessen: Gegen +50 % genügt 1,80-fach, im Feld 1,49-fach; gegen +25 % 1,62-fach).
 - Rechenzeit ca. 0,13 µs pro Schlacht.
 - Für Phase 3: Die echten Armeen sind klein (Ø 64 Soldaten je Volk) und nur etwa 1 % sind Schock (Pferde sind knapp).
+- Für Phase 3: In den echten Armeen würde die schwächere Seite in 45 % der Nachbarpaare aufgeben (weniger als 40 % der Stärke des Gegners).
