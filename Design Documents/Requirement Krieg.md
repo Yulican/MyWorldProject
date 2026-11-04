@@ -72,7 +72,8 @@ Entschieden (Nutzer), Phase 3b.
 - **Beute:** Der Eroberer übernimmt das Lager und die Hälfte der Kasse; Gebäude bleiben stehen.
 - **Besetzt heißt nicht erobert:** Ein besetzter Sitz wechselt den Besitzer erst am Ende des Krieges, und nur, wenn er das Kriegsziel war; unterwegs besetzte andere Sitze werden nach dem Krieg zurückgegeben.
 - **Ein Kriegsziel je Krieg** (ein Zielsitz). Ausnahme Rebellenkrieg: Ziel sind alle Sitze der Rebellen (Abschnitt 8).
-- **Hauptstadt** (entschieden): keine Annexion des ganzen Volks. Die Hauptstadt wechselt nur mit ihrem Bezirk den Besitzer, wenn sie das Kriegsziel war; das übrige Volk wählt eine neue Hauptstadt (nach den Regeln für Sitze in `Requirement Zentralregierung.md`).
+- **Volk mit nur einem Bezirk:** Ist der Bezirk des Zielsitzes das ganze Volk, wird es beim Verlust ganz annektiert (bewusst angenommen; der Unterschied zur Hauptstadtregel liegt nur darin, dass der Zielbezirk das ganze Volk ist).
+- **Hauptstadt** (entschieden): keine Annexion des ganzen Volks, wenn das Volk weitere Bezirke hat. Die Hauptstadt wechselt nur mit ihrem Bezirk den Besitzer, wenn sie das Kriegsziel war; das übrige Volk wählt eine neue Hauptstadt (nach den Regeln für Sitze in `Requirement Zentralregierung.md`).
 
 ## 6. Kriegserklärung, Frieden, Eroberung
 
@@ -80,11 +81,11 @@ Entschieden (Nutzer), Phase 3a.
 
 - **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt (ein Krieg je Volk).
 - **Zielsitz:** Unter den Sitzen, deren Bezirke Siedlungen an der Grenze des Angreifers enthalten, wählt er den mit dem größten Nutzen bei Eroberung. **Nutzen** (entschieden) = gewichtete Summe aus Einwohnern und Ressourcen des Bezirks (strategische Güter und Luxusvorkommen zählen doppelt), geteilt durch die Verteidiger im Bezirk. Es gibt ein Kriegsziel je Krieg.
-- **Aufgabe:** Eine Seite gibt auf, wenn sie weniger als 40 % der Stärke des Gegners hat (entschieden, für beide Seiten). Der Verlierer tritt den Zielsitz samt Bezirk ab.
+- **Aufgabe:** Eine Seite gibt auf, wenn sie weniger als 40 % der Stärke des Gegners hat (entschieden, für beide Seiten), jährlich geprüft, ohne dass eine Schlacht nötig ist. Der Verlierer tritt den Zielsitz samt Bezirk ab. Es gibt keine Mindeststärke für Kriegsziele: Auch gegen schwache Splittervölker oder Völker ohne Soldaten darf erklärt werden.
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
 - **Erschöpfung:** Nach 10 Jahren ohne Besetzung oder Sieg endet der Krieg ohne Gebietsänderung (Frieden).
 - **Nach dem Krieg:** Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
-- **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer (am Kriegsende, Abschnitt 5). Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
+- **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer (am Kriegsende, Abschnitt 5). Am Grenzübergang zum Eroberer entsteht eine Straße, damit der eroberte Bezirk nicht sofort abgeschnitten ist. Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
 - Chronik: Kriegserklärung, Belagerung, Besetzung, Frieden, mit Dialog und „Go to“; Annexion des ganzen Volks gibt es nicht.
 
 ## 7. Bündnisse
@@ -143,6 +144,8 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 Entschieden (Nutzer): „Unzufrieden“ = Zufriedenheit < 0; keine Mindestgröße; Rebellen müssen nicht zusammenhängen; bei Sieg ein Volk je zusammenhängender Gruppe, miteinander verbündet; Besetzung: Belagerung ≥ 2 Jahre und Zufriedenheit < 0 (ersetzt die 5-Jahres-Regel, Abschnitt 5); Rebellensiedlungen wechseln mit der Erklärung den Besitzer; annektierte Rebellensiedlungen bekommen „erobert“. Zuordnung der strategischen Güter, Gold, Beschaffung von Eisen und Feuerstein sowie die Zahlen von Phase 0 und 1: siehe Abschnitt 2 und 14.
 
+Phase 3, entschieden (nach der Simulation, Abschnitt 14): keine Mindeststärke für Kriegsziele, Aufgabe unverändert, Annexion eines Ein-Bezirk-Volks, Eroberungsstraße; weniger Völker durch Annexionen und damit weniger Außenhandel und Abkommen sind eine bewusst akzeptierte Folge.
+
 Phase 3, entschieden: siehe Abschnitte 4 bis 6 (Nutzen der Zielwahl, Besetzung, Hauptstadt ohne Annexion, ein Kriegsziel je Krieg, Zeitpunkt der Verteidigung).
 
 Offen:
@@ -181,3 +184,19 @@ Zusätzlich gewählt: Eisen- und Feuerstein-Vorkommen sind bei der Weltgenerieru
 - Rechenzeit ca. 0,13 µs pro Schlacht.
 - Für Phase 3: Die echten Armeen sind klein (Ø 64 Soldaten je Volk) und nur etwa 1 % sind Schock (Pferde sind knapp).
 - Für Phase 3: In den echten Armeen würde die schwächere Seite in 45 % der Nachbarpaare aufgeben (weniger als 40 % der Stärke des Gegners).
+
+### Krieg auf der Karte (Phase 3)
+
+24 Welten, Jahr 500, mit Annexion und Eroberungsstraße, gegen den Stand ohne Krieg:
+
+| Kennzahl | Ergebnis |
+|---|---|
+| Kriege je Welt | ca. 4,3 (fast keine vor Jahr 300) |
+| Dauer | meist kurz (ca. 0,6 Jahre), meist durch Aufgabe beendet |
+| Annektierte Völker | ca. 3,5 je Welt |
+| Siedlungen / Bevölkerung | unverändert |
+| Aufstände | 0,5 → 2,0 |
+| Außenhandel | −56 % |
+| Abkommen | 4,6 → 1,1 |
+| Rechenzeit (ms pro Jahr) | +5 % |
+| Belagerung (Teilwert −40) | 75 % der Sitze nach 2 Jahren unter 0; am Ende alle besetzt |
