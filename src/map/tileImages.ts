@@ -1,4 +1,3 @@
-import type { SkImage } from '@shopify/react-native-skia';
 import { markTimeline, TimelineKind } from '../state/perfStats';
 import type { TileRef } from './viewport';
 
@@ -17,7 +16,7 @@ const SLICE_PAUSE_MS = 16;
  * of new images in the same frame, e.g. after a snapshot or in fresh map.
  * A layer kept waiting gets the next turn.
  */
-const gate: { lastSliceAt: number; waiting: TileImages | null } = { lastSliceAt: -Infinity, waiting: null };
+const gate: { lastSliceAt: number; waiting: TileImages<TileImage> | null } = { lastSliceAt: -Infinity, waiting: null };
 /** Memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
@@ -30,12 +29,14 @@ const KEEP_MS = 1000;
  */
 const REDO_IDLE_MS = 300;
 
+/** A rendered tile: an image, or anything that has an image's size and can be freed. */
+export type TileImage = { width(): number; height(): number; dispose(): void };
 /** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
-export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
+export type RenderTile<T extends TileImage> = (chunk: number, pxPerUnit: number) => T | null;
 /** A number that only changes when a tile's image would change (see `invalidate`). */
 export type TileSignature = (chunk: number) => number;
 
-type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; signature: number };
+type Entry<T> = { image: T | null; bytes: number; usedAt: number; stale: boolean; signature: number };
 export type TileRequest = TileRef & { tier: number };
 
 /**
@@ -47,8 +48,8 @@ export type TileRequest = TileRef & { tier: number };
  * UI thread doesn't have to upload it again. Least recently drawn tiles are freed when the memory budget is
  * exceeded.
  */
-export class TileImages {
-  private entries = new Map<string, Entry>();
+export class TileImages<T extends TileImage> {
+  private entries = new Map<string, Entry<T>>();
   private queue: TileRequest[] = [];
   /** Tiles of the current view (any tier): never freed. */
   private wanted = new Set<number>();
@@ -61,7 +62,7 @@ export class TileImages {
   private tileMs = 0;
 
   constructor(
-    private render: RenderTile,
+    private render: RenderTile<T>,
     /** Without one, every tile counts as changed on `invalidate`. */
     private signature: TileSignature | null,
     /** Pixels per picture pixel for each tier. */
@@ -70,7 +71,7 @@ export class TileImages {
   ) {}
 
   /** The image of a tile at a tier, or at any other tier as a stand-in. */
-  get(chunk: number, tier: number): SkImage | null {
+  get(chunk: number, tier: number): T | null {
     const now = Date.now();
     const exact = this.entries.get(key(chunk, tier));
     if (exact) {
@@ -175,6 +176,7 @@ export class TileImages {
     if (rendered > 0) {
       gate.lastSliceAt = performance.now();
       markTimeline(TimelineKind.tiles, rendered);
+      markTimeline(TimelineKind.tileMs, Date.now() - start);
       this.onReady();
     }
     if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(rendered > 0 ? SLICE_PAUSE_MS : 0, wait));
@@ -195,7 +197,7 @@ export class TileImages {
   }
 
   /** Releases an entry's image once it can no longer be on screen. */
-  private free(e: Entry) {
+  private free(e: Entry<T>) {
     this.bytes -= e.bytes;
     const image = e.image;
     if (image) setTimeout(() => image.dispose(), KEEP_MS);

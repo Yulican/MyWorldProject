@@ -79,8 +79,14 @@ export const TimelineKind = {
   handover: 3,
   /** A gap between two game-clock frames over 20 ms: the JS thread was busy or stalled (value: ms). */
   jsGap: 4,
+  /** JS time of a slice of tile images, ms. */
+  tileMs: 5,
+  /** JS time of handing a tile set to the UI thread (building and sending it), ms. */
+  handoverMs: 6,
+  /** JS time of publishing a new snapshot to the map and React subscribers, including React's render, ms. */
+  publishMs: 7,
 } as const;
-const KIND_NAMES = ['sim', 'snapshot', 'tiles', 'handover', 'jsGap'] as const;
+const KIND_NAMES = ['sim', 'snapshot', 'tiles', 'handover', 'jsGap', 'tileMs', 'handoverMs', 'publishMs'] as const;
 const TIMELINE_SIZE = 2048;
 const timelineAt = new Float64Array(TIMELINE_SIZE);
 const timelineKind = new Uint8Array(TIMELINE_SIZE);
@@ -101,7 +107,7 @@ export function markTimeline(kind: (typeof TimelineKind)[keyof typeof TimelineKi
  * (inclusive); `jsGap` is the longest gap instead of a sum.
  */
 export function timelineBetween(from: number, to: number): Record<(typeof KIND_NAMES)[number], number> {
-  const out = { sim: 0, snapshot: 0, tiles: 0, handover: 0, jsGap: 0 };
+  const out = { sim: 0, snapshot: 0, tiles: 0, handover: 0, jsGap: 0, tileMs: 0, handoverMs: 0, publishMs: 0 };
   for (let n = 0; n < timelineCount; n++) {
     const i = (timelineNext - 1 - n + TIMELINE_SIZE) % TIMELINE_SIZE;
     const at = timelineAt[i];

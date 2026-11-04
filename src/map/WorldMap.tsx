@@ -1,4 +1,15 @@
-import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage, type SkPicture } from '@shopify/react-native-skia';
+import {
+  Canvas,
+  ClipOp,
+  Group,
+  Image,
+  Path,
+  Picture,
+  Skia,
+  createPicture,
+  type SkImage,
+  type SkPicture,
+} from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -475,10 +486,33 @@ type TileLayerProps = {
   work: SharedValue<UiWork>;
 };
 
-/** Finished images the UI thread may draw, by tile, for the current zoom tier. */
+/**
+ * A tile image as the UI thread gets it: inside a picture that only draws
+ * it, plus its size. Handing over the image itself would make the UI runtime
+ * charge its pixels (megabytes per tile) to its garbage collector, which
+ * then ran often and, with a burst of new tiles, for up to ~50 ms in the
+ * middle of a frame; a picture only charges its few recorded bytes. Drawing
+ * it still draws (and first uploads) the same image.
+ */
+type TilePicture = { picture: SkPicture; w: number; h: number };
+
+/** A rendered tile on the JS thread (see TileImages): its picture for the UI thread. */
+type Tile = { ui: TilePicture; width(): number; height(): number; dispose(): void };
+
+function toTile(image: SkImage | null): Tile | null {
+  if (!image) return null;
+  const w = image.width();
+  const h = image.height();
+  const picture = createPicture((canvas) => canvas.drawImage(image, 0, 0), { width: w, height: h });
+  // The picture holds the image now.
+  image.dispose();
+  return { ui: { picture, w, h }, width: () => w, height: () => h, dispose: () => picture.dispose() };
+}
+
+/** Finished tiles the UI thread may draw, by tile, for the current zoom tier. */
 type TileSet = {
-  terrain: Record<number, SkImage>;
-  territory: Record<number, SkImage>;
+  terrain: Record<number, TilePicture>;
+  territory: Record<number, TilePicture>;
   /** Zoomed out: territories as one image. */
   overview: SkImage | null;
 };
@@ -503,10 +537,11 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
   const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
   /** Whether `picture` was recorded here (and may be freed when replaced). */
   const ownsPicture = useSharedValue(false);
-  /** Images handed over but not drawn yet (UI thread), drawn ahead a few per frame. */
-  const warm = useSharedValue<SkImage[]>([]);
-  /** The images drawn ahead in this frame, kept if the view redraws in it too. */
-  const ahead = useSharedValue<SkImage[]>([]);
+  /** Tiles handed over but not drawn yet (UI thread), drawn ahead a few per frame from `warmNext` on. */
+  const warm = useSharedValue<TilePicture[]>([]);
+  const warmNext = useSharedValue(0);
+  /** The tiles drawn ahead in this frame, kept if the view redraws in it too. */
+  const ahead = useSharedValue<TilePicture[]>([]);
   const current = useRef<ViewTiles>(NO_TILES);
   const publish = useRef<() => void>(() => {});
   const onReady = useCallback(() => publish.current(), []);
@@ -517,7 +552,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
       new TileImages(
         (chunk, px) => {
           countEvent('terrainTiles');
-          return renderTile(world, chunk, layers.chunkCols, px);
+          return toTile(renderTile(world, chunk, layers.chunkCols, px));
         },
         null,
         scales,
@@ -530,7 +565,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
       new TileImages(
         (chunk, px) => {
           countEvent('territoryTiles');
-          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor);
+          return toTile(renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor));
         },
         (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
@@ -560,9 +595,9 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
     if (v.detail) {
       for (const t of visibleTiles(v, layers, PREFETCH_TILES)) {
         const ground = terrainTiles.get(t.chunk, v.tier);
-        if (ground) set.terrain[t.chunk] = ground;
+        if (ground) set.terrain[t.chunk] = ground.ui;
         const people = territoryTiles.get(t.chunk, v.tier);
-        if (people) set.territory[t.chunk] = people;
+        if (people) set.territory[t.chunk] = people.ui;
       }
     } else {
       set.overview = overviewFor(territory.getVersion());
@@ -598,80 +633,75 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
   const grid = { width: layers.width, chunkCols: layers.chunkCols, chunkRows: layers.chunkRows };
   const overviewRect = layers.overviewRect;
   /**
-   * Records the tile picture for a view and image set (UI thread), plus
-   * `ahead`: images drawn as an invisible dot in the middle of the view, so
-   * the GPU uploads them now instead of when they come into view.
+   * Records the tile picture for a view and tile set (UI thread), plus
+   * `ahead`: tiles drawn shrunk to a dot in the middle of the view, under the
+   * opaque terrain tiles, so the GPU uploads their images now instead of
+   * when they come into view.
    *
    * Allocates as little as it can on the UI runtime, whose collector runs on
-   * the thread that draws the frames: rects are two reused plain objects
-   * (Skia reads their fields), the paints are freed right after recording,
-   * and the replaced picture is freed at once instead of by the collector
-   * (it holds every tile image it drew, which would otherwise stay in memory,
-   * and on the GPU, until the UI runtime collects it).
+   * the thread that draws the frames: the clip rect is one reused plain
+   * object (Skia reads its fields), the paint is freed right after
+   * recording, and the replaced picture is freed at once instead of by the
+   * collector.
    */
-  const draw = (v: ViewTiles, set: TileSet, ahead: SkImage[] = []) => {
+  const draw = (v: ViewTiles, set: TileSet, ahead: TilePicture[]) => {
     'worklet';
     const t0 = performance.now();
-    const src = { x: 0, y: 0, width: 0, height: 0 };
-    const dst = { x: 0, y: 0, width: 0, height: 0 };
-    const rect = (r: typeof src, x: number, y: number, w: number, h: number) => {
-      r.x = x;
-      r.y = y;
-      r.width = w;
-      r.height = h;
-      return r;
-    };
-    const paint = Skia.Paint();
-    const faint = ahead.length > 0 ? Skia.Paint() : null;
     const next = createPicture((canvas) => {
-      if (faint) {
-        faint.setAlphaf(1 / 255);
-        rect(dst, ((v.x0 + v.x1 + 1) / 2) * CHUNK_W, ((v.y0 + v.y1 + 1) / 2) * CHUNK_H, 0.5, 0.5);
-        for (const image of ahead) {
-          canvas.drawImageRect(image, rect(src, 0, 0, image.width(), image.height()), dst, faint, true);
+      if (ahead.length > 0) {
+        const x = ((v.x0 + v.x1 + 1) / 2) * CHUNK_W;
+        const y = ((v.y0 + v.y1 + 1) / 2) * CHUNK_H;
+        for (const tile of ahead) {
+          canvas.save();
+          canvas.translate(x, y);
+          canvas.scale(0.5 / tile.w, 0.5 / tile.h);
+          canvas.drawPicture(tile.picture);
+          canvas.restore();
         }
       }
       if (!v.detail) {
         const image = set.overview;
         if (!image) return;
-        rect(src, 0, 0, image.width(), image.height());
+        const paint = Skia.Paint();
+        const src = { x: 0, y: 0, width: image.width(), height: image.height() };
         // Two copies cover any view: the offset stays within one map width.
         for (let copy = 0; copy < 2; copy++) {
-          rect(dst, overviewRect.x + copy * grid.width, overviewRect.y, overviewRect.width, overviewRect.height);
+          const dst = { x: overviewRect.x + copy * grid.width, y: overviewRect.y, width: overviewRect.width, height: overviewRect.height };
           canvas.drawImageRect(image, src, dst, paint, true);
         }
+        paint.dispose();
         return;
       }
       const tiles = visibleTiles(v, grid);
+      const tileW = CHUNK_W + 2 * TILE_BLEED;
+      const tileH = CHUNK_H + 2 * TILE_BLEED;
       // Terrain tiles are opaque and overlap by their bleed, so no seam shows.
       for (const t of tiles) {
-        const image = set.terrain[t.chunk];
-        if (!image) continue;
-        rect(src, 0, 0, image.width(), image.height());
-        rect(
-          dst,
-          t.col * CHUNK_W + t.offsetX - TILE_BLEED,
-          t.row * CHUNK_H - TILE_BLEED,
-          CHUNK_W + 2 * TILE_BLEED,
-          CHUNK_H + 2 * TILE_BLEED,
-        );
-        canvas.drawImageRect(image, src, dst, paint, true);
+        const tile = set.terrain[t.chunk];
+        if (!tile) continue;
+        canvas.save();
+        canvas.translate(t.col * CHUNK_W + t.offsetX - TILE_BLEED, t.row * CHUNK_H - TILE_BLEED);
+        canvas.scale(tileW / tile.w, tileH / tile.h);
+        canvas.drawPicture(tile.picture);
+        canvas.restore();
       }
       // Territory tiles are semi-transparent and must not overlap (a strip
-      // drawn twice would show darker): each is drawn exactly into its tile,
+      // drawn twice would show darker): each is clipped exactly to its tile,
       // its bleed pixels only feed the smoothing at the edges.
+      const clip = { x: 0, y: 0, width: CHUNK_W, height: CHUNK_H };
       for (const t of tiles) {
-        const image = set.territory[t.chunk];
-        if (!image) continue;
-        const sx = image.width() / (CHUNK_W + 2 * TILE_BLEED);
-        const sy = image.height() / (CHUNK_H + 2 * TILE_BLEED);
-        rect(src, TILE_BLEED * sx, TILE_BLEED * sy, CHUNK_W * sx, CHUNK_H * sy);
-        rect(dst, t.col * CHUNK_W + t.offsetX, t.row * CHUNK_H, CHUNK_W, CHUNK_H);
-        canvas.drawImageRect(image, src, dst, paint, true);
+        const tile = set.territory[t.chunk];
+        if (!tile) continue;
+        clip.x = t.col * CHUNK_W + t.offsetX;
+        clip.y = t.row * CHUNK_H;
+        canvas.save();
+        canvas.clipRect(clip, ClipOp.Intersect, false);
+        canvas.translate(clip.x - TILE_BLEED, clip.y - TILE_BLEED);
+        canvas.scale(tileW / tile.w, tileH / tile.h);
+        canvas.drawPicture(tile.picture);
+        canvas.restore();
       }
     });
-    paint.dispose();
-    faint?.dispose();
     const old = picture.value;
     picture.value = next;
     // The canvas holds its own reference to whatever it still draws; this
@@ -692,27 +722,34 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
     () => view.value,
     (v) => draw(v, tileSet.value, ahead.value),
   );
-  // ...and when JS hands over new images: applied and drawn on the UI thread
+  // ...and when JS hands over new tiles: applied and drawn on the UI thread
   // right away, without waiting for the next movement.
   function showTiles(set: TileSet) {
+    const t0 = performance.now();
     markTimeline(TimelineKind.handover, 1);
     scheduleOnUI((next: TileSet) => {
       'worklet';
-      // Images off screen not drawn yet: new ones, and those still waiting
+      // Tiles off screen not drawn yet: new ones, and those still waiting
       // from before (the ones on screen are drawn right below).
       const v = view.value;
       const prev = tileSet.value;
       const onScreen: Record<number, boolean> = {};
       for (const t of visibleTiles(v, grid)) onScreen[t.chunk] = true;
-      const pending: SkImage[] = [];
+      const pending: TilePicture[] = [];
       const waiting = warm.value;
+      const from = warmNext.value;
+      const waits = (picture: SkPicture) => {
+        for (let i = from; i < waiting.length; i++) if (waiting[i].picture === picture) return true;
+        return false;
+      };
       let fresh = 0;
-      const add = (images: Record<number, SkImage>, before: Record<number, SkImage>) => {
-        for (const k in images) {
-          const image = images[k];
+      const add = (tiles: Record<number, TilePicture>, before: Record<number, TilePicture>) => {
+        for (const k in tiles) {
+          const tile = tiles[k];
+          const same = before[k] !== undefined && before[k].picture === tile.picture;
           if (onScreen[k]) {
-            if (before[k] !== image) fresh++;
-          } else if (before[k] !== image || waiting.indexOf(image) >= 0) pending.push(image);
+            if (!same) fresh++;
+          } else if (!same || waits(tile.picture)) pending.push(tile);
         }
       };
       add(next.terrain, prev.terrain);
@@ -725,21 +762,26 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
         }, false);
       }
       warm.value = pending;
+      warmNext.value = 0;
       tileSet.value = next;
       draw(v, next, ahead.value);
     }, set);
+    markTimeline(TimelineKind.handoverMs, performance.now() - t0);
   }
-  // Off-screen images not drawn yet, a few per frame, ahead of being seen.
+  // Off-screen tiles not drawn yet, a few per frame, ahead of being seen.
   useFrameCallback(() => {
     'worklet';
     const pending = warm.value;
-    if (pending.length === 0) {
-      // Only ever one frame old: a replaced image is freed a while later.
+    const from = warmNext.value;
+    if (from >= pending.length) {
+      // Only ever one frame old: a replaced tile is freed a while later.
       if (ahead.value.length > 0) ahead.value = [];
       return;
     }
-    const batch = pending.slice(0, WARM_PER_FRAME);
-    warm.value = pending.slice(WARM_PER_FRAME);
+    const to = Math.min(pending.length, from + WARM_PER_FRAME);
+    const batch: TilePicture[] = [];
+    for (let i = from; i < to; i++) batch.push(pending[i]);
+    warmNext.value = to;
     ahead.value = batch;
     draw(view.value, tileSet.value, batch);
   });

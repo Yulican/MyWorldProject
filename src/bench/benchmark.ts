@@ -119,6 +119,8 @@ export type SwipeResult = {
   fps: number;
   worstMs: number;
   pass: boolean;
+  /** When the swipe started (Date.now() on the device), to find system log lines from it. */
+  startedAt?: number;
   /** What else happened in the app during the swipe (see perfStats.perfEvents), to find what costs frames. */
   events?: Record<string, number>;
 };

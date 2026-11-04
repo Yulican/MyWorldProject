@@ -236,7 +236,10 @@ function runFrame(now: number) {
     countEvent('snapshots');
     markTimeline(TimelineKind.snapshot, 1);
     pendingTicks += ticksPerSecond * seconds;
+    const publishStart = performance.now();
     publish({});
+    // Queued after React's own flush of the update (a microtask too), so this includes its render and commit.
+    queueMicrotask(() => markTimeline(TimelineKind.publishMs, performance.now() - publishStart));
     if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
     return;
   }

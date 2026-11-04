@@ -51,6 +51,8 @@ while true; do
   sleep 15
 done
 
+# The whole system log with device times, to see what else ran during failing swipes (ART garbage collections, Choreographer, system services).
+adb logcat -d -v epoch > "$OUT/logcat-epoch.txt" 2>/dev/null || true
 grep -o 'MYWORLD_BENCH_SWIPE .*' "$OUT/logcat.txt" | sed 's/^MYWORLD_BENCH_SWIPE //' > "$OUT/swipes.jsonl"
 grep -o 'MYWORLD_BENCH_DONE .*' "$OUT/logcat.txt" | tail -n 1 | sed 's/^MYWORLD_BENCH_DONE //' > "$OUT/summary.json"
 
@@ -110,6 +112,23 @@ if (withEvents.length > 0) {
     for (const s of failing) {
       lines.push(`| ${s.world + 1} | ${s.direction} | ${s.fps.toFixed(1)} | ${s.worstMs.toFixed(1)} | ` + keys.map((k) => s.events[k]).join(' | ') + ' |');
     }
+  }
+}
+// System log lines (other than the app's JS log) while each failing swipe ran.
+let system = [];
+try {
+  system = fs.readFileSync(`${out}/logcat-epoch.txt`, 'utf8').split('\n')
+    .map((l) => ({ t: parseFloat(l) * 1000, l: l.trim() }))
+    .filter((e) => Number.isFinite(e.t) && !/ReactNativeJS/.test(e.l));
+} catch {}
+const failingTimed = swipes.filter((s) => !s.pass && s.startedAt);
+if (failingTimed.length > 0 && system.length > 0) {
+  lines.push('', '### System log during failing swipes', '');
+  for (const s of failingTimed) {
+    const near = system.filter((e) => e.t >= s.startedAt - 100 && e.t <= s.startedAt + 700);
+    lines.push(`World ${s.world + 1} ${s.direction} (worst frame at +${s.events?.worstAtMs ?? '?'} ms): ${near.length} lines`, '', '```');
+    for (const e of near.slice(0, 25)) lines.push(`+${Math.round(e.t - s.startedAt)} ms ${e.l.slice(0, 200)}`);
+    lines.push('```', '');
   }
 }
 const text = lines.join('\n') + '\n';

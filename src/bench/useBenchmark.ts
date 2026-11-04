@@ -85,7 +85,14 @@ export function useBenchmark(controller: { current: MapController | null }) {
           events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
         }
         if (stats.ui) Object.assign(events, uiEvents(stats.ui, stats.worstMs));
-        const result = { world, seed, direction: plan[i].direction, ...evaluateSwipe(stats), events };
+        const result: SwipeResult = {
+          world,
+          seed,
+          direction: plan[i].direction,
+          ...evaluateSwipe(stats),
+          startedAt: stats.ui?.startedAt,
+          events,
+        };
         results.push(result);
         console.log(`${LOG}_SWIPE ${JSON.stringify(result)}`);
         setStatus({ running: true, scenario, world, swipe: i + 1, failed: results.filter((r) => !r.pass).length });
