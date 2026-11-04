@@ -25,7 +25,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 |---|---|---|
 | Simulation outside React, snapshots for the map | `src/state/worldStore.ts` | components subscribe; Context only for UI state (`src/context/AppContext.tsx`, `src/hooks/useApp.ts`) |
 | Map rendering (Skia), gestures, zoom | `src/map/WorldMap.tsx`, `viewport.ts`, `mapGeometry.ts` | `viewport.test.ts` |
-| Map pictures, tile cache | `src/map/worldPicture.ts`, `tileImages.ts`, `hexIcons.ts`, `palette.ts`, `paints.ts` | hot path for the benchmark |
+| Map pictures, tile cache | `src/map/worldPicture.ts`, `tileImages.ts`, `hexIcons.ts`, `palette.ts`, `paints.ts` | hot path for the benchmark; `tileImages.test.ts` |
 | Territories, borders (dashed = open), seat flags | `src/map/territoryLayers.ts` | unrest, diplomacy, government scenarios |
 | FPS meter, perf counters | `src/map/MapPerfMeter.tsx`, `motionStats.ts`, `src/state/perfStats.ts` | `motionStats.test.ts` |
 | Screen, panels, dialogs (English texts) | `src/screens/WorldScreen.tsx`, `src/components/HexInfoPanel.tsx`, `CivPanel.tsx`, `DiplomacyPanel.tsx`, `GovernmentPanel.tsx`, `ChronicleDialog.tsx`, `TimeControls.tsx`, `Screen.tsx`, `src/theme/` | – |
