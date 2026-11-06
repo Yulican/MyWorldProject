@@ -53,6 +53,8 @@ Entschieden (Nutzer), Phase 3; Zahlen sind Startwerte (kalibrieren (Simulation))
 
 - Eine Armee ist ein Zähler (Nahkampf / Fernkampf / Schock) mit Position und Volk. Die Soldaten werden aus der Heimatsiedlung abgezogen.
 - **Wer marschiert:** Bei Kriegsbeginn stellen alle Siedlungen des Volks 70 % ihrer Soldaten für die Armeen, 30 % bleiben zu Hause.
+- **Sammeln** (Interpretation, zu bestätigen): Die Soldaten marschieren aus ihren Siedlungen zu einem Sammelpunkt, dem eigenen Sitz des Angreifers, der dem Kriegsziel am nächsten liegt. Die Armee bricht auf, wenn alle Kontingente angekommen sind, spätestens nach 8 Wochen.
+- **Rückzug geschlagener Armeen** (Interpretation, zu bestätigen): Eine geschlagene Armee zieht mit den Soldaten, die nach der 50-%-Rückzugsregel (Abschnitt 3) übrig sind, zum nächsten eigenen Sitz, mit normaler Geschwindigkeit, und schließt sich dort der Besatzung an. Auf dem Weg kann sie erneut angegriffen werden.
 - **Zahl der Armeen:** höchstens 4 je Volk (1 Hauptarmee, 3 Entsatzarmeen), höchstens 32 Armeen auf der Welt.
 - **Marsch:** 1 Reisekosteneinheit pro Woche (ein Straßenhex kostet meist 0,5). Der Weg geht über Straßen und freies Gelände, durch feindliches Land immer, durch befreundetes nur bei offener Grenze. Keine Schiffe. Der Weg wird nur bei Zielwechsel neu berechnet.
 - **Versorgung:** keine; der Sold läuft weiter aus der Heimatkasse (Entlassung bei leerer Kasse wie in Abschnitt 2). Hat eine Armee 2 Jahre lang kein Ziel, kehrt sie heim.
@@ -65,7 +67,7 @@ Entschieden (Nutzer), Phase 3b.
 
 - **Belagert werden können Regierungssitze.** Eine Belagerung beginnt, wenn eine feindliche Armee den Sitz-Hex erreicht hat.
 - **Während der Belagerung:** alle Kapazitäten (Ernte, Bau, Bevölkerung) der Siedlung des Sitzes sind halbiert, nicht die des Bezirks. Der Handel mit der Siedlung ruht. Die Siedlung bekommt den Teilwert „Besieged“ −40 (`Requirement Zufriedenheit.md`).
-- **Verteidiger müssen nicht sofort kämpfen:** Die Armee am Sitz darf warten, bis genug Armeen aus Nachbarsiedlungen angekommen sind, und kämpft dann gemeinsam. Verteidiger und Entsatzarmeen greifen an, sobald sie nach der Schlachtrechnung gewinnen können, sonst spätestens im letzten Monat vor der Besetzung (entschieden).
+- **Verteidiger müssen nicht sofort kämpfen:** Die Armee am Sitz darf warten, bis genug Armeen aus Nachbarsiedlungen angekommen sind, und kämpft dann gemeinsam. Nach der Besetzung des Zielsitzes werden die Verteidiger im Monat vor jeder jährlichen Besetzungsprüfung zum Kampf gezwungen. Verteidiger und Entsatzarmeen greifen an, sobald sie nach der Schlachtrechnung gewinnen können, sonst spätestens im letzten Monat vor der Besetzung (entschieden).
 - **Entsatz:** Armeen des Volks (und von Verbündeten) können die Belagerung brechen, ohne Entfernungsgrenze; sie müssen den Weg zurücklegen. Greift die Entsatzarmee an, kämpft sie bei der Ankunft.
 - **Verteidigerbonus:** +25 % in einem belagerten Sitz, +50 % mit eigener Armee im Sitz (entschieden).
 - **Besetzung** (bestätigt): Der Sitz wird besetzt, wenn die Belagerung mindestens 2 Jahre gedauert hat und die Siedlung des Sitzes Zufriedenheit < 0 hat; ab da wird jährlich geprüft. Das ersetzt die 5-Jahres-Regel für die Besetzung. Der Teilwert „Besieged“ −40 wirkt wegen der Trägheit (25 % des Abstands pro Jahr) erst nach und nach; in der Simulation prüfen, ob Sitze in 2 Jahren tatsächlich unter 0 fallen.
@@ -73,13 +75,14 @@ Entschieden (Nutzer), Phase 3b.
 - **Besetzt heißt nicht erobert:** Ein besetzter Sitz wechselt den Besitzer erst am Ende des Krieges, und nur, wenn er das Kriegsziel war; unterwegs besetzte andere Sitze werden nach dem Krieg zurückgegeben.
 - **Ein Kriegsziel je Krieg** (ein Zielsitz). Ausnahme Rebellenkrieg: Ziel sind alle Sitze der Rebellen (Abschnitt 8).
 - **Volk mit nur einem Bezirk:** Ist der Bezirk des Zielsitzes das ganze Volk, wird es beim Verlust ganz annektiert (bewusst angenommen; der Unterschied zur Hauptstadtregel liegt nur darin, dass der Zielbezirk das ganze Volk ist).
+- **Neue Hauptstadt** (entschieden): Verliert ein Volk seine Hauptstadt, wird sein einwohnerreichster verbliebener Sitz die neue Hauptstadt, sonst seine einwohnerreichste Siedlung.
 - **Hauptstadt** (entschieden): keine Annexion des ganzen Volks, wenn das Volk weitere Bezirke hat. Die Hauptstadt wechselt nur mit ihrem Bezirk den Besitzer, wenn sie das Kriegsziel war; das übrige Volk wählt eine neue Hauptstadt (nach den Regeln für Sitze in `Requirement Zentralregierung.md`).
 
 ## 6. Kriegserklärung, Frieden, Eroberung
 
 Entschieden (Nutzer), Phase 3a.
 
-- **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt (ein Krieg je Volk).
+- **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Ist die Stärke des Angreifers 0, darf er nicht erklären (keine Kriege „0 ≥ 2 × 0“). Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt (ein Krieg je Volk).
 - **Zielsitz:** Unter den Sitzen, deren Bezirke Siedlungen an der Grenze des Angreifers enthalten, wählt er den mit dem größten Nutzen bei Eroberung. **Nutzen** (entschieden) = gewichtete Summe aus Einwohnern und Ressourcen des Bezirks (strategische Güter und Luxusvorkommen zählen doppelt), geteilt durch die Verteidiger im Bezirk. Es gibt ein Kriegsziel je Krieg.
 - **Aufgabe** (entschieden): Vor der Besetzung des Kriegsziels (Zielsitz) gibt der Verteidiger nie auf. Ist der Zielsitz besetzt, gibt er nur auf, wenn er weniger als 40 % der Stärke des Gegners hat; sonst geht der Krieg (mit besetztem Sitz) weiter bis zur Aufgabe, zur Erschöpfung (10 Jahre) oder bis zum Entsatz. Für den Angreifer gilt die einfache 40-%-Regel. Geprüft wird jährlich, ohne dass eine Schlacht nötig ist.
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
@@ -150,7 +153,13 @@ Phase 3, entschieden (nach der Simulation, Abschnitt 14): keine Mindeststärke f
 
 Phase 3, entschieden: siehe Abschnitte 4 bis 6 (Nutzen der Zielwahl, Besetzung, Hauptstadt ohne Annexion, ein Kriegsziel je Krieg, Zeitpunkt der Verteidigung).
 
+Später (bewusste Vereinfachungen für jetzt):
+- Belagert wird nur das Kriegsziel (nicht andere Sitze auf dem Weg).
+- Die 30 %, die zu Hause bleiben, kämpfen nicht.
+- Armeen werden jedes Jahr neu aufgestellt.
+
 Offen:
+- Zu bestätigen: Sammeln (spätestens nach 8 Wochen) und Rückzug geschlagener Armeen (Abschnitt 4).
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
