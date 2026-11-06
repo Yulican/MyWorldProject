@@ -6,7 +6,7 @@
 //   npx tsx tools/warMapStats.ts 24 300,500 "nowar:enabled=0" "war" "malus80:siegeMalus=80"
 //   "old world:width=64,height=64,maxCivs=6,tribeChance=0.02". Without variants: nowar, war (the game's defaults).
 // Prints per year: growth, population, trade, diplomacy, uprisings, wars (started, ongoing, duration, end types,
-// battles, armies), sieges and occupations (seat satisfaction at the first check), territory, and the cost of the
+// battles, armies, gathering, retreats), sieges and occupations (seat satisfaction at the first check), territory, and the cost of the
 // war parts per week and year plus ms per simulated year.
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
@@ -107,7 +107,14 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'battles won by defender': st.battleWinsDef,
     'battles drawn': st.battleDraws,
     'armies raised': st.armiesRaised,
-    'armies at once (max)': st.maxArmies,
+    'armies at once = markers (max)': st.maxArmies,
+    'contingents sent': st.contingents,
+    'contingents arrived': st.contingentsArrived,
+    'contingents too late (home)': st.contingentsLate,
+    'gathering weeks per army (mean)': st.gatherWeeksSum / Math.max(1, st.setOut),
+    'retreats': st.retreats,
+    'retreats reached their seat': st.retreatsHome,
+    'battles with a retreating army': st.retreatBattles,
     'wars at once (max)': st.maxWars,
     sieges: st.sieges,
     'siege: first check, seat sat < 0': st.checksBelow,

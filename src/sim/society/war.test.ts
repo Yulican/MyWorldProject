@@ -14,15 +14,19 @@ import { SUPPLY_KINDS, SupplyKind } from './supply';
 import { TICKS_PER_YEAR, changeCiv, createSimulation, foundCivilization, stepSimulation, type Simulation } from './simulation';
 import { TRADE_GOODS, updateTradeNeeds } from './trade';
 import {
+  ArmyState,
   EndType,
   MAX_ARMIES,
   WAR,
   advanceWar,
+  armySoldiers,
   chooseGoal,
   disbandArmy,
   endWar,
+  finishGathering,
   inTruce,
   planMarch,
+  rallyPoint,
   runWarYear,
   startWar,
   travelCost,
@@ -131,10 +135,16 @@ const armiesOf = (sim: Simulation, civ: number) => {
 
 const totalSoldiers = (sim: Simulation) => sim.military.soldiers.reduce((s, v) => s + v, 0);
 
-/** A war of att against the seat `goal`; the defender's armies are sent home. */
+/** Every gathering army is complete and sets out. */
+function ready(sim: Simulation): void {
+  for (let a = 0; a < MAX_ARMIES; a++) finishGathering(sim, a);
+}
+
+/** A war of att against the seat `goal`, the armies gathered; the defender's armies are sent home. */
 function warOn(f: Fixture, goal: number, keepDefenders = false): number {
   const s = startWar(f.sim, f.att, goal);
   assert.ok(s >= 0);
+  ready(f.sim);
   if (!keepDefenders) for (const a of armiesOf(f.sim, f.def)) disbandArmy(f.sim, a);
   return s;
 }
@@ -170,6 +180,16 @@ test('war is declared only on a neighbor at most half as strong, outside a truce
   m.strength[def] = m.strength[att] / 2 + 0.01;
   assert.deepEqual(warTargets(sim, att), []);
   m.strength[def] = 8 * settledOf(sim, def).length;
+  // Without strength no war, not even on a people without strength.
+  const sa = m.strength[att];
+  const sd = m.strength[def];
+  m.strength[att] = 0;
+  m.strength[def] = 0;
+  assert.deepEqual(warTargets(sim, att), []);
+  m.strength[att] = 0.01;
+  assert.deepEqual(warTargets(sim, att), [def]);
+  m.strength[att] = sa;
+  m.strength[def] = sd;
   // A truce bars it until it ends.
   sim.war.truce[att * PAIRS + def] = sim.tick + 10;
   assert.equal(inTruce(sim, att, def), true);
@@ -229,7 +249,7 @@ test('the goal is the bordering seat with the largest benefit: (inhabitants + 50
   assert.equal(chooseGoal(sim, att, new Uint8Array(PAIRS)), -1);
 });
 
-test('70 % of the soldiers march, in at most 4 armies per people and 32 in the world', () => {
+test('70 % of the soldiers march, one army per raise, at most 4 armies per people and 32 in the world', () => {
   const f = fixture(1);
   const { sim, att, def } = f;
   sim.war.armies = MAX_ARMIES - 2; // as if 30 armies marched elsewhere
@@ -250,17 +270,90 @@ test('70 % of the soldiers march, in at most 4 armies per people and 32 in the w
   sim.war.armies = 0;
 
   const s2 = startWar(sim, att, f.seats[0]);
-  assert.equal(armiesOf(sim, att).length, 4);
-  for (const c of settledOf(sim, att)) assert.equal(sim.war.away[c * TROOP_TYPES + Troop.Melee], 7);
-  for (const c of settledOf(sim, def)) assert.equal(sim.war.away[c * TROOP_TYPES + Troop.Melee], 5);
+  assert.equal(armiesOf(sim, att).length, 1);
+  assert.equal(armiesOf(sim, def).length, 1);
+  ready(sim);
   let marching = 0;
   for (const a of armiesOf(sim, att)) marching += sim.war.aN[a * TROOP_TYPES + Troop.Melee];
-  assert.equal(marching, 7 * settledOf(sim, att).length);
-  // Raising again next year keeps to the caps and to 70 %.
-  runWarYear(sim);
-  assert.ok(sim.war.wLive[s2]);
-  assert.equal(armiesOf(sim, att).length, 4);
-  for (const c of settledOf(sim, att)) assert.equal(sim.war.away[c * TROOP_TYPES + Troop.Melee], 7);
+  let away = 0;
+  for (const c of settledOf(sim, att)) {
+    const k = sim.war.away[c * TROOP_TYPES + Troop.Melee];
+    assert.ok(k === 0 || k === 7, 'the share of a settlement that can reach the rally point, or none');
+    away += k;
+  }
+  assert.ok(marching > 0);
+  assert.equal(marching, away);
+  for (const c of settledOf(sim, def)) assert.ok([0, 5].includes(sim.war.away[c * TROOP_TYPES + Troop.Melee]));
+  // Every year one more army from the soldiers not yet away, up to 4.
+  const counts: number[] = [];
+  for (let y = 0; y < 5; y++) {
+    for (const c of settledOf(sim, att)) sim.military.soldiers[c * TROOP_TYPES + Troop.Melee] += 10;
+    runWarYear(sim);
+    ready(sim);
+    assert.ok(sim.war.wLive[s2]);
+    counts.push(armiesOf(sim, att).length);
+  }
+  assert.deepEqual(counts, [2, 3, 4, 4, 4]);
+  for (const c of settledOf(sim, att)) {
+    const i = c * TROOP_TYPES + Troop.Melee;
+    assert.ok(sim.war.away[i] <= Math.floor(0.7 * sim.military.soldiers[i]));
+  }
+});
+
+test('contingents walk to the rally point (the seat nearest the goal) at army speed; the army sets out when all arrived, at the latest after 8 weeks', () => {
+  for (const late of [false, true]) {
+    const f = fixture(1);
+    const { sim, att, def } = f;
+    const goal = f.seats[0];
+    const s = startWar(sim, att, goal);
+    const w = sim.war;
+    const [a] = armiesOf(sim, att);
+    const [b] = armiesOf(sim, def);
+    assert.equal(w.aState[a], ArmyState.Gathering);
+    // The rally point: the attacker's seat with the least travel cost to the goal; the defender gathers in the goal.
+    const rally = rallyPoint(sim, s, att);
+    assert.equal(w.aCell[a], rally);
+    assert.ok(rally === sim.civs[att]!.capital || hasSeat(sim.economy, rally));
+    for (const c of settledOf(sim, att)) {
+      if (c === sim.civs[att]!.capital || hasSeat(sim.economy, c)) assert.ok(travelCost(sim, s, 0, c) >= travelCost(sim, s, 0, rally));
+    }
+    assert.equal(w.aCell[b], goal);
+    // The rally point's own soldiers are there at once, the others on the way.
+    assert.equal(w.aN[a * TROOP_TYPES + Troop.Melee], 7);
+    const coming = settledOf(sim, att).filter((c) => w.cArmy[c] === a);
+    assert.ok(coming.length > 1, 'contingents on the way');
+    assert.equal(w.aWait[a], coming.length);
+    for (const c of coming) {
+      assert.equal(w.pend[c * TROOP_TYPES + Troop.Melee], 7);
+      assert.equal(w.away[c * TROOP_TYPES + Troop.Melee], 0, 'not in the army yet');
+      assert.ok(w.cArrive[c] - sim.tick >= hexDistance(sim.world, c, rally) / 2, 'army speed');
+    }
+    // One contingent far away (as if 20 weeks): the army leaves without it after 8 weeks.
+    if (late) w.cArrive[coming[0]] = sim.tick + 20;
+    const start = sim.tick;
+    const last = Math.max(...coming.map((c) => w.cArrive[c]));
+    const leave = Math.min(last, start + WAR.gatherWeeks);
+    if (!late) assert.ok(last - start <= WAR.gatherWeeks, 'all near enough for this check');
+    while (sim.tick < leave - 1) {
+      week(sim);
+      assert.equal(w.aState[a], ArmyState.Gathering);
+      assert.equal(w.aCell[a], rally, 'it waits');
+      let n = 7;
+      for (const c of coming) if (w.cArrive[c] <= sim.tick) n += 7;
+      assert.equal(w.aN[a * TROOP_TYPES + Troop.Melee], n, `week ${sim.tick - start}`);
+    }
+    week(sim);
+    assert.equal(w.aState[a], ArmyState.Marching);
+    assert.equal(w.aWait[a], 0);
+    const arrived = coming.filter((c) => !late || c !== coming[0]);
+    assert.equal(w.aN[a * TROOP_TYPES + Troop.Melee], 7 * (arrived.length + 1));
+    if (late) {
+      assert.equal(w.pend[coming[0] * TROOP_TYPES + Troop.Melee], 0, 'the late contingent went home');
+      assert.equal(w.away[coming[0] * TROOP_TYPES + Troop.Melee], 0);
+      assert.equal(w.cArmy[coming[0]], -1);
+    }
+    for (const c of arrived) assert.equal(w.away[c * TROOP_TYPES + Troop.Melee], 7);
+  }
 });
 
 test('armies march 1 travel cost a week over land they may enter, and go home after 2 years without a way', () => {
@@ -363,9 +456,102 @@ test('armies that meet fight: on the same hex, and an army stops on the hex of a
     week(sim);
     assert.equal(sim.war.wBattles[s], 1, mode);
     assert.ok(totalSoldiers(sim) < before, 'both sides lose soldiers');
-    assert.ok(!sim.war.live[a] || !sim.war.live[b], 'the loser leaves the field');
-    if (sim.war.live[a]) assert.equal(sim.war.aCell[a], next);
+    const beaten = (x: number) => !sim.war.live[x] || sim.war.aState[x] === ArmyState.Retreating;
+    assert.ok(beaten(a) || beaten(b), 'the loser retreats');
+    if (!beaten(a)) assert.equal(sim.war.aCell[a], next);
   }
+});
+
+test('a beaten army retreats with what is left to its nearest own seat and goes home there; on the way it can be attacked', () => {
+  for (const attacked of [false, true]) {
+    const f = fixture(1);
+    const { sim, att, def } = f;
+    const w = sim.war;
+    const goal = f.seats[0];
+    const s = warOn(f, goal, true);
+    const [a, ...ra] = armiesOf(sim, att);
+    const [b, ...rb] = armiesOf(sim, def);
+    for (const x of [...ra, ...rb]) disbandArmy(sim, x);
+    const field = settledOf(sim, def).find((c) => c !== goal)!;
+    assert.ok(field >= 0);
+    const n0 = armySoldiers(w, a);
+    w.aN.fill(0, b * TROOP_TYPES, b * TROOP_TYPES + TROOP_TYPES);
+    w.aN[b * TROOP_TYPES + Troop.Melee] = Math.round(1.6 * n0);
+    put(sim, a, field);
+    put(sim, b, field);
+    week(sim);
+    assert.equal(w.wBattles[s], 1);
+    assert.equal(w.live[a], 1);
+    assert.equal(w.aState[a], ArmyState.Retreating);
+    assert.ok(armySoldiers(w, a) > 0 && armySoldiers(w, a) < n0, 'with what is left');
+    assert.equal(w.aState[b], ArmyState.Marching);
+    // The way: neighbor by neighbor to a seat of its own people.
+    const path = Array.from(w.aPath.subarray(a * 64, a * 64 + w.aPathLen[a]));
+    assert.ok(path.length > 0);
+    let prev = field;
+    for (const c of path) {
+      assert.equal(hexDistance(sim.world, prev, c), 1);
+      prev = c;
+    }
+    const seat = path[path.length - 1];
+    assert.equal(sim.world.owner[seat], att);
+    assert.ok(seat === sim.civs[att]!.capital || hasSeat(sim.economy, seat));
+    if (attacked) {
+      // An enemy army waits on its way: the retreating army stops there and is attacked.
+      put(sim, b, path[0]);
+      // It stands there (as if gathering).
+      w.aState[b] = ArmyState.Gathering;
+      w.aWait[b] = 1;
+      w.aLeave[b] = sim.tick + 100;
+      w.gathering++;
+      for (let k = 0; k < 4 && w.wBattles[s] === 1; k++) {
+        week(sim);
+      }
+      assert.equal(w.wBattles[s], 2);
+      assert.equal(w.stats.retreatBattles, 1);
+      assert.ok(!w.live[a] || w.aCell[a] === path[0]);
+      continue;
+    }
+    disbandArmy(sim, b);
+    let weeks = 0;
+    while (w.live[a] && weeks < 60) {
+      week(sim);
+      weeks++;
+      if (w.live[a]) assert.ok(path.includes(w.aCell[a]), 'along its way');
+    }
+    assert.equal(w.live[a], 0, 'home at the seat');
+    assert.ok(weeks >= path.length / 2, 'at army speed');
+    assert.equal(w.stats.retreatsHome, 1);
+    for (const c of settledOf(sim, att)) assert.equal(w.away[c * TROOP_TYPES + Troop.Melee], 0, 'its soldiers count in their cells again');
+  }
+});
+
+test('retreating armies do not attack each other', () => {
+  const f = fixture(1);
+  const { sim, att, def } = f;
+  const w = sim.war;
+  const s = warOn(f, f.seats[0], true);
+  const [a] = armiesOf(sim, att);
+  const [b] = armiesOf(sim, def);
+  const field = settledOf(sim, def).find((c) => c !== f.seats[0])!;
+  let far = 0;
+  while (hexDistance(sim.world, field, far) < 3) far++;
+  put(sim, a, field);
+  put(sim, b, field);
+  for (const x of [a, b]) {
+    w.aState[x] = ArmyState.Retreating;
+    w.aPath[x * 64] = far; // not a neighbor: a way they can't walk, both stay
+    w.aPathLen[x] = 1;
+    w.aPathPos[x] = 0;
+  }
+  week(sim);
+  assert.equal(w.live[a] + w.live[b], 2);
+  assert.equal(w.aCell[a], w.aCell[b]);
+  assert.equal(w.wBattles[s], 0);
+  // A fighting army on the hex attacks.
+  w.aState[b] = ArmyState.Marching;
+  week(sim);
+  assert.equal(w.wBattles[s], 1);
 });
 
 test('a siege halves the seat’s natural supply, stops its trade and gives “Besieged” −40', () => {

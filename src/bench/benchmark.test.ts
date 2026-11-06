@@ -142,7 +142,8 @@ test('the war scenario puts peoples at war in pairs, raises armies within the ca
   for (let a = 0; a < w.live.length; a++) if (w.live[a]) perCiv.set(w.aCiv[a], (perCiv.get(w.aCiv[a]) ?? 0) + 1);
   for (const k of perCiv.values()) assert.ok(k <= WAR.maxArmies, `${k} armies of one people`);
   assert.ok(w.armies <= WAR.worldArmies);
-  assert.ok(w.armies >= 3 * w.wars, `${w.armies} armies in ${w.wars} wars`);
+  // One army per side and raise (it gathers at its rally point): two per war at the declaration.
+  assert.ok(w.armies >= 2 * w.wars, `${w.armies} armies in ${w.wars} wars`);
   const sieges = w.siege.reduce((n, v) => n + v, 0);
   assert.ok(sieges >= w.wars - 1 && sieges >= 2, `${sieges} sieges in ${w.wars} wars`);
   assert.equal(SCENARIOS.war.war, true);

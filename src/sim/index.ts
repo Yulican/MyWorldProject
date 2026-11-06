@@ -18,6 +18,7 @@ export { hexSatisfaction, type HexSatisfaction } from './society/satisfaction';
 export { relationsOf, type Relation } from './society/diplomacy';
 export { MIL, TROOP_NAMES, TROOP_TYPES, Troop, civMilitary, hexMilitary, soldiersAt, type CivMilitary, type HexMilitary } from './society/military';
 export {
+  ArmyState,
   END_NAMES,
   EndType,
   MAX_ARMIES,
@@ -26,6 +27,7 @@ export {
   armySoldiers,
   civTruces,
   civWar,
+  finishGathering,
   inTruce,
   warArmies,
   type ArmyInfo,
