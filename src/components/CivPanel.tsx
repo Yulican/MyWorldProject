@@ -27,10 +27,12 @@ type Props = {
   onDiplomacy: () => void;
   /** Opens the government panel. */
   onGovernment: () => void;
+  /** Opens the war panel. */
+  onWar: () => void;
 };
 
 /** Bottom panel listing the living peoples, how faith in the player develops, and the chronicle. */
-export function CivPanel({ sim, onClose, onDiplomacy, onGovernment }: Props) {
+export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onWar }: Props) {
   // The player's people first, then by size.
   const civs = livingCivilizations(sim).sort(
     (a, b) => Number(b.worshipsPlayer) - Number(a.worshipsPlayer) || b.population - a.population,
@@ -51,6 +53,9 @@ export function CivPanel({ sim, onClose, onDiplomacy, onGovernment }: Props) {
         </Pressable>
         <Pressable onPress={onDiplomacy} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
           <Text style={styles.diplomacyText}>Diplomacy ›</Text>
+        </Pressable>
+        <Pressable onPress={onWar} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
+          <Text style={styles.diplomacyText}>War ›</Text>
         </Pressable>
         <Pressable onPress={onClose} hitSlop={12} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>

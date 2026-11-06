@@ -27,6 +27,15 @@ const ANCHOR_COLOR = '#1f3b63';
 /** Flags of seats of government and capitals (world.seats). */
 const SEAT_COLOR = '#e3b23c';
 const CAPITAL_COLOR = '#b3262e';
+/** Borders between peoples at war (dashed) and the frame around a besieged seat. */
+const WAR_COLOR = '#e01e1e';
+
+/**
+ * The war as the map draws it (a copy taken with each society snapshot, see
+ * worldStore.mapWar): per people the people it is at war with (0 = none), per
+ * cell 1 while besieged.
+ */
+export type MapWar = { readonly enemy: Uint8Array; readonly siege: Uint8Array };
 
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
@@ -71,6 +80,7 @@ export function buildTerritoryOverview(
   world: World,
   colorOf: (civ: number) => string,
   terrain: WorldLayers,
+  war: MapWar,
 ): TerritoryOverview {
   const rect = terrain.overviewRect;
   const k = OVERVIEW_PX_PER_HEX / HEX_PX;
@@ -79,7 +89,7 @@ export function buildTerritoryOverview(
   const picture = createPicture((canvas) => {
     canvas.scale(k, k);
     canvas.translate(-rect.x, -rect.y);
-    drawTerritory(canvas, world, all, colorOf);
+    drawTerritory(canvas, world, all, colorOf, war);
   }, size);
   const image = drawAsImageFromPicture(picture, size);
   if (!image) throw new Error('Could not render the territory overview.');
@@ -88,14 +98,15 @@ export function buildTerritoryOverview(
 
 /**
  * A fingerprint of everything a territory tile shows (owners and their
- * colors, dot sizes, city icons, ruins, roads). Equal fingerprints draw the same image, so a new
- * society snapshot only re-renders tiles that actually look different.
+ * colors, dot sizes, city icons, ruins, roads, open and war borders, sieges). Equal fingerprints draw
+ * the same image, so a new society snapshot only re-renders tiles that actually look different.
  */
 export function territoryTileSignature(
   world: World,
   chunk: number,
   chunkCols: number,
   colorOf: (civ: number) => string,
+  war: MapWar,
 ): number {
   let h = 0x811c9dc5;
   const mix = (v: number) => {
@@ -114,6 +125,8 @@ export function territoryTileSignature(
       mix(dotSize(world.population[c]));
       mix(cityLevel(world.buildings[c]));
       mix(openEdges(world, c, owner));
+      mix(warEdges(world, c, owner, war));
+      mix(war.siege[c]);
       mix(world.harbors[c]);
       mix(world.seats[c]);
       const color = colorOf(owner);
@@ -135,6 +148,18 @@ function openEdges(world: World, c: number, owner: number): number {
   return mask;
 }
 
+/** Bit d set when the hex's border towards direction d faces the people its owner is at war with (red, dashed). */
+function warEdges(world: World, c: number, owner: number, war: MapWar): number {
+  const enemy = war.enemy[owner];
+  if (enemy === 0) return 0;
+  let mask = 0;
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = world.neighbors[c * DIRECTION_COUNT + d];
+    if (nb >= 0 && world.owner[nb] === enemy) mask |= 1 << d;
+  }
+  return mask;
+}
+
 /** Dashes along a border edge that is open: start and end as shares of the edge, flat so drawing allocates nothing. */
 const DASHES = [0, 0.3, 0.45, 0.55, 0.7, 1];
 
@@ -145,21 +170,23 @@ export function renderTerritoryTile(
   chunkCols: number,
   pxPerUnit: number,
   colorOf: (civ: number) => string,
+  war: MapWar,
 ): SkImage | null {
   const settled = tileCells(world, chunk, chunkCols).some(({ cells }) =>
     cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0 || world.ruins[c] !== 0),
   );
   if (!settled) return null;
-  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf)]);
+  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf, war)]);
 }
 
 /**
  * A tint and a border per civilization, roads, a dot per tribe sized by
  * population, a city icon per settlement with buildings, and a ruin icon on
- * free hexes with ruins. Each hex draws its half of a road (center to edge),
- * so roads join across tiles and the map wrap.
+ * free hexes with ruins. Borders towards a people at war are red and dashed,
+ * besieged seats get a red frame. Each hex draws its half of a road (center
+ * to edge), so roads join across tiles and the map wrap.
  */
-function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string) {
+function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string, war: MapWar) {
   const tints = new Map<number, SkPathBuilder>();
   const borders = new Map<number, SkPathBuilder>();
   const dots = new Map<number, SkPathBuilder>();
@@ -168,6 +195,8 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   const outlines = Skia.PathBuilder.Make();
   const ruins = Skia.PathBuilder.Make();
   const anchors = Skia.PathBuilder.Make();
+  const warLines = Skia.PathBuilder.Make();
+  let wars = 0;
   // Flag poles go with the outlines; the pennants are only drawn on tiles that have seats.
   const seatFlags = Skia.PathBuilder.Make();
   const capitalFlags = Skia.PathBuilder.Make();
@@ -212,15 +241,24 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     // opened our borders to them.
     const r = HEX_PX * 0.88;
     const open = openEdges(world, c, owner);
+    const hostile = warEdges(world, c, owner, war);
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
       if (nb >= 0 && world.owner[nb] === owner) continue;
       const [ax, ay, bx, by] = EDGE_CORNERS[d];
-      const border = pathFor(borders, owner);
       const x0 = x + ax * r;
       const y0 = y + ay * r;
       const dx = (bx - ax) * r;
       const dy = (by - ay) * r;
+      if (hostile & (1 << d)) {
+        for (let k = 0; k < DASHES.length; k += 2) {
+          warLines.moveTo(x0 + dx * DASHES[k], y0 + dy * DASHES[k]);
+          warLines.lineTo(x0 + dx * DASHES[k + 1], y0 + dy * DASHES[k + 1]);
+        }
+        wars++;
+        continue;
+      }
+      const border = pathFor(borders, owner);
       if (open & (1 << d)) {
         for (let k = 0; k < DASHES.length; k += 2) {
           border.moveTo(x0 + dx * DASHES[k], y0 + dy * DASHES[k]);
@@ -232,6 +270,10 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       }
     }
 
+    if (war.siege[c]) {
+      addHex(warLines, x, y, HEX_PX * 0.7);
+      wars++;
+    }
     if (world.harbors[c]) addAnchor(anchors, world, c, x, y);
     if (world.seats[c] === 2) {
       addFlag(outlines, capitalFlags, x, y, true);
@@ -254,6 +296,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   for (const [civ, path] of tints) canvas.drawPath(path.detach(), sharedFillPaint(withAlpha(colorOf(civ), 0.28)));
   canvas.drawPath(roads.detach(), sharedStrokePaint(ROAD_COLOR, HEX_PX * 0.1));
   for (const [civ, path] of borders) canvas.drawPath(path.detach(), sharedStrokePaint(colorOf(civ), HEX_PX * 0.12));
+  if (wars > 0) canvas.drawPath(warLines.detach(), sharedStrokePaint(WAR_COLOR, HEX_PX * 0.14));
   canvas.drawPath(rim.detach(), sharedFillPaint('#1b1b1b'));
   canvas.drawPath(ruins.detach(), sharedFillPaint(RUIN_COLOR));
   for (const [civ, path] of dots) canvas.drawPath(path.detach(), sharedFillPaint(colorOf(civ)));

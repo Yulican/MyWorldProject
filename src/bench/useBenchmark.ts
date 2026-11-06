@@ -5,6 +5,7 @@ import { perfEvents } from '../state/perfStats';
 import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
+import { declareWarsEverywhere } from './declareWars';
 import { empowerGovernment } from './empowerGovernment';
 import { openDiplomacy } from './openDiplomacy';
 import { stirUnrest } from './stirUnrest';
@@ -64,7 +65,9 @@ export function useBenchmark(controller: { current: MapController | null }) {
               ? openDiplomacy
               : setup.government
                 ? empowerGovernment
-                : undefined;
+                : setup.war
+                  ? declareWarsEverywhere
+                  : undefined;
       advanceYears(setup.years, prepare);
       setStatus({ running: true, scenario, world, swipe: 0, failed: results.filter((r) => !r.pass).length });
       await delay(WORLD_SETTLE_MS);

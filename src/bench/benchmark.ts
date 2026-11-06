@@ -12,11 +12,22 @@
  * every settlement trades (openTrade.ts), where every people opened its
  * borders to every other and trades freely (dashed borders, merchants
  * abroad; openDiplomacy.ts), and where seats of government and government
- * buildings stand everywhere (flags, government traders, soldiers; empowerGovernment.ts).
+ * buildings stand everywhere (flags, government traders, soldiers; empowerGovernment.ts),
+ * and where all peoples are at war in pairs, their armies out and the
+ * attackers besieging their goal seats (army markers, siege frames, red
+ * dashed war borders; declareWars.ts).
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government',
-  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean; diplomacy?: boolean; government?: boolean }
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war',
+  {
+    years: number;
+    buildings?: boolean;
+    unrest?: boolean;
+    trade?: boolean;
+    diplomacy?: boolean;
+    government?: boolean;
+    war?: boolean;
+  }
 > = {
   young: { years: 0 },
   aged: { years: 300 },
@@ -25,6 +36,7 @@ export const SCENARIOS: Record<
   trade: { years: 300, trade: true },
   diplomacy: { years: 300, diplomacy: true },
   government: { years: 300, government: true },
+  war: { years: 300, war: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 

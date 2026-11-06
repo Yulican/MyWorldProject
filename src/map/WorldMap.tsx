@@ -25,6 +25,7 @@ import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { countEvent, recordMapBuild } from '../state/perfStats';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
+import { buildArmyPicture, type ArmyMarkers } from './armyLayer';
 import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
 import {
@@ -32,6 +33,7 @@ import {
   renderTerritoryTile,
   TERRITORY_TILE_RESOLUTION,
   territoryTileSignature,
+  type MapWar,
 } from './territoryLayers';
 import { TileImages } from './tileImages';
 import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
@@ -58,6 +60,14 @@ export type TerritorySource = {
   subscribe: (listener: () => void) => () => void;
   getVersion: () => number;
   civColor: (civ: number) => string;
+  /** Wars and sieges as of the current snapshot (red dashed borders, siege frames). */
+  war: MapWar;
+  /** Army markers: their own store, as armies move weekly, between snapshots. */
+  armies: {
+    subscribe: (listener: () => void) => () => void;
+    getVersion: () => number;
+    markers: ArmyMarkers;
+  };
 };
 
 /** Drives the map from code, for the performance benchmark. */
@@ -349,6 +359,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
               />
             ))}
             <TileLayer world={world} layers={layers} listener={tileListener} territory={territory} view={lastView} />
+            <ArmyLayer world={world} mapWidth={mapWidth} territory={territory} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -421,9 +432,9 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
       new TileImages(
         (chunk, px) => {
           countEvent('territoryTiles');
-          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor);
+          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor, territory.war);
         },
-        (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor),
+        (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor, territory.war),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
         onReady,
       ),
@@ -437,7 +448,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
   const overviewFor = (version: number): SkImage => {
     if (overview.current?.version !== version) {
       const t0 = performance.now();
-      const built = buildTerritoryOverview(world, territory.civColor, layers);
+      const built = buildTerritoryOverview(world, territory.civColor, layers, territory.war);
       recordMapBuild(performance.now() - t0);
       countEvent('territoryOverviews');
       overview.current = { version, image: built.overview };
@@ -548,6 +559,33 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
     }, set);
   }
 
+  return <Picture picture={picture} />;
+});
+
+/**
+ * The army markers above the territories: one small picture (at most 32
+ * markers, both map copies), recorded on the JS thread when an army moved
+ * and handed to the UI thread, which only replays it in a frame.
+ */
+const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { world: World; mapWidth: number; territory: TerritorySource }) {
+  const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
+  useEffect(() => {
+    const { armies, civColor } = territory;
+    let seen = -1;
+    const update = () => {
+      const version = armies.getVersion();
+      if (version === seen) return;
+      seen = version;
+      const next = buildArmyPicture(world, armies.markers, civColor, mapWidth);
+      countEvent('armyPictures');
+      scheduleOnUI((p: SkPicture) => {
+        'worklet';
+        picture.value = p;
+      }, next);
+    };
+    update();
+    return armies.subscribe(update);
+  }, [world, mapWidth, territory, picture]);
   return <Picture picture={picture} />;
 });
 

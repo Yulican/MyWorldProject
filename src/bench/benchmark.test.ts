@@ -44,6 +44,7 @@ test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=unrest'), 'unrest');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=trade'), 'trade');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=government'), 'government');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=war'), 'war');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });
 
@@ -126,4 +127,23 @@ test('the government scenario puts up seats and government buildings everywhere 
   assert.ok(traders > 2 * seatsBefore, `${traders} government traders`);
   assert.ok(sim.government.tripCount > 0, 'government traders on their way');
   assert.equal(SCENARIOS.government.government, true);
+});
+
+test('the war scenario puts peoples at war in pairs, raises armies within the caps and besieges the goals', async () => {
+  const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR, WAR } = await import('../sim');
+  const { declareWarsEverywhere } = await import('./declareWars');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  declareWarsEverywhere(sim);
+  const w = sim.war;
+  const civs = livingCivilizations(sim).length;
+  assert.ok(w.wars >= Math.floor(civs / 2) - 1 && w.wars >= 2, `${w.wars} wars among ${civs} peoples`);
+  const perCiv = new Map<number, number>();
+  for (let a = 0; a < w.live.length; a++) if (w.live[a]) perCiv.set(w.aCiv[a], (perCiv.get(w.aCiv[a]) ?? 0) + 1);
+  for (const k of perCiv.values()) assert.ok(k <= WAR.maxArmies, `${k} armies of one people`);
+  assert.ok(w.armies <= WAR.worldArmies);
+  assert.ok(w.armies >= 3 * w.wars, `${w.armies} armies in ${w.wars} wars`);
+  const sieges = w.siege.reduce((n, v) => n + v, 0);
+  assert.ok(sieges >= w.wars - 1 && sieges >= 2, `${sieges} sieges in ${w.wars} wars`);
+  assert.equal(SCENARIOS.war.war, true);
 });

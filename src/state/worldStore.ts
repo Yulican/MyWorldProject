@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import {
+  MAX_ARMIES,
   TICKS_PER_YEAR,
   createSimulation,
   generateWorld,
@@ -28,6 +29,22 @@ const DEFAULT_SPEED = 1;
 const FRAME_BUDGET_MS = [0, 3, 4, 8] as const;
 /** React is told about new map snapshots at most this often. */
 const NOTIFY_INTERVAL_MS = 400;
+/** The map's army markers follow the armies (they move weekly) at most this often. */
+const ARMY_INTERVAL_MS = 250;
+
+/**
+ * The war as the territory layer draws it, copied from the simulation with
+ * every map snapshot (so borders, sieges and owners always match): per people
+ * the people it is at war with (0 = none), per cell 1 while besieged.
+ * Arrays are reused; only a new world replaces `siege`.
+ */
+export const mapWar = { enemy: new Uint8Array(256), siege: new Uint8Array(0) };
+
+/**
+ * The map's army markers: `count` armies, each on hex `cell[i]` with the
+ * people `civ[i]` (its flag color). Filled in place, never reallocated.
+ */
+export const mapArmies = { count: 0, cell: new Int32Array(MAX_ARMIES), civ: new Uint8Array(MAX_ARMIES), version: 0 };
 
 export type GameState = {
   sim: Simulation | null;
@@ -60,10 +77,48 @@ let lastFrameTime = 0;
 let pendingTicks = 0;
 let lastNotify = 0;
 let notifiedSnapshot = -1;
+let lastArmyNotify = 0;
+let syncedWar = -1;
+const armyListeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Takes the war data the territory layer draws (with a new map snapshot). */
+function syncMapWar(sim: Simulation) {
+  const w = sim.war;
+  if (mapWar.siege.length !== sim.world.cellCount) mapWar.siege = new Uint8Array(sim.world.cellCount);
+  mapWar.enemy.set(w.enemy.subarray(0, mapWar.enemy.length));
+  mapWar.siege.set(w.siege);
+}
+
+/** Takes the armies' places and peoples; tells the map's army layer only if a marker changed. */
+function syncArmies(sim: Simulation) {
+  const w = sim.war;
+  syncedWar = w.version;
+  let k = 0;
+  let changed = false;
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (!w.live[a]) continue;
+    if (mapArmies.cell[k] !== w.aCell[a] || mapArmies.civ[k] !== w.aCiv[a]) changed = true;
+    mapArmies.cell[k] = w.aCell[a];
+    mapArmies.civ[k] = w.aCiv[a];
+    k++;
+  }
+  if (k !== mapArmies.count) changed = true;
+  mapArmies.count = k;
+  if (!changed) return;
+  mapArmies.version++;
+  armyListeners.forEach((l) => l());
+}
+
+/** A new map snapshot is shown: the war data and armies come along. */
+function syncSnapshot(sim: Simulation) {
+  notifiedSnapshot = sim.snapshotVersion;
+  syncMapWar(sim);
+  syncArmies(sim);
 }
 
 function publish(changes: Partial<GameState>) {
@@ -74,7 +129,7 @@ function publish(changes: Partial<GameState>) {
 /** Generates a new world (random seed if none given), settles the tribe and starts the clock. */
 export function createNewWorld(seed: number = randomSeed()): World {
   const sim = createSimulation(generateWorld({ seed }));
-  notifiedSnapshot = sim.snapshotVersion;
+  syncSnapshot(sim);
   pendingTicks = 0;
   const seen = state.chronicleDialogs ? nextShown(sim, 0) : sim.chronicle.length;
   publish({
@@ -97,7 +152,7 @@ export function advanceYears(years: number, prepare?: (sim: Simulation) => void)
   if (!sim) return;
   for (let t = 0; t < years * TICKS_PER_YEAR && !sim.gameOver; t++) stepSimulation(sim);
   prepare?.(sim);
-  notifiedSnapshot = sim.snapshotVersion;
+  syncSnapshot(sim);
   publish(state.chronicleDialogs ? {} : { chronicleSeen: sim.chronicle.length });
 }
 
@@ -152,6 +207,15 @@ export const snapshotStore = {
   getVersion: (): number => notifiedSnapshot,
 };
 
+/** The army markers as an external store: notifies when a marker moved, appeared or is gone (see mapArmies). */
+export const armyStore = {
+  subscribe: (listener: () => void): (() => void) => {
+    armyListeners.add(listener);
+    return () => armyListeners.delete(listener);
+  },
+  getVersion: (): number => mapArmies.version,
+};
+
 function startClock() {
   if (frame !== null) return;
   lastFrameTime = performance.now();
@@ -187,11 +251,20 @@ function runFrame(now: number) {
 
   // A new snapshot (complete after its tick) gets a frame of its own.
   if (betweenTicks && sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
-    notifiedSnapshot = sim.snapshotVersion;
+    syncSnapshot(sim);
     lastNotify = now;
+    lastArmyNotify = now;
     countEvent('snapshots');
     pendingTicks += ticksPerSecond * seconds;
     publish({});
+    if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
+    return;
+  }
+  // Moved armies get a frame of their own too (the map records their markers again).
+  if (betweenTicks && sim.war.version !== syncedWar && now - lastArmyNotify >= ARMY_INTERVAL_MS) {
+    lastArmyNotify = now;
+    pendingTicks += ticksPerSecond * seconds;
+    syncArmies(sim);
     if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
     return;
   }
@@ -227,7 +300,7 @@ function runFrame(now: number) {
   if (state.chronicleDialogs && sim.part === TickPart.Start) {
     const seen = nextShown(sim, state.chronicleSeen);
     if (seen < sim.chronicle.length) {
-      notifiedSnapshot = sim.snapshotVersion;
+      syncSnapshot(sim);
       pendingTicks = 0;
       publish({ chronicleSeen: seen, speed: 0, resumeSpeed: speed });
       return;

@@ -4,11 +4,13 @@ import {
   BIOMES,
   DEPOSITS,
   GOOD_NAMES,
+  MAX_ARMIES,
   MIL,
   RESOURCE_COUNT,
   RESOURCE_NAMES,
   SUPPLY_NAMES,
   TROOP_NAMES,
+  armySoldiers,
   elevationMeters,
   hasFreshWater,
   resourceCapacityTerms,
@@ -42,6 +44,8 @@ type Props = {
   military?: HexMilitary | null;
   /** Strategic goods without comfort (iron, flint) in stock; horses show with the luxury goods. */
   strategic?: readonly StrategicStock[] | null;
+  /** The war here: siege or occupation, armies on the hex (see hexWar). */
+  war?: readonly string[];
   onClose: () => void;
 };
 
@@ -49,7 +53,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, war, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -74,6 +78,7 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
   const highlights = [
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     civName ? settlementName(standing) : null,
+    war && war.length > 0 ? war[0] : null,
     military && military.soldiers > 0 ? `${military.soldiers} soldier${military.soldiers > 1 ? 's' : ''}` : null,
     !civName && ruins > 0 ? `${ruins} ruin${ruins > 1 ? 's' : ''}` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
@@ -262,6 +267,17 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
             </>
           )}
 
+          {war && war.length > 0 && (
+            <>
+              <Text style={styles.section}>War</Text>
+              {war.map((line, i) => (
+                <Text key={i} style={styles.note}>
+                  {line}
+                </Text>
+              ))}
+            </>
+          )}
+
           {military && military.troops.length > 0 && (
             <>
               <Text style={styles.section}>Soldiers {military.soldiers}</Text>
@@ -343,6 +359,25 @@ export function strategicStock(sim: Simulation, cell: number): StrategicStock[] 
     if (stock >= 0.5) goods.push({ name: GOOD_NAMES[FIRST_LUXURY + k], stock });
   }
   return goods;
+}
+
+/** The war on a hex, e.g. "Besieged by the Arani", "Army of the Arani (40 soldiers)"; empty in peace. */
+export function hexWar(sim: Simulation, cell: number): string[] {
+  const w = sim.war;
+  const lines: string[] = [];
+  const name = (civ: number) => sim.civs[civ]?.name ?? 'a vanished people';
+  if (w.siege[cell]) {
+    const owner = sim.world.owner[cell];
+    const s = w.civWar[owner];
+    const occupied = s >= 0 && w.wGoal[s] === cell && w.wOccupied[s] === 1;
+    const by = w.enemy[owner];
+    lines.push(`${occupied ? 'Occupied' : 'Besieged'}${by !== 0 ? ` by the ${name(by)}` : ''}`);
+  }
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (!w.live[a] || w.aCell[a] !== cell) continue;
+    lines.push(`Army of the ${name(w.aCiv[a])} (${Math.round(armySoldiers(w, a))} soldiers)`);
+  }
+  return lines;
 }
 
 /** The strategic good a troop type needs, lower case ("iron"). */
