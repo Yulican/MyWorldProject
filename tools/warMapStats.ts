@@ -1,24 +1,25 @@
 // War phase 3 (war on the map: declaration, armies, march, battles, peace, siege, occupation, conquest;
 // "Design Documents/Requirement Krieg.md", sections 4 to 6) over many worlds, against the state without war.
 // Usage: npx tsx tools/warMapStats.ts [worlds=24] [years=300,500] [variant ...]
-//   A variant is "name:key=value,key=value" with the numbers of WAR (src/sim/society/war.ts), e.g.
-//   npx tsx tools/warMapStats.ts 24 300,500 "base:phase=0" "3a:phase=1" "3ab:phase=2" "malus80:phase=2,siegeMalus=80"
-//   phase=0 is the state without war. Without variants: base, 3a, 3ab.
+//   A variant is "name:key=value,key=value" with the numbers of WAR (src/sim/society/war.ts), the world size
+//   (width, height) or TRIBE_TUNING (maxCivs, tribeChance), e.g.
+//   npx tsx tools/warMapStats.ts 24 300,500 "nowar:enabled=0" "war" "malus80:siegeMalus=80"
+//   "old world:width=64,height=64,maxCivs=6,tribeChance=0.02". Without variants: nowar, war (the game's defaults).
 // Prints per year: growth, population, trade, diplomacy, uprisings, wars (started, ongoing, duration, end types,
 // battles, armies), sieges and occupations (seat satisfaction at the first check), territory, and the cost of the
 // war parts per week and year plus ms per simulated year.
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { PAIRS } from '../src/sim/society/diplomacy';
-import { WAR, END_NAMES } from '../src/sim/society/war';
+import { EndType, WAR, WAR_PROFILE } from '../src/sim/society/war';
 import { TRIBE_TUNING } from '../src/sim/society/simulation';
 
 const worlds = Number(process.argv[2] ?? 24);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
-const variants = process.argv.slice(4).length ? process.argv.slice(4) : ['base:phase=0', '3a:phase=1', '3ab:phase=2'];
+const variants = process.argv.slice(4).length ? process.argv.slice(4) : ['nowar:enabled=0', 'war'];
 const defaults = { ...WAR };
 const tribeDefaults = { ...TRIBE_TUNING };
-// Non-WAR keys of a variant: map size in hex columns/rows (default 64 x 64), maxCivs and chance of new tribes (TRIBE_TUNING).
+// Non-WAR keys of a variant: map size in hex columns/rows (default: the game's), maxCivs and chance of new tribes (TRIBE_TUNING).
 const WORLD_KEYS = ['width', 'height'];
 
 type Row = Record<string, number>;
@@ -65,7 +66,7 @@ function measure(sim: Simulation, ms: number, year: number): Row {
   let soldiers = 0;
   for (let c = 0; c < w.cellCount * 3; c++) soldiers += sim.military.soldiers[c];
   const ended = st.ended.reduce((a, b) => a + b, 0);
-  const dur = st.durations.reduce((a, b) => a + b, 0) / Math.max(1, st.durations.length) / TICKS_PER_YEAR;
+  const dur = st.durationSum / Math.max(1, ended) / TICKS_PER_YEAR;
   const row: Row = {
     settlements,
     people: sim.pop.count,
@@ -91,20 +92,20 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'est.: whole people annexed': st.estAnnexed,
     'wars ongoing': sim.war.wars,
     'blocked by army cap': st.capBlocked,
-    'annex-blocked goals (checks)': st.annexBlocked,
     'war duration (years)': dur,
-    'end: goal conquered': st.ended[0],
-    'end: defender gave up': st.ended[1],
-    'end: exhaustion': st.ended[2],
-    'end: attacker gave up': st.ended[3],
-    'end: people vanished': st.ended[4],
+    'end: defender gave up': st.ended[EndType.GaveUp],
+    'end: attacker gave up': st.ended[EndType.AttackerGaveUp],
+    'end: exhaustion': st.ended[EndType.Exhausted],
+    'end: goal lost otherwise': st.ended[EndType.GoalLost],
+    'end: people vanished': st.ended[EndType.Vanished],
     'wars without any battle': st.noBattle,
     'wars vs a people with 0 strength': st.zeroDefender,
-    'wars at ratio > 2.5': st.ratioHigh,
     'conquest roads built': st.roads,
     'battles': st.battles,
     'battles per war': st.battles / Math.max(1, st.declared),
-    'battle wins attacker/defender/draw': st.battleWins[0] + st.battleWins[1] * 0.001,
+    'battles won by attacker': st.battleWinsAtt,
+    'battles won by defender': st.battleWinsDef,
+    'battles drawn': st.battleDraws,
     'armies raised': st.armiesRaised,
     'armies at once (max)': st.maxArmies,
     'wars at once (max)': st.maxWars,
@@ -126,7 +127,6 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'ms year war (mean)': st.yearMs / Math.max(1, st.yearCalls),
     msPerYear: ms / year,
   };
-  void ended;
   return row;
 }
 
@@ -136,7 +136,7 @@ for (const spec of variants) {
   Object.assign(WAR, defaults);
   Object.assign(TRIBE_TUNING, tribeDefaults);
   const worldOpt: Record<string, number> = {};
-  WAR.profile = 1;
+  WAR_PROFILE.clock = () => performance.now();
   for (const kv of rest.split(',').filter(Boolean)) {
     const [k, v] = kv.split('=');
     if (WORLD_KEYS.includes(k)) worldOpt[k] = Number(v);
@@ -174,4 +174,3 @@ for (const year of checkpoints) {
     console.log([k.padEnd(38), ...cells].join(' '));
   }
 }
-void END_NAMES;

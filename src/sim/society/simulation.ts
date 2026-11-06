@@ -1,4 +1,4 @@
-import { advanceWar, createWar, reconcileWar, runWarYear, type WarState } from './war';
+import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYear, type WarState } from './war';
 import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
@@ -132,8 +132,8 @@ const GOOD_LAND_PEOPLE = 150;
 /** Years of population and believer counts kept for the trend chart. */
 const HISTORY_YEARS = 200;
 const NEW_TRIBE_MIN_YEAR = 25;
-const NEW_TRIBE_CHANCE = 0.02;
-/** Tool-tunable (tools/warMapStats.ts): soft cap on living peoples and yearly chance of a new tribe; defaults are the game's. */
+const NEW_TRIBE_CHANCE = 0.03;
+/** Soft cap on living peoples and yearly chance of a new tribe; mutable only for tools/warMapStats.ts comparisons. */
 export const TRIBE_TUNING = { maxCivs: MAX_CIVS, tribeChance: NEW_TRIBE_CHANCE };
 /** New tribes appear at least this many hexes from anyone else. */
 const NEW_TRIBE_DISTANCE = 8;
@@ -1330,7 +1330,7 @@ function tryNewTribe(sim: Simulation): void {
  * around its capital; a breakaway starts halfway between that and its
  * parent's culture.
  */
-function foundCivilization(
+export function foundCivilization(
   sim: Simulation,
   origin: CivOrigin,
   capital: number,
@@ -1359,6 +1359,7 @@ function foundCivilization(
   if (parent) civ.parentName = parent.name;
   addMood(civ, 'A new people', MOOD_NEW_PEOPLE, sim.tick);
   resetCivRelations(sim.diplomacy, id);
+  resetWarCiv(sim, id);
   sim.civs[id] = civ;
   return civ;
 }

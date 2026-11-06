@@ -234,7 +234,7 @@ test('diplomacy keeps the history the same for the same seed', () => {
 });
 
 test('the simulation uses the same trust and danger the diplomacy panel explains', () => {
-  const sim = createSimulation(generateWorld({ seed: 16 }));
+  const sim = createSimulation(generateWorld({ seed: 25 }));
   runYears(sim, 160);
   let pairs = 0;
   for (const a of livingCivilizations(sim)) {

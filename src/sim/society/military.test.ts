@@ -34,7 +34,7 @@ function place(sim: Simulation, cell: number, type: number): void {
  * least `minPop` people each. `seat` is their district's seat.
  */
 function setup(minPop = 60): { sim: Simulation; a: number; b: number; seat: number; civ: number } {
-  const sim = createSimulation(generateWorld({ seed: 3 }));
+  const sim = createSimulation(generateWorld({ seed: 5 }));
   runYears(sim, 150);
   const { economy, government: gov, military: m } = sim;
   const n = sim.world.cellCount;

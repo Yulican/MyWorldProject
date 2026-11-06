@@ -4,9 +4,9 @@ import type { CivMood } from './satisfaction';
 
 /**
  * Soft cap: new tribes only appear while fewer civilizations than this live
- * (design doc: 3–6). Peoples splitting off can go beyond it.
+ * (design doc: up to 9). Peoples splitting off can go beyond it.
  */
-export const MAX_CIVS = 6;
+export const MAX_CIVS = 9;
 /**
  * Hard limit of civilizations alive at once: ids 1..MAX_CIV_ID are stored per
  * inhabitant and per hex in Uint8Arrays; an extinct civilization's id is

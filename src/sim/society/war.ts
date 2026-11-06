@@ -5,187 +5,201 @@ import { isWaterBiome } from '../world/biomes';
 import { Deposit } from '../world/deposits';
 import { addRoad, stepCost } from '../world/roads';
 import { BUILDINGS } from './buildings';
-import { BO, BI, Defense, fightBattle, remainingSoldiers } from './battle';
+import { BO, BI, Defense, fightBattle, givesUp, remainingSoldiers } from './battle';
 import { PAIRS, addMood, rebuildPartners } from './diplomacy';
 import { updateCellSupply } from './economy';
 import { MIL, TROOP_TYPES } from './military';
 import { SupplyKind, type SupplyModifier } from './supply';
-import { satisfactionTarget } from './satisfaction';
+import { hasSeat, satisfactionTarget } from './satisfaction';
 import { changeCiv, record, type Simulation } from './simulation';
 
-// War on the map, phase 3 ("Design Documents/Requirement Krieg.md", sections
-// 4 to 6). PROTOTYPE for the simulation step: all numbers are named in WAR so
-// tools/warMapStats.ts can compare values; WAR.phase switches it (0 = off,
-// 1 = 3a: declaration, armies, march, battles, peace; 2 = 3a + 3b: siege,
-// occupation, conquest).
+// War on the map, phase 3a + 3b ("Design Documents/Requirement Krieg.md",
+// sections 4 to 6): declaration, armies, march, battles, siege, occupation,
+// peace and conquest.
 //
-// Soldiers stay in the cells' counters (military.soldiers), so pay, training
-// and strength work as before; an army is a counter of the soldiers "away"
-// from their cells (`away`), with a position. Casualties are taken from the
-// cells. All state lives in typed arrays; only the few wars are objects.
+// Soldiers stay in their cells' counters (military.soldiers), so pay,
+// training and strength work as before; an army is a count of soldiers
+// "away" from their cells (`away`), with a position. Casualties are taken
+// from the cells. Everything lives in flat typed arrays: wars by war slot,
+// armies by army slot, the rest by cell or people. Nothing is allocated per
+// week; the yearly part allocates nothing either, events (a war's start, a
+// siege, its end) only a few strings and the siege's supply modifiers.
+//
+// Simplifications kept from the simulated prototype (the numbers were chosen
+// with them):
+// - Armies gather instantly at their anchor (the settlements with the most
+//   soldiers), and the cells' soldiers are counted to the nearest anchor.
+// - A beaten army is gone: its soldiers go home (a draw sends both home).
+// - Only the war goal is besieged; armies march to it and nowhere else, so no
+//   other seat is ever occupied (nothing to give back at the war's end).
+// - Relief armies and the garrison of the seat fight as one pool; the 30 %
+//   left at home do not fight.
+// - "Besieged" halves the natural food, water and space of the seat's
+//   settlement (a supply modifier), not its buildings' share.
+// - Exhaustion counts the attacker's successes (battles won, occupation).
+// - Armies are raised again each year while the war runs (up to the caps).
+// - Defenders are also made to fight in the last month before every yearly
+//   check after an occupation.
+// - The attacker withdraws from a siege when its besiegers fall below half of
+//   their largest strength there.
 
+/**
+ * The war's numbers (chosen by the user after the simulation, section 14/15).
+ * Mutable only so tools/warMapStats.ts can compare values; `enabled` = 0 is
+ * the tools' baseline without war.
+ */
 export const WAR = {
-  /** 0 = off, 1 = 3a, 2 = 3a + 3b. */
-  phase: 0,
-  /** Declaration: own strength at least this times the target's; yearly chance; own strength floor (prototype addition, 0 = none). */
+  /** 1 = wars happen (the game); 0 only for the stats tools' baseline. */
+  enabled: 1,
+  /** Declaration: own strength at least this times the target's; yearly chance per people with a candidate. */
   ratio: 2,
   chance: 0.1,
-  minStrength: 0,
-  /** Added to both strengths in the ratio test (like MIL.floor in the danger formula; 0 = the plain 2x of the requirement). */
-  ratioFloor: 0,
-  /** Neighbors: 0 = settlements on adjacent hexes, else the people's travel-cost distance (diplomacy) at most this. */
-  nbDist: 0,
-  /** Benefit of a district: inhabitants + resPop per deposit (x resMul for strategic and luxury deposits), divided by 1 + defenders. */
+  /** Benefit of a district: inhabitants + resPop per deposit (x resMul for strategic and luxury deposits), divided by 1 + its defenders. */
   resPop: 50,
   resMul: 2,
-  /** 1: the goal district must not be the target's only district (no annexation of a whole people). */
-  noAnnex: 0,
-  /** Armies: share of the soldiers that march, armies per people, armies worldwide, smallest army, anchor spacing (hexes). */
+  /** Armies: share of a people's soldiers that march, armies per people and worldwide, smallest army, hexes between anchors. */
   sendShare: 0.7,
   maxArmies: 4,
   worldArmies: 32,
   armyMin: 5,
   anchorSep: 3,
-  /** Travel cost per week, cost limit of the path search, weeks without a path before an army goes home. */
+  /** Travel cost per week (a road hex costs mostly 0.5), cost limit of the path search, weeks without a path before an army goes home. */
   speed: 1,
   fieldMax: 25,
   noTargetWeeks: 104,
-  /** Raise armies again each year while the war runs (1 = yes). */
-  reraise: 1,
-  /** 3b: satisfaction part of a besieged seat, weeks of siege before occupation, weeks between checks, 1 = check the target instead of the value. */
+  /** Siege: "Besieged" satisfaction part, weeks of siege before the first occupation check, weeks between checks. */
   siegeMalus: 40,
   occupyWeeks: 104,
   occupyCheck: 52,
-  occupyOnTarget: 0,
-  /** 3b: the attacker withdraws below this share of its siege strength; defenders must fight this many weeks before an occupation check. */
+  /** The attacker withdraws below this share of its largest siege strength; defenders must fight this many weeks before a check. */
   withdraw: 0.5,
   forceWeeks: 4,
-  /** Share of the seat's treasury the conqueror gets, the "Conquered" part and the years it fades over. */
+  /** Share of the seat's treasury the conqueror keeps, the "Conquered" part and the years it fades over. */
   loot: 0.5,
   conqMalus: 15,
   conqYears: 10,
-  /** A side gives up below this share of the enemy's strength (battle.ts: BATTLE.giveUp = 0.4; 0 = never), and not before the war is this many weeks old. */
-  giveUp: 0.4,
-  giveUpAfter: 0,
-  /** Defender's give-up: 0 = whenever below giveUp (old), 1 = only once the goal seat is occupied, then only below giveUp (the war goes on, occupied, until give-up, exhaustion or relief), 2 = occupying the goal ends the war at once, no give-up before. The attacker always gives up at the plain rule. */
-  giveUpMode: 1,
-  /** 1: a road joins a conquered district to the conqueror's land (else it is cut off from the conqueror's capital and becomes a people of its own). */
-  conquestRoad: 1,
-  /** Exhaustion (years without attacker success), truce (years), trust lost after the war. */
+  /** Years without an attacker success before peace by exhaustion, years of truce, trust lost after the war. */
   exhaustYears: 10,
   truceYears: 20,
   trustLoss: 30,
-  /** Measure the time of the war parts (tools). */
-  profile: 0,
 };
 
-const MAX_ARMIES = 64;
-const MAX_WARS = 24;
+/** Army slots (WAR.worldArmies is at most this). */
+export const MAX_ARMIES = 32;
+/** War slots. A war needs room for two armies when it starts, so 16 would do; spare slots for wars whose armies are gone. */
+export const MAX_WARS = 24;
 const TICKS_PER_YEAR = 52;
-export const EndType = { Conquered: 0, GaveUp: 1, Exhausted: 2, AttackerGaveUp: 3, Vanished: 4 } as const;
-export const END_NAMES = ['goal conquered', 'defender gave up', 'exhaustion', 'attacker gave up', 'a people vanished'] as const;
 
-export type War = {
-  att: number;
-  def: number;
-  goal: number;
-  start: number;
-  /** Tick of the attacker's last success (battle won, occupation). */
-  lastGain: number;
-  /** Tick the siege began (-1 = none) and the besiegers' strength then. */
-  siegeStart: number;
-  siegeStrength: number;
-  fieldAtt: Float32Array | null;
-  fieldDef: Float32Array | null;
-  battles: number;
-  sieges: number;
-  maxArmies: number;
-  slot: number;
-  /** 3b, giveUpMode 1: the goal seat is occupied (the siege goes on). */
-  occupied: boolean;
-  /** The target arose from the attacker (secession, revolution, cut-off land). */
-  splinter: boolean;
-};
+/** How a war ended. */
+export const EndType = { GaveUp: 0, AttackerGaveUp: 1, Exhausted: 2, GoalLost: 3, Vanished: 4 } as const;
+export const END_NAMES = ['defender gave up', 'attacker gave up', 'exhaustion', 'goal lost', 'a people vanished'] as const;
+
+/** Tools only: a clock to measure the war parts (e.g. performance.now); the simulation never reads the time itself. */
+export const WAR_PROFILE: { clock: (() => number) | null } = { clock: null };
 
 export type WarStats = {
   declared: number;
+  /** Declarations that found no room for armies (WAR.worldArmies). */
   capBlocked: number;
-  /** Targets that could not be a goal for lack of a second district (WAR.noAnnex). */
-  annexBlocked: number;
-  ended: number[];
-  weeks: number;
+  /** Ended wars per EndType. */
+  ended: Int32Array;
   battles: number;
-  warBattles: number;
+  battleWinsAtt: number;
+  battleWinsDef: number;
+  battleDraws: number;
   armiesRaised: number;
   maxArmies: number;
   maxWars: number;
   sieges: number;
   occupations: number;
-  /** Siege ends: relief won, attacker withdrew, attacker gone. */
+  /** Siege ends: no besieger left, attacker withdrew. */
   siegeBroken: number;
   siegeWithdrew: number;
-  /** First occupation check of a siege: seat satisfaction below 0 / checks / sum of satisfaction, and the same for the target. */
+  /** First occupation checks: count, below 0, sum of satisfaction and of target; satisfaction at siege starts. */
   checks: number;
   checksBelow: number;
   checkSat: number;
   checkTarget: number;
   startSat: number;
-  /** Cells and people that changed hands, annexations of a whole people. */
+  /** Settlements and people that changed hands, whole peoples annexed, conquest roads. */
   cellsMoved: number;
   peopleMoved: number;
   annexed: number;
-  /** Weekly and yearly cost of the war parts (WAR.profile), ms: sum, calls, worst. */
+  roads: number;
+  /** Wars without any battle, against a people without strength. */
+  noBattle: number;
+  zeroDefender: number;
+  /** Against established peoples (not the attacker's own splinters). */
+  estDeclared: number;
+  estBattles: number;
+  estSieges: number;
+  estOcc: number;
+  estAnnexed: number;
+  /** Summed durations (ticks) of the ended wars. */
+  durationSum: number;
+  /** WAR_PROFILE: ms of the weekly and yearly parts (sum, calls, worst). */
   weekMs: number;
   weekCalls: number;
   weekMax: number;
   yearMs: number;
   yearCalls: number;
   yearMax: number;
-  battleWins: number[];
-  /** Wars that ended without any battle, wars against a people without soldiers, wars declared at a strength ratio above 2.5. */
-  noBattle: number;
-  zeroDefender: number;
-  ratioHigh: number;
-  /** Wars whose goal district was not a neighbor-adjacent... (unused) / roads built for conquered districts. */
-  roads: number;
-  /** Wars (and their battles, sieges, occupations, annexed peoples) against established peoples, i.e. not against the attacker's own splinters. */
-  estDeclared: number;
-  estBattles: number;
-  estSieges: number;
-  estOcc: number;
-  estAnnexed: number;
-  /** Durations (ticks) of the wars that ended, and their battles. */
-  durations: number[];
 };
 
 export type WarState = {
   /** Per people: the people it is at war with, 0 = none (one war per people). */
   enemy: Uint8Array;
-  slots: (War | null)[];
+  /** Per people: its war's slot, -1 = none. */
+  civWar: Int8Array;
+  /** Running wars, and per war slot: */
   wars: number;
-  /** Armies (struct of arrays); `live` marks used entries. */
+  wLive: Uint8Array;
+  wAtt: Uint8Array;
+  wDef: Uint8Array;
+  /** The goal seat (cell). */
+  wGoal: Int32Array;
+  wStart: Int32Array;
+  /** Tick of the attacker's last success (battle won, occupation). */
+  wLastGain: Int32Array;
+  /** Tick the siege of the goal began (-1 = none), the besiegers' largest strength. */
+  wSiegeStart: Int32Array;
+  wSiegeStrength: Float64Array;
+  /** 1 once the goal seat is occupied (the siege goes on until the war ends or relief breaks it). */
+  wOccupied: Uint8Array;
+  /** 1 if the defender arose from the attacker (secession, revolution). Statistics only. */
+  wSplinter: Uint8Array;
+  wBattles: Uint16Array;
+  /** End queued during the week (EndType), -1 = none. */
+  wEnd: Int8Array;
+  /** Travel cost to the goal per war, side (0 attacker, 1 defender) and cell: ((war * 2 + side) * cellCount + cell). */
+  field: Float32Array;
+  /** Armies, per army slot: */
+  armies: number;
   live: Uint8Array;
   aCiv: Uint8Array;
   aWar: Int8Array;
   aCell: Int32Array;
+  /** Soldiers and strategic factor per troop type (army * TROOP_TYPES + type). */
   aN: Float64Array;
   aFac: Float64Array;
+  /** Travel cost walked towards the next hex, weeks without a path. */
   aProg: Float32Array;
   aIdle: Uint16Array;
   /** Tick the army reached its hex. */
   aSince: Int32Array;
-  armies: number;
   /** Per cell and troop type: soldiers of the cell that are in an army. */
   away: Uint16Array;
-  /** Per cell: 1 while the settlement is besieged; its satisfaction part (negative). */
+  /** Per cell: 1 while the settlement is besieged, and its "Besieged" part (negative). */
   siege: Uint8Array;
   siegeValue: Float32Array;
-  /** Per cell: the "Conquered" part, the tick it began and the years it fades over (satisfaction.ts). */
+  /** Per cell: the "Conquered" part, the tick it began and the tick it is gone (it fades linearly; satisfaction.ts). */
   conqValue: Float32Array;
   conqTick: Int32Array;
-  conqYears: number;
-  /** Truce end tick per ordered pair key a * PAIRS + b (min, max). */
-  truce: Map<number, number>;
+  conqUntil: Int32Array;
+  /** Per people pair (min * PAIRS + max): tick the truce ends (0 = none). */
+  truce: Int32Array;
+  /** Counts every change the map shows (armies moved, wars, sieges). */
+  version: number;
   rng: Rng;
   stats: WarStats;
 };
@@ -193,34 +207,48 @@ export type WarState = {
 export function createWar(seed: number, cellCount: number): WarState {
   return {
     enemy: new Uint8Array(PAIRS),
-    slots: new Array<War | null>(MAX_WARS).fill(null),
+    civWar: new Int8Array(PAIRS).fill(-1),
     wars: 0,
+    wLive: new Uint8Array(MAX_WARS),
+    wAtt: new Uint8Array(MAX_WARS),
+    wDef: new Uint8Array(MAX_WARS),
+    wGoal: new Int32Array(MAX_WARS).fill(-1),
+    wStart: new Int32Array(MAX_WARS),
+    wLastGain: new Int32Array(MAX_WARS),
+    wSiegeStart: new Int32Array(MAX_WARS).fill(-1),
+    wSiegeStrength: new Float64Array(MAX_WARS),
+    wOccupied: new Uint8Array(MAX_WARS),
+    wSplinter: new Uint8Array(MAX_WARS),
+    wBattles: new Uint16Array(MAX_WARS),
+    wEnd: new Int8Array(MAX_WARS).fill(-1),
+    field: new Float32Array(MAX_WARS * 2 * cellCount),
+    armies: 0,
     live: new Uint8Array(MAX_ARMIES),
     aCiv: new Uint8Array(MAX_ARMIES),
-    aWar: new Int8Array(MAX_ARMIES),
+    aWar: new Int8Array(MAX_ARMIES).fill(-1),
     aCell: new Int32Array(MAX_ARMIES),
     aN: new Float64Array(MAX_ARMIES * TROOP_TYPES),
     aFac: new Float64Array(MAX_ARMIES * TROOP_TYPES),
     aProg: new Float32Array(MAX_ARMIES),
     aIdle: new Uint16Array(MAX_ARMIES),
     aSince: new Int32Array(MAX_ARMIES),
-    armies: 0,
     away: new Uint16Array(cellCount * TROOP_TYPES),
     siege: new Uint8Array(cellCount),
     siegeValue: new Float32Array(cellCount),
     conqValue: new Float32Array(cellCount),
     conqTick: new Int32Array(cellCount),
-    conqYears: WAR.conqYears,
-    truce: new Map(),
+    conqUntil: new Int32Array(cellCount),
+    truce: new Int32Array(PAIRS * PAIRS),
+    version: 0,
     rng: createRng(deriveSeed(seed, 'war')),
     stats: {
       declared: 0,
       capBlocked: 0,
-      annexBlocked: 0,
-      ended: [0, 0, 0, 0, 0],
-      weeks: 0,
+      ended: new Int32Array(END_NAMES.length),
       battles: 0,
-      warBattles: 0,
+      battleWinsAtt: 0,
+      battleWinsDef: 0,
+      battleDraws: 0,
       armiesRaised: 0,
       maxArmies: 0,
       maxWars: 0,
@@ -236,186 +264,228 @@ export function createWar(seed: number, cellCount: number): WarState {
       cellsMoved: 0,
       peopleMoved: 0,
       annexed: 0,
+      roads: 0,
+      noBattle: 0,
+      zeroDefender: 0,
+      estDeclared: 0,
+      estBattles: 0,
+      estSieges: 0,
+      estOcc: 0,
+      estAnnexed: 0,
+      durationSum: 0,
       weekMs: 0,
       weekCalls: 0,
       weekMax: 0,
       yearMs: 0,
       yearCalls: 0,
       yearMax: 0,
-      battleWins: [0, 0, 0],
-      noBattle: 0,
-      zeroDefender: 0,
-      ratioHigh: 0,
-      roads: 0,
-      estDeclared: 0,
-      estBattles: 0,
-      estSieges: 0,
-      estOcc: 0,
-      estAnnexed: 0,
-      durations: [],
     },
   };
-}
-
-/** Whether a side of strength `own` gives up against `enemy` in a war of this age (BATTLE.giveUp as WAR.giveUp). */
-function gaveUp(own: number, enemy: number, age: number): boolean {
-  return WAR.giveUp > 0 && age >= WAR.giveUpAfter && own < WAR.giveUp * enemy;
-}
-
-/** Whether the defender gives up now. */
-function defenderGaveUp(war: War, sd: number, sa: number, age: number): boolean {
-  if (WAR.giveUpMode !== 0 && WAR.phase >= 2 && !war.occupied) return false;
-  return gaveUp(sd, sa, age);
 }
 
 const pairKey = (a: number, b: number) => (a < b ? a * PAIRS + b : b * PAIRS + a);
 
 /** Whether a new war between a and b is barred by a truce. */
 export function inTruce(sim: Simulation, a: number, b: number): boolean {
-  const until = sim.war.truce.get(pairKey(a, b));
-  return until !== undefined && sim.tick < until;
+  return sim.tick < sim.war.truce[pairKey(a, b)];
+}
+
+/** A new people takes id `id` (a reused one): no war, no truce from the old people of that id. */
+export function resetWarCiv(sim: Simulation, id: number): void {
+  const w = sim.war;
+  const s = w.civWar[id];
+  if (s >= 0 && w.wLive[s]) endWar(sim, s, EndType.Vanished);
+  w.enemy[id] = 0;
+  w.civWar[id] = -1;
+  for (let b = 0; b < PAIRS; b++) w.truce[pairKey(id, b)] = 0;
 }
 
 // ---------------------------------------------------------------------------
 // Yearly: end checks, new armies, declarations
 
 let adj = new Uint8Array(0);
-let benefit = new Float64Array(0);
+const candidate = new Uint8Array(PAIRS);
 let bPop = new Float64Array(0);
 let bRes = new Float64Array(0);
 let bDef = new Float64Array(0);
 let bBorder = new Uint8Array(0);
 let bCells = new Uint16Array(0);
+let touched = new Int32Array(0);
+/** Deposits that count resMul times: luxury deposits (a building harvests them) and the strategic iron and flint. */
 const DOUBLE_DEPOSIT = new Uint8Array(32);
 {
   for (const b of BUILDINGS) if (b.deposit) DOUBLE_DEPOSIT[b.deposit] = 1;
+  DOUBLE_DEPOSIT[Deposit.Iron] = 1;
+  DOUBLE_DEPOSIT[Deposit.Flint] = 1;
 }
 
-/** The war's yearly part (week of simulation.ts: WAR_WEEK): end checks and new armies for the running wars, then declarations. */
+function clockStart(): number {
+  return WAR_PROFILE.clock ? WAR_PROFILE.clock() : 0;
+}
+
+/** The war's yearly part (simulation.ts: WAR_WEEK): end checks and new armies for the running wars, then declarations. */
 export function runWarYear(sim: Simulation): void {
-  if (WAR.phase === 0) return;
-  const t0 = WAR.profile ? performance.now() : 0;
+  if (!WAR.enabled) return;
+  const t0 = clockStart();
   const w = sim.war;
-  w.conqYears = WAR.conqYears;
   const m = sim.military;
   for (let s = 0; s < MAX_WARS; s++) {
-    const war = w.slots[s];
-    if (!war) continue;
-    if (!sim.civs[war.att] || !sim.civs[war.def]) {
-      endWar(sim, war, EndType.Vanished);
-      continue;
-    }
-    if (sim.world.owner[war.goal] !== war.def || sim.cellPop[war.goal] === 0) {
-      endWar(sim, war, EndType.Exhausted);
-      continue;
-    }
-    const sa = m.strength[war.att] ?? 0;
-    const sd = m.strength[war.def] ?? 0;
-    const age = sim.tick - war.start;
-    if (defenderGaveUp(war, sd, sa, age)) endWar(sim, war, EndType.GaveUp);
-    else if (gaveUp(sa, sd, age)) endWar(sim, war, EndType.AttackerGaveUp);
-    else if (sim.tick - war.lastGain >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, war, EndType.Exhausted);
-    else if (WAR.reraise) {
-      reraise(sim, war, war.att);
-      reraise(sim, war, war.def);
+    if (!w.wLive[s]) continue;
+    if (endIfGone(sim, s)) continue;
+    const att = w.wAtt[s];
+    const def = w.wDef[s];
+    const sa = m.strength[att] ?? 0;
+    const sd = m.strength[def] ?? 0;
+    if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
+    else if (givesUp(sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
+    else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
+    else {
+      reraise(sim, s, att);
+      reraise(sim, s, def);
     }
   }
   declareWars(sim);
-  if (WAR.profile) {
-    const dt = performance.now() - t0;
+  if (WAR_PROFILE.clock) {
+    const dt = WAR_PROFILE.clock() - t0;
     w.stats.yearMs += dt;
     w.stats.yearCalls++;
     if (dt > w.stats.yearMax) w.stats.yearMax = dt;
   }
 }
 
-function countArmies(w: WarState, war: War, civ: number): number {
+/** The defender gives up only once the goal seat is occupied, and then below BATTLE.giveUp of the attacker's strength. */
+function defenderGivesUp(w: WarState, s: number, sd: number, sa: number): boolean {
+  return w.wOccupied[s] === 1 && givesUp(sd, sa);
+}
+
+/** Ends war `s` if a side vanished or the goal seat is no longer the defender's; true if it ended. */
+function endIfGone(sim: Simulation, s: number): boolean {
+  const w = sim.war;
+  if (!sim.civs[w.wAtt[s]] || !sim.civs[w.wDef[s]]) {
+    endWar(sim, s, EndType.Vanished);
+    return true;
+  }
+  const goal = w.wGoal[s];
+  if (sim.world.owner[goal] !== w.wDef[s] || sim.cellPop[goal] === 0) {
+    endWar(sim, s, EndType.GoalLost);
+    return true;
+  }
+  return false;
+}
+
+function countArmies(w: WarState, s: number, civ: number): number {
   let k = 0;
-  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === war.slot && w.aCiv[a] === civ) k++;
+  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === civ) k++;
   return k;
 }
 
-function reraise(sim: Simulation, war: War, civ: number): void {
-  const w = sim.war;
-  const have = countArmies(w, war, civ);
-  const room = Math.min(WAR.maxArmies - have, WAR.worldArmies - w.armies);
-  if (room > 0) raiseArmies(sim, war, civ, room);
+function worldRoom(w: WarState): number {
+  return Math.min(WAR.worldArmies, MAX_ARMIES) - w.armies;
 }
 
-function declareWars(sim: Simulation): void {
+function reraise(sim: Simulation, s: number, civ: number): void {
   const w = sim.war;
-  const dip = sim.diplomacy;
-  const m = sim.military;
+  const room = Math.min(WAR.maxArmies - countArmies(w, s, civ), worldRoom(w));
+  if (room > 0) raiseArmies(sim, s, civ, room);
+}
+
+/** Fills `adj` (civs x civs): 1 where two peoples have settlements on adjacent hexes (a common border). */
+function findNeighbors(sim: Simulation): number {
   const world = sim.world;
   const owner = world.owner;
   const n = world.cellCount;
-  if (WAR.nbDist === 0) {
-    if (adj.length !== PAIRS * PAIRS) adj = new Uint8Array(PAIRS * PAIRS);
-    adj.fill(0);
-    for (let c = 0; c < n; c++) {
-      const a = owner[c];
-      if (a === 0 || sim.cellPop[c] === 0) continue;
-      for (let d = 0; d < DIRECTION_COUNT; d++) {
-        const nb = world.neighbors[c * DIRECTION_COUNT + d];
-        if (nb < 0) continue;
-        const b = owner[nb];
-        if (b !== 0 && b !== a && sim.cellPop[nb] > 0) adj[a * PAIRS + b] = 1;
-      }
+  const civs = sim.civs.length;
+  if (adj.length < civs * civs) adj = new Uint8Array(civs * civs);
+  adj.fill(0, 0, civs * civs);
+  for (let c = 0; c < n; c++) {
+    const a = owner[c];
+    if (a === 0 || sim.cellPop[c] === 0) continue;
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      if (nb < 0) continue;
+      const b = owner[nb];
+      if (b !== 0 && b !== a && sim.cellPop[nb] > 0) adj[a * civs + b] = 1;
     }
   }
-  for (let a = 1; a < sim.civs.length; a++) {
-    if (!sim.civs[a] || w.enemy[a] !== 0) continue;
-    const sa = m.strength[a] ?? 0;
-    if (sa < WAR.minStrength) continue;
-    // Candidates: free neighbors we outweigh.
-    let any = false;
-    let mask: Uint8Array | null = null;
-    for (let b = 1; b < sim.civs.length; b++) {
-      if (b === a || !sim.civs[b] || w.enemy[b] !== 0 || !dip.known[a * PAIRS + b]) continue;
-      const near = WAR.nbDist === 0 ? adj[a * PAIRS + b] === 1 : dip.distance[a * PAIRS + b] <= WAR.nbDist;
-      if (!near || inTruce(sim, a, b)) continue;
-      if (sa + WAR.ratioFloor < WAR.ratio * ((m.strength[b] ?? 0) + WAR.ratioFloor)) continue;
-      (mask ??= new Uint8Array(sim.civs.length))[b] = 1;
-      any = true;
-    }
-    if (!any) continue;
-    if (w.rng() >= WAR.chance) continue;
-    if (WAR.worldArmies - w.armies < 2) {
+  return civs;
+}
+
+/** Marks in `candidate` the peoples `a` may declare war on (findNeighbors first); false if none or `a` is at war. */
+function markCandidates(sim: Simulation, a: number, civs: number): boolean {
+  const w = sim.war;
+  const m = sim.military;
+  candidate.fill(0);
+  if (!sim.civs[a] || w.enemy[a] !== 0) return false;
+  const sa = m.strength[a] ?? 0;
+  let any = false;
+  for (let b = 1; b < civs; b++) {
+    if (b === a || !sim.civs[b] || w.enemy[b] !== 0 || adj[a * civs + b] === 0 || inTruce(sim, a, b)) continue;
+    if (sa < WAR.ratio * (m.strength[b] ?? 0)) continue;
+    candidate[b] = 1;
+    any = true;
+  }
+  return any;
+}
+
+/**
+ * The peoples `a` may declare war on now: neighbors (a common border), at
+ * least WAR.ratio times weaker, not in a truce with it, and neither side at war.
+ */
+export function warTargets(sim: Simulation, a: number): number[] {
+  const civs = findNeighbors(sim);
+  const list: number[] = [];
+  if (markCandidates(sim, a, civs)) for (let b = 1; b < civs; b++) if (candidate[b]) list.push(b);
+  return list;
+}
+
+/** Every people with a target rolls WAR.chance; the winner picks its goal and declares. */
+function declareWars(sim: Simulation): void {
+  const w = sim.war;
+  const civs = findNeighbors(sim);
+  for (let a = 1; a < civs; a++) {
+    if (!markCandidates(sim, a, civs) || w.rng() >= WAR.chance) continue;
+    if (worldRoom(w) < 2 || w.wars >= MAX_WARS) {
       w.stats.capBlocked++;
       continue;
     }
-    const goal = chooseGoal(sim, a, mask!);
-    if (goal < 0) continue;
-    startWar(sim, a, owner[goal], goal);
+    const goal = chooseGoal(sim, a, candidate);
+    if (goal >= 0) startWar(sim, a, goal);
   }
 }
 
-/** The seat to take: among the districts of the marked peoples with settlements next to the attacker's, the one with the largest benefit; -1 if none. */
-function chooseGoal(sim: Simulation, att: number, mask: Uint8Array): number {
+/**
+ * The seat to take: among the districts of the candidate peoples that hold a
+ * settlement next to one of the attacker's, the one with the largest benefit
+ * (inhabitants + WAR.resPop per deposit, strategic and luxury deposits
+ * WAR.resMul times, divided by 1 + the district's soldiers); -1 if none.
+ * Ties: the lower seat cell.
+ */
+export function chooseGoal(sim: Simulation, att: number, candidates: Uint8Array): number {
   const gov = sim.government;
   const world = sim.world;
   const owner = world.owner;
   const n = world.cellCount;
-  if (benefit.length !== n) {
-    benefit = new Float64Array(n);
+  if (bPop.length !== n) {
     bPop = new Float64Array(n);
     bRes = new Float64Array(n);
     bDef = new Float64Array(n);
     bBorder = new Uint8Array(n);
     bCells = new Uint16Array(n);
+    touched = new Int32Array(n);
   }
-  const touched: number[] = [];
+  const soldiers = sim.military.soldiers;
+  let count = 0;
   for (let c = 0; c < n; c++) {
     const b = owner[c];
-    if (b === 0 || !mask[b] || sim.cellPop[c] === 0) continue;
+    if (b === 0 || !candidates[b] || sim.cellPop[c] === 0) continue;
     const d = gov.district[c];
     if (d < 0 || owner[d] !== b || sim.cellPop[d] === 0) continue;
-    if (bCells[d] === 0) touched.push(d);
+    if (bCells[d] === 0) touched[count++] = d;
     bCells[d]++;
     bPop[d] += sim.cellPop[c];
     const dep = world.deposit[c];
-    if (dep !== 0) bRes[d] += DOUBLE_DEPOSIT[dep] || dep === Deposit.Iron || dep === Deposit.Flint ? WAR.resMul : 1;
-    bDef[d] += sim.military.soldiers[c * TROOP_TYPES] + sim.military.soldiers[c * TROOP_TYPES + 1] + sim.military.soldiers[c * TROOP_TYPES + 2];
+    if (dep !== 0) bRes[d] += DOUBLE_DEPOSIT[dep] ? WAR.resMul : 1;
+    bDef[d] += soldiers[c * TROOP_TYPES] + soldiers[c * TROOP_TYPES + 1] + soldiers[c * TROOP_TYPES + 2];
     if (!bBorder[d]) {
       for (let k = 0; k < DIRECTION_COUNT; k++) {
         const nb = world.neighbors[c * DIRECTION_COUNT + k];
@@ -424,34 +494,17 @@ function chooseGoal(sim: Simulation, att: number, mask: Uint8Array): number {
           break;
         }
       }
-      if (!bBorder[d] && WAR.nbDist > 0) bBorder[d] = 1;
     }
-  }
-  // Districts per people (annexation rule).
-  const districts = new Map<number, number>();
-  if (WAR.noAnnex) {
-    const all = new Map<number, Set<number>>();
-    for (let c = 0; c < n; c++) {
-      const b = owner[c];
-      if (b === 0 || !mask[b] || sim.cellPop[c] === 0 || gov.district[c] < 0) continue;
-      let set = all.get(b);
-      if (!set) all.set(b, (set = new Set()));
-      set.add(gov.district[c]);
-    }
-    for (const [b, set] of all) districts.set(b, set.size);
   }
   let best = -1;
   let bestValue = -1;
-  for (const d of touched) {
+  for (let i = 0; i < count; i++) {
+    const d = touched[i];
     if (bBorder[d]) {
-      if (WAR.noAnnex && (districts.get(owner[d]) ?? 0) < 2) {
-        sim.war.stats.annexBlocked++;
-      } else {
-        const v = (bPop[d] + WAR.resPop * bRes[d]) / (1 + bDef[d]);
-        if (v > bestValue) {
-          bestValue = v;
-          best = d;
-        }
+      const v = (bPop[d] + WAR.resPop * bRes[d]) / (1 + bDef[d]);
+      if (v > bestValue || (v === bestValue && d < best)) {
+        bestValue = v;
+        best = d;
       }
     }
     bCells[d] = 0;
@@ -463,47 +516,50 @@ function chooseGoal(sim: Simulation, att: number, mask: Uint8Array): number {
   return best;
 }
 
-function startWar(sim: Simulation, att: number, def: number, goal: number): void {
+/**
+ * `att` declares war on the owner of seat `goal` (no checks: declareWars and
+ * tests). Borders and agreements end, both sides raise their armies. Returns
+ * the war's slot, -1 if there is no room.
+ */
+export function startWar(sim: Simulation, att: number, goal: number): number {
   const w = sim.war;
-  const slot = w.slots.indexOf(null);
-  if (slot < 0) return;
-  const war: War = {
-    att,
-    def,
-    goal,
-    start: sim.tick,
-    lastGain: sim.tick,
-    siegeStart: -1,
-    siegeStrength: 0,
-    fieldAtt: null,
-    fieldDef: null,
-    battles: 0,
-    sieges: 0,
-    maxArmies: 0,
-    slot,
-    occupied: false,
-    splinter: sim.civs[def]!.parentName === sim.civs[att]!.name,
-  };
-  w.slots[slot] = war;
+  const def = sim.world.owner[goal];
+  let s = 0;
+  while (s < MAX_WARS && w.wLive[s]) s++;
+  if (s === MAX_WARS || def === 0 || def === att || w.enemy[att] !== 0 || w.enemy[def] !== 0) return -1;
+  w.wLive[s] = 1;
+  w.wAtt[s] = att;
+  w.wDef[s] = def;
+  w.wGoal[s] = goal;
+  w.wStart[s] = sim.tick;
+  w.wLastGain[s] = sim.tick;
+  w.wSiegeStart[s] = -1;
+  w.wSiegeStrength[s] = 0;
+  w.wOccupied[s] = 0;
+  w.wSplinter[s] = sim.civs[def]!.parentName === sim.civs[att]!.name ? 1 : 0;
+  w.wBattles[s] = 0;
+  w.wEnd[s] = -1;
   w.wars++;
   w.enemy[att] = def;
   w.enemy[def] = att;
-  w.stats.declared++;
-  if (!war.splinter) w.stats.estDeclared++;
-  const sdef = sim.military.strength[def] ?? 0;
-  if (sdef <= 0) w.stats.zeroDefender++;
-  if (sdef * 2.5 < (sim.military.strength[att] ?? 0)) w.stats.ratioHigh++;
-  if (w.wars > w.stats.maxWars) w.stats.maxWars = w.wars;
+  w.civWar[att] = s;
+  w.civWar[def] = s;
+  w.version++;
+  const st = w.stats;
+  st.declared++;
+  if (!w.wSplinter[s]) st.estDeclared++;
+  if ((sim.military.strength[def] ?? 0) <= 0) st.zeroDefender++;
+  if (w.wars > st.maxWars) st.maxWars = w.wars;
   sever(sim, att, def);
-  const each = Math.min(WAR.maxArmies, Math.floor((WAR.worldArmies - w.armies) / 2));
-  war.fieldAtt = travelField(sim, goal, att, def);
-  war.fieldDef = travelField(sim, goal, def, att);
-  raiseArmies(sim, war, att, each);
-  raiseArmies(sim, war, def, each);
+  planMarch(sim, s);
+  const each = Math.min(WAR.maxArmies, Math.floor(worldRoom(w) / 2));
+  raiseArmies(sim, s, att, each);
+  raiseArmies(sim, s, def, each);
   record(sim, `The ${sim.civs[att]!.name} declared war on the ${sim.civs[def]!.name}.`, goal);
+  return s;
 }
 
-/** Borders closed, agreements gone, peace and trust start over (a war's start). */
+/** Borders closed, free trade, migration and trade agreements gone, peace starts over. */
 function sever(sim: Simulation, a: number, b: number): void {
   const dip = sim.diplomacy;
   const k = a * PAIRS + b;
@@ -517,7 +573,9 @@ function sever(sim: Simulation, a: number, b: number): void {
   dip.migration[k2] = 0;
   dip.peace[k] = 0;
   dip.peace[k2] = 0;
-  dip.agreements = dip.agreements.filter((t) => !((t.a === a && t.b === b) || (t.a === b && t.b === a)));
+  let any = false;
+  for (const t of dip.agreements) if ((t.a === a && t.b === b) || (t.a === b && t.b === a)) any = true;
+  if (any) dip.agreements = dip.agreements.filter((t) => !((t.a === a && t.b === b) || (t.a === b && t.b === a)));
   rebuildPartners(dip);
   if (changed) dip.bordersVersion++;
 }
@@ -526,119 +584,153 @@ function sever(sim: Simulation, a: number, b: number): void {
 // Armies
 
 let takeBuf = new Int32Array(0);
+let raiseCells = new Int32Array(0);
+const sold = new Float64Array(TROOP_TYPES);
+const cov = new Float64Array(TROOP_TYPES);
+const anchorBuf = new Int32Array(MAX_ARMIES);
+const slotBuf = new Int32Array(MAX_ARMIES);
 
-/** Raises up to `room` armies of `civ` from 70 % of its soldiers (never more than that share away at a time). */
-function raiseArmies(sim: Simulation, war: War, civ: number, room: number): void {
+function weightOf(c: number): number {
+  return takeBuf[c * TROOP_TYPES] + takeBuf[c * TROOP_TYPES + 1] + takeBuf[c * TROOP_TYPES + 2];
+}
+
+/**
+ * Raises up to `room` armies of `civ` for war `s` from WAR.sendShare of its
+ * soldiers (never more than that share away at a time). Anchors are the cells
+ * with the most soldiers to send, at least WAR.anchorSep hexes apart if
+ * possible; every cell sends its soldiers to the nearest anchor's army.
+ */
+function raiseArmies(sim: Simulation, s: number, civ: number, room: number): void {
   const w = sim.war;
   const m = sim.military;
   const n = sim.world.cellCount;
   const owner = sim.world.owner;
   if (room <= 0) return;
-  if (takeBuf.length !== n * TROOP_TYPES) takeBuf = new Int32Array(n * TROOP_TYPES);
-  const sold = [0, 0, 0];
-  const cov = [0, 0, 0];
-  const cells: number[] = [];
+  if (takeBuf.length !== n * TROOP_TYPES) {
+    takeBuf = new Int32Array(n * TROOP_TYPES);
+    raiseCells = new Int32Array(n);
+  }
+  sold.fill(0);
+  cov.fill(0);
+  let cells = 0;
   let total = 0;
   for (let c = 0; c < n; c++) {
     if (owner[c] !== civ) continue;
     let any = 0;
     for (let t = 0; t < TROOP_TYPES; t++) {
       const i = c * TROOP_TYPES + t;
-      const s = m.soldiers[i];
-      if (s === 0) {
+      const k = m.soldiers[i];
+      if (k === 0) {
         takeBuf[i] = 0;
         continue;
       }
-      sold[t] += s;
-      if (m.covered[i]) cov[t] += s;
-      const take = Math.max(0, Math.floor(WAR.sendShare * s) - w.away[i]);
+      sold[t] += k;
+      if (m.covered[i]) cov[t] += k;
+      const take = Math.max(0, Math.floor(WAR.sendShare * k) - w.away[i]);
       takeBuf[i] = take;
       any += take;
     }
     if (any > 0) {
-      cells.push(c);
+      raiseCells[cells++] = c;
       total += any;
     }
   }
-  const k = Math.min(room, Math.floor(total / WAR.armyMin));
+  const k = Math.min(room, Math.floor(total / WAR.armyMin), MAX_ARMIES);
   if (k <= 0) return;
-  // Anchors: the cells with the most soldiers to take, spaced apart.
-  const weight = (c: number) => takeBuf[c * 3] + takeBuf[c * 3 + 1] + takeBuf[c * 3 + 2];
-  cells.sort((x, y) => weight(y) - weight(x) || x - y);
-  const anchors: number[] = [];
-  for (let sep = WAR.anchorSep; anchors.length < k && sep >= 0; sep = sep > 0 ? sep - 1 : -1) {
-    for (const c of cells) {
-      if (anchors.length >= k) break;
-      if (anchors.includes(c)) continue;
-      let ok = true;
-      for (const a of anchors) {
-        if (hexDistance(sim.world, c, a) < sep) {
-          ok = false;
-          break;
+  // Anchors: greedily the cell with the most soldiers to send that keeps `sep` from the anchors so far; then closer.
+  let anchors = 0;
+  for (let sep = WAR.anchorSep; anchors < k && sep >= 0; sep--) {
+    while (anchors < k) {
+      let best = -1;
+      let bestW = -1;
+      for (let i = 0; i < cells; i++) {
+        const c = raiseCells[i];
+        const wt = weightOf(c);
+        if (wt <= bestW) continue;
+        let ok = true;
+        for (let j = 0; j < anchors; j++) {
+          if (anchorBuf[j] === c || hexDistance(sim.world, c, anchorBuf[j]) < sep) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          best = c;
+          bestW = wt;
         }
       }
-      if (ok) anchors.push(c);
+      if (best < 0) break;
+      anchorBuf[anchors++] = best;
     }
   }
-  // One army per anchor, filled with the cells nearest to it.
-  const slots: number[] = [];
-  for (const anchor of anchors) {
+  // One army per anchor.
+  let slots = 0;
+  for (let j = 0; j < anchors; j++) {
     let a = 0;
     while (a < MAX_ARMIES && w.live[a]) a++;
     if (a === MAX_ARMIES) break;
     w.live[a] = 1;
     w.aCiv[a] = civ;
-    w.aWar[a] = war.slot;
-    w.aCell[a] = anchor;
+    w.aWar[a] = s;
+    w.aCell[a] = anchorBuf[j];
     w.aProg[a] = 0;
     w.aIdle[a] = 0;
     w.aSince[a] = sim.tick;
     for (let t = 0; t < TROOP_TYPES; t++) {
-      w.aN[a * 3 + t] = 0;
-      w.aFac[a * 3 + t] = 1 + (MIL.factor - 1) * (sold[t] > 0 ? cov[t] / sold[t] : 0);
+      w.aN[a * TROOP_TYPES + t] = 0;
+      w.aFac[a * TROOP_TYPES + t] = 1 + (MIL.factor - 1) * (sold[t] > 0 ? cov[t] / sold[t] : 0);
     }
-    slots.push(a);
+    slotBuf[slots++] = a;
     w.armies++;
     w.stats.armiesRaised++;
   }
-  if (slots.length === 0) return;
-  for (const c of cells) {
+  if (slots === 0) return;
+  for (let i = 0; i < cells; i++) {
+    const c = raiseCells[i];
     let best = 0;
     let bestD = Infinity;
-    for (let j = 0; j < slots.length; j++) {
-      const d = hexDistance(sim.world, c, w.aCell[slots[j]]);
+    for (let j = 0; j < slots; j++) {
+      const d = hexDistance(sim.world, c, w.aCell[slotBuf[j]]);
       if (d < bestD) {
         bestD = d;
         best = j;
       }
     }
-    const a = slots[best];
+    const a = slotBuf[best];
     for (let t = 0; t < TROOP_TYPES; t++) {
-      const i = c * TROOP_TYPES + t;
-      const take = takeBuf[i];
+      const idx = c * TROOP_TYPES + t;
+      const take = takeBuf[idx];
       if (take === 0) continue;
-      w.away[i] += take;
-      w.aN[a * 3 + t] += take;
+      w.away[idx] += take;
+      w.aN[a * TROOP_TYPES + t] += take;
     }
   }
-  // Drop armies that ended up empty.
-  for (const a of slots) if (w.aN[a * 3] + w.aN[a * 3 + 1] + w.aN[a * 3 + 2] <= 0) removeArmy(w, a);
-  const live = countArmies(w, war, civ) + countArmies(w, war, civ === war.att ? war.def : war.att);
-  if (live > war.maxArmies) war.maxArmies = live;
+  for (let j = 0; j < slots; j++) {
+    const a = slotBuf[j];
+    if (armySoldiers(w, a) <= 0) removeArmy(w, a);
+  }
   if (w.armies > w.stats.maxArmies) w.stats.maxArmies = w.armies;
+  w.version++;
+}
+
+/** Soldiers in army `a`. */
+export function armySoldiers(w: WarState, a: number): number {
+  return w.aN[a * TROOP_TYPES] + w.aN[a * TROOP_TYPES + 1] + w.aN[a * TROOP_TYPES + 2];
 }
 
 function removeArmy(w: WarState, a: number): void {
   if (!w.live[a]) return;
   w.live[a] = 0;
+  w.aWar[a] = -1;
   w.armies--;
+  w.version++;
 }
 
 /** The soldiers of army `a` go home (their cells count them again) and the army is gone. */
-function disbandArmy(sim: Simulation, a: number): void {
+export function disbandArmy(sim: Simulation, a: number): void {
   const w = sim.war;
   const civ = w.aCiv[a];
-  for (let t = 0; t < TROOP_TYPES; t++) takeAway(sim, civ, t, Math.round(w.aN[a * 3 + t]), false);
+  for (let t = 0; t < TROOP_TYPES; t++) takeAway(sim, civ, t, Math.round(w.aN[a * TROOP_TYPES + t]), false);
   removeArmy(w, a);
 }
 
@@ -658,112 +750,134 @@ function takeAway(sim: Simulation, civ: number, t: number, k: number, kill: bool
     w.away[i] -= x;
     k -= x;
     if (kill) {
-      const before = m.soldiers[c * 3] + m.soldiers[c * 3 + 1] + m.soldiers[c * 3 + 2];
+      const base = c * TROOP_TYPES;
+      const before = m.soldiers[base] + m.soldiers[base + 1] + m.soldiers[base + 2];
       m.soldiers[i] -= Math.min(x, m.soldiers[i]);
-      if (before > 0) m.faith[c] *= (m.soldiers[c * 3] + m.soldiers[c * 3 + 1] + m.soldiers[c * 3 + 2]) / before;
+      if (before > 0) m.faith[c] *= (m.soldiers[base] + m.soldiers[base + 1] + m.soldiers[base + 2]) / before;
     }
   }
 }
 
+/** Whether `civ` may enter land of `o` in war against `enemy`: free land, its own, the enemy's, or open to it. */
+function mayEnter(sim: Simulation, o: number, civ: number, enemy: number): boolean {
+  return o === 0 || o === civ || o === enemy || sim.diplomacy.open[o * PAIRS + civ] === 1;
+}
+
 /**
- * Cheapest travel cost from every hex to `goal` for the armies of `civ` (a
- * Dijkstra from the goal; the path of an army is found by always stepping to
- * the neighbor with the least cost to go, so it is computed once per war):
- * through free land, its own, the enemy's, and the land of peoples that
- * opened their borders to it; not over water (no ships).
+ * Cheapest travel cost from every hex to the goal for the armies of `civ`
+ * (side 0 attacker, 1 defender): a Dijkstra from the goal over land the army
+ * may enter, up to WAR.fieldMax; no water (no ships). An army steps to the
+ * neighbor with the least cost to go, so the path is found once per war.
  */
 const fieldHeap = new MinHeap(256);
-function travelField(sim: Simulation, goal: number, civ: number, enemy: number): Float32Array {
+function travelField(sim: Simulation, s: number, side: number, civ: number, enemy: number): void {
   const world = sim.world;
   const owner = world.owner;
-  const dip = sim.diplomacy;
   const n = world.cellCount;
-  const field = new Float32Array(n).fill(Infinity);
-  field[goal] = 0;
+  const field = sim.war.field;
+  const base = (s * 2 + side) * n;
+  const goal = sim.war.wGoal[s];
+  field.fill(Infinity, base, base + n);
+  field[base + goal] = 0;
   fieldHeap.push(goal, 0);
   while (fieldHeap.size > 0) {
     const c = fieldHeap.pop();
-    const here = field[c];
+    const here = field[base + c];
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[c * DIRECTION_COUNT + d];
-      if (nb < 0 || isWaterBiome(world.biome[nb])) continue;
+      if (nb < 0 || isWaterBiome(world.biome[nb]) || !mayEnter(sim, owner[nb], civ, enemy)) continue;
       const next = here + stepCost(world, c, d);
-      if (next >= field[nb] || next > WAR.fieldMax) continue;
-      field[nb] = next;
-      const o = owner[nb];
-      // An army may enter nb (later in the path) only if the land allows it; it may stand on any hex to start.
-      if (o === 0 || o === civ || o === enemy || dip.open[o * PAIRS + civ] === 1) fieldHeap.push(nb, next);
+      if (next >= field[base + nb] || next > WAR.fieldMax) continue;
+      field[base + nb] = next;
+      fieldHeap.push(nb, next);
     }
   }
-  return field;
+}
+
+/** Both sides' ways to the goal of war `s` (at the war's start; again only if the goal changed). */
+export function planMarch(sim: Simulation, s: number): void {
+  const w = sim.war;
+  travelField(sim, s, 0, w.wAtt[s], w.wDef[s]);
+  travelField(sim, s, 1, w.wDef[s], w.wAtt[s]);
+}
+
+/** Travel cost from `cell` to the goal of war `s` for its side `side` (0 attacker, 1 defender); Infinity = no path. */
+export function travelCost(sim: Simulation, s: number, side: number, cell: number): number {
+  return sim.war.field[(s * 2 + side) * sim.world.cellCount + cell];
 }
 
 // ---------------------------------------------------------------------------
 // Weekly: march, battles, siege
 
-const inp = new Float64Array(12);
+const inp = new Float64Array(BI.SIDE * 2);
 const out = new Float64Array(BO.SIZE);
 const groupA = new Int32Array(MAX_ARMIES);
 const groupB = new Int32Array(MAX_ARMIES);
-const finishing: War[] = [];
-const finishTypes: number[] = [];
 
-/** One week of war (called every tick from simulation.ts; nothing to do without wars). */
+/** One week of war (simulation.ts, every tick; nothing to do without wars). */
 export function advanceWar(sim: Simulation): void {
   const w = sim.war;
   if (w.wars === 0) return;
-  const t0 = WAR.profile ? performance.now() : 0;
-  w.stats.weeks++;
+  const t0 = clockStart();
+  for (let s = 0; s < MAX_WARS; s++) if (w.wLive[s]) endIfGone(sim, s);
   for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a]) moveArmy(sim, a);
   resolveBattles(sim);
-  if (WAR.phase >= 2) {
-    for (let s = 0; s < MAX_WARS; s++) {
-      const war = w.slots[s];
-      if (war) updateSiege(sim, war);
-    }
-  }
-  for (let i = 0; i < finishing.length; i++) endWar(sim, finishing[i], finishTypes[i]);
-  finishing.length = 0;
-  finishTypes.length = 0;
-  if (WAR.profile) {
-    const dt = performance.now() - t0;
+  for (let s = 0; s < MAX_WARS; s++) if (w.wLive[s] && w.wEnd[s] < 0) updateSiege(sim, s);
+  for (let s = 0; s < MAX_WARS; s++) if (w.wLive[s] && w.wEnd[s] >= 0) endWar(sim, s, w.wEnd[s]);
+  if (WAR_PROFILE.clock) {
+    const dt = WAR_PROFILE.clock() - t0;
     w.stats.weekMs += dt;
     w.stats.weekCalls++;
     if (dt > w.stats.weekMax) w.stats.weekMax = dt;
   }
 }
 
+/** Whether an army of the other side of war `s` than `civ` stands on `cell`. */
+function enemyAt(w: WarState, s: number, civ: number, cell: number): boolean {
+  for (let b = 0; b < MAX_ARMIES; b++) if (w.live[b] && w.aWar[b] === s && w.aCell[b] === cell && w.aCiv[b] !== civ) return true;
+  return false;
+}
+
+/**
+ * WAR.speed travel cost per week along the cheapest way to the goal. An army
+ * that meets an enemy army (shares its hex, or steps onto it) stops there to
+ * fight. Without a path for WAR.noTargetWeeks it goes home.
+ */
 function moveArmy(sim: Simulation, a: number): void {
   const w = sim.war;
-  const war = w.slots[w.aWar[a]]!;
+  const s = w.aWar[a];
+  const goal = w.wGoal[s];
+  const civ = w.aCiv[a];
   let cur = w.aCell[a];
-  if (cur === war.goal) return;
-  const field = w.aCiv[a] === war.att ? war.fieldAtt! : war.fieldDef!;
-  if (field[cur] === Infinity) {
+  if (cur === goal || enemyAt(w, s, civ, cur)) return;
+  const n = sim.world.cellCount;
+  const base = (s * 2 + (civ === w.wAtt[s] ? 0 : 1)) * n;
+  const field = w.field;
+  if (field[base + cur] === Infinity) {
     if (++w.aIdle[a] >= WAR.noTargetWeeks) disbandArmy(sim, a);
     return;
   }
   const world = sim.world;
   let prog = w.aProg[a] + WAR.speed;
   for (let guard = 0; guard < 8; guard++) {
-    let bestD = -1;
+    let next = -1;
     let bestV = Infinity;
     let bestStep = 0;
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       const nb = world.neighbors[cur * DIRECTION_COUNT + d];
-      if (nb < 0 || field[nb] === Infinity) continue;
+      if (nb < 0 || field[base + nb] === Infinity) continue;
       const step = stepCost(world, cur, d);
-      const v = field[nb] + step;
+      const v = field[base + nb] + step;
       if (v < bestV) {
         bestV = v;
-        bestD = nb;
+        next = nb;
         bestStep = step;
       }
     }
-    if (bestD < 0 || prog < bestStep) break;
+    if (next < 0 || prog < bestStep) break;
     prog -= bestStep;
-    cur = bestD;
-    if (cur === war.goal) {
+    cur = next;
+    if (cur === goal || enemyAt(w, s, civ, cur)) {
       prog = 0;
       break;
     }
@@ -772,95 +886,99 @@ function moveArmy(sim: Simulation, a: number): void {
   if (cur !== w.aCell[a]) {
     w.aCell[a] = cur;
     w.aSince[a] = sim.tick;
+    w.version++;
   }
 }
 
+/** Armies of both sides of a war on one hex fight, each (war, hex) once. */
 function resolveBattles(sim: Simulation): void {
   const w = sim.war;
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a]) continue;
-    const war = w.slots[w.aWar[a]];
-    if (!war) continue;
+    const s = w.aWar[a];
+    if (w.wEnd[s] >= 0) continue;
     const cell = w.aCell[a];
-    // Handle each (war, hex) once, at its first army.
     let first = true;
     let na = 0;
     let nb = 0;
     for (let b = 0; b < MAX_ARMIES; b++) {
-      if (!w.live[b] || w.aWar[b] !== war.slot || w.aCell[b] !== cell) continue;
-      if (b < a) first = false;
-      if (w.aCiv[b] === war.att) groupA[na++] = b;
+      if (!w.live[b] || w.aWar[b] !== s || w.aCell[b] !== cell) continue;
+      if (b < a) {
+        first = false;
+        break;
+      }
+      if (w.aCiv[b] === w.wAtt[s]) groupA[na++] = b;
       else groupB[nb++] = b;
     }
-    if (!first || na === 0 || nb === 0) continue;
-    fight(sim, war, cell, na, nb);
+    if (first && na > 0 && nb > 0) fight(sim, s, cell, na, nb);
   }
 }
 
-function fight(sim: Simulation, war: War, cell: number, na: number, nb: number): void {
+/**
+ * The attacker's armies (groupA) against the defender's (groupB). In a field
+ * battle they fight at once. At the goal seat the defenders (garrison and
+ * relief together) only attack when they would win, or in the last
+ * WAR.forceWeeks before an occupation check; with an army in the seat since
+ * before this week they get the SeatArmy bonus, else the Seat bonus.
+ */
+function fight(sim: Simulation, s: number, cell: number, na: number, nb: number): void {
   const w = sim.war;
-  // Sum the two sides: soldiers and the factor that gives the right strength.
-  for (let t = 0; t < 3; t++) {
+  for (let t = 0; t < TROOP_TYPES; t++) {
     let sa = 0;
     let fa = 0;
     for (let i = 0; i < na; i++) {
       const a = groupA[i];
-      sa += w.aN[a * 3 + t];
-      fa += w.aN[a * 3 + t] * w.aFac[a * 3 + t];
+      sa += w.aN[a * TROOP_TYPES + t];
+      fa += w.aN[a * TROOP_TYPES + t] * w.aFac[a * TROOP_TYPES + t];
     }
     let sb = 0;
     let fb = 0;
     for (let i = 0; i < nb; i++) {
       const a = groupB[i];
-      sb += w.aN[a * 3 + t];
-      fb += w.aN[a * 3 + t] * w.aFac[a * 3 + t];
+      sb += w.aN[a * TROOP_TYPES + t];
+      fb += w.aN[a * TROOP_TYPES + t] * w.aFac[a * TROOP_TYPES + t];
     }
     inp[BI.soldiers + t] = sa;
     inp[BI.factor + t] = sa > 0 ? fa / sa : 1;
     inp[BI.SIDE + BI.soldiers + t] = sb;
     inp[BI.SIDE + BI.factor + t] = sb > 0 ? fb / sb : 1;
   }
+  const att = w.wAtt[s];
+  const def = w.wDef[s];
   let defense: Defense = Defense.Field;
-  let seat = false;
-  if (WAR.phase >= 2 && cell === war.goal) {
-    seat = true;
+  const seat = cell === w.wGoal[s];
+  if (seat) {
     let garrison = false;
     for (let i = 0; i < nb; i++) if (w.aSince[groupB[i]] < sim.tick) garrison = true;
     defense = garrison ? Defense.SeatArmy : Defense.Seat;
   }
   const result = fightBattle(inp, defense, out);
   if (seat) {
-    // Defenders wait in the seat until they can win, or the last weeks before an occupation check.
-    if (war.siegeStart < 0) startSiege(sim, war);
-    if (result >= 0 && !forced(sim, war)) return;
+    if (w.wSiegeStart[s] < 0) startSiege(sim, s);
+    if (result >= 0 && !forced(sim, s)) return;
   }
-  war.battles++;
-  w.stats.battles++;
-  if (!war.splinter) w.stats.estBattles++;
-  const str = (side: number) => (side === 0 ? out[BO.strLostA] : out[BO.strLostB]);
-  w.stats.battleWins[result > 0 ? 0 : result < 0 ? 1 : 2]++;
-  if (result > 0) war.lastGain = sim.tick;
-  // Losses and strength.
+  w.wBattles[s]++;
+  const st = w.stats;
+  st.battles++;
+  if (!w.wSplinter[s]) st.estBattles++;
+  if (result > 0) {
+    st.battleWinsAtt++;
+    w.wLastGain[s] = sim.tick;
+  } else if (result < 0) st.battleWinsDef++;
+  else st.battleDraws++;
   const m = sim.military;
-  if (m.strength.length > war.att) m.strength[war.att] = Math.max(0, m.strength[war.att] - str(0));
-  if (m.strength.length > war.def) m.strength[war.def] = Math.max(0, m.strength[war.def] - str(1));
-  applyLosses(sim, groupA, na, war.att, 0);
-  applyLosses(sim, groupB, nb, war.def, 1);
-  // The loser leaves the field; a draw sends both away.
+  if (m.strength.length > att) m.strength[att] = Math.max(0, m.strength[att] - out[BO.strLostA]);
+  if (m.strength.length > def) m.strength[def] = Math.max(0, m.strength[def] - out[BO.strLostB]);
+  applyLosses(sim, groupA, na, att, 0);
+  applyLosses(sim, groupB, nb, def, 1);
+  // The loser leaves the field (its soldiers go home); a draw sends both home.
   if (result >= 0) for (let i = 0; i < nb; i++) disbandArmy(sim, groupB[i]);
   if (result <= 0) for (let i = 0; i < na; i++) disbandArmy(sim, groupA[i]);
   // Giving up after the battle.
-  const sa = m.strength[war.att] ?? 0;
-  const sd = m.strength[war.def] ?? 0;
-  const age = sim.tick - war.start;
-  if (defenderGaveUp(war, sd, sa, age)) queueEnd(war, EndType.GaveUp);
-  else if (gaveUp(sa, sd, age)) queueEnd(war, EndType.AttackerGaveUp);
-}
-
-function queueEnd(war: War, type: number): void {
-  if (finishing.includes(war)) return;
-  finishing.push(war);
-  finishTypes.push(type);
+  const sa = m.strength[att] ?? 0;
+  const sd = m.strength[def] ?? 0;
+  if (defenderGivesUp(w, s, sd, sa)) w.wEnd[s] = EndType.GaveUp;
+  else if (givesUp(sa, sd)) w.wEnd[s] = EndType.AttackerGaveUp;
 }
 
 /** Scales the group's armies to what is left of `side` after the battle and kills the difference in the cells. */
@@ -868,221 +986,264 @@ function applyLosses(sim: Simulation, group: Int32Array, count: number, civ: num
   const w = sim.war;
   for (let t = 0; t < TROOP_TYPES; t++) {
     let before = 0;
-    for (let i = 0; i < count; i++) before += w.aN[group[i] * 3 + t];
+    for (let i = 0; i < count; i++) before += w.aN[group[i] * TROOP_TYPES + t];
     if (before <= 0) continue;
     const left = remainingSoldiers(side, t);
     const lost = before - left;
     if (lost <= 0) continue;
     const k = left / before;
-    for (let i = 0; i < count; i++) w.aN[group[i] * 3 + t] *= k;
+    for (let i = 0; i < count; i++) w.aN[group[i] * TROOP_TYPES + t] *= k;
     takeAway(sim, civ, t, Math.round(lost), true);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Siege (3b)
+// Siege
 
 /** Defenders must fight when an occupation check is at most WAR.forceWeeks away. */
-function forced(sim: Simulation, war: War): boolean {
-  const age = sim.tick - war.siegeStart;
+function forced(sim: Simulation, s: number): boolean {
+  const age = sim.tick - sim.war.wSiegeStart[s];
   const next = age <= WAR.occupyWeeks ? WAR.occupyWeeks : WAR.occupyWeeks + Math.ceil((age - WAR.occupyWeeks) / WAR.occupyCheck) * WAR.occupyCheck;
   return next - age <= WAR.forceWeeks;
 }
 
 const SUPPLY_LABEL = 'Besieged';
-function startSiege(sim: Simulation, war: War): void {
+const SIEGE_KINDS = [SupplyKind.Food, SupplyKind.Water, SupplyKind.Space] as const;
+
+function startSiege(sim: Simulation, s: number): void {
   const w = sim.war;
-  war.siegeStart = sim.tick;
-  war.sieges++;
+  const goal = w.wGoal[s];
+  w.wSiegeStart[s] = sim.tick;
   w.stats.sieges++;
-  if (!war.splinter) w.stats.estSieges++;
-  w.siege[war.goal] = 1;
-  w.siegeValue[war.goal] = -WAR.siegeMalus;
-  w.stats.startSat += sim.satisfaction[war.goal];
-  war.siegeStrength = besiegerStrength(sim, war);
-  const mods: SupplyModifier[] = [];
-  for (const kind of [SupplyKind.Food, SupplyKind.Water, SupplyKind.Space]) mods.push({ kind, label: SUPPLY_LABEL, amount: -0.5, percent: true });
-  const old = sim.supplyModifiers.get(war.goal);
-  sim.supplyModifiers.set(war.goal, old ? [...old, ...mods] : mods);
-  updateCellSupply(sim, war.goal);
-  record(sim, `The ${sim.civs[war.att]!.name} besieged the ${sim.civs[war.def]!.name} seat of government.`, war.goal);
+  if (!w.wSplinter[s]) w.stats.estSieges++;
+  w.siege[goal] = 1;
+  w.siegeValue[goal] = -WAR.siegeMalus;
+  w.stats.startSat += sim.satisfaction[goal];
+  w.wSiegeStrength[s] = besiegerStrength(sim, s);
+  w.version++;
+  const mods: SupplyModifier[] = (sim.supplyModifiers.get(goal) ?? []).filter((x) => x.label !== SUPPLY_LABEL);
+  for (const kind of SIEGE_KINDS) mods.push({ kind, label: SUPPLY_LABEL, amount: -0.5, percent: true });
+  sim.supplyModifiers.set(goal, mods);
+  updateCellSupply(sim, goal);
+  record(sim, `The ${sim.civs[w.wAtt[s]]!.name} besieged a seat of government of the ${sim.civs[w.wDef[s]]!.name}.`, goal);
 }
 
-function endSiege(sim: Simulation, war: War): void {
+function endSiege(sim: Simulation, s: number): void {
   const w = sim.war;
-  if (war.siegeStart < 0) return;
-  war.siegeStart = -1;
-  war.occupied = false;
-  w.siege[war.goal] = 0;
-  w.siegeValue[war.goal] = 0;
-  const old = sim.supplyModifiers.get(war.goal);
+  if (w.wSiegeStart[s] < 0) return;
+  const goal = w.wGoal[s];
+  w.wSiegeStart[s] = -1;
+  w.wOccupied[s] = 0;
+  w.siege[goal] = 0;
+  w.siegeValue[goal] = 0;
+  w.version++;
+  const old = sim.supplyModifiers.get(goal);
   if (old) {
     const rest = old.filter((x) => x.label !== SUPPLY_LABEL);
-    if (rest.length > 0) sim.supplyModifiers.set(war.goal, rest);
-    else sim.supplyModifiers.delete(war.goal);
-    updateCellSupply(sim, war.goal);
+    if (rest.length > 0) sim.supplyModifiers.set(goal, rest);
+    else sim.supplyModifiers.delete(goal);
+    updateCellSupply(sim, goal);
   }
 }
 
-function besiegerStrength(sim: Simulation, war: War): number {
+function besiegerStrength(sim: Simulation, s: number): number {
   const w = sim.war;
-  let s = 0;
+  const att = w.wAtt[s];
+  const goal = w.wGoal[s];
+  let sum = 0;
   for (let a = 0; a < MAX_ARMIES; a++) {
-    if (!w.live[a] || w.aWar[a] !== war.slot || w.aCiv[a] !== war.att || w.aCell[a] !== war.goal) continue;
-    for (let t = 0; t < 3; t++) s += w.aN[a * 3 + t] * w.aFac[a * 3 + t];
+    if (!w.live[a] || w.aWar[a] !== s || w.aCiv[a] !== att || w.aCell[a] !== goal) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) sum += w.aN[a * TROOP_TYPES + t] * w.aFac[a * TROOP_TYPES + t];
   }
-  return s;
+  return sum;
 }
 
-function updateSiege(sim: Simulation, war: War): void {
+/**
+ * A siege begins when an attacker's army stands on the goal seat, and ends
+ * when none is left (relief won) or the attacker withdraws. After
+ * WAR.occupyWeeks, and then every WAR.occupyCheck weeks, the seat is occupied
+ * if its settlement's satisfaction is below 0.
+ */
+function updateSiege(sim: Simulation, s: number): void {
   const w = sim.war;
-  // Armies may have reached the seat without a battle that started it.
-  const here = besiegerStrength(sim, war);
-  if (war.siegeStart < 0) {
-    if (here > 0) startSiege(sim, war);
+  const here = besiegerStrength(sim, s);
+  if (w.wSiegeStart[s] < 0) {
+    if (here > 0) startSiege(sim, s);
     return;
   }
   if (here <= 0) {
-    endSiege(sim, war);
+    endSiege(sim, s);
     w.stats.siegeBroken++;
     return;
   }
-  if (here < WAR.withdraw * war.siegeStrength) {
+  if (here < WAR.withdraw * w.wSiegeStrength[s]) {
+    const goal = w.wGoal[s];
     for (let a = 0; a < MAX_ARMIES; a++) {
-      if (w.live[a] && w.aWar[a] === war.slot && w.aCiv[a] === war.att && w.aCell[a] === war.goal) disbandArmy(sim, a);
+      if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === w.wAtt[s] && w.aCell[a] === goal) disbandArmy(sim, a);
     }
-    endSiege(sim, war);
+    endSiege(sim, s);
     w.stats.siegeWithdrew++;
     return;
   }
-  if (war.siegeStrength < here) war.siegeStrength = here;
-  if (war.occupied) return;
-  const age = sim.tick - war.siegeStart;
+  if (w.wSiegeStrength[s] < here) w.wSiegeStrength[s] = here;
+  if (w.wOccupied[s]) return;
+  const age = sim.tick - w.wSiegeStart[s];
   if (age < WAR.occupyWeeks || (age - WAR.occupyWeeks) % WAR.occupyCheck !== 0) return;
-  const cell = war.goal;
+  const cell = w.wGoal[s];
   const sat = sim.satisfaction[cell];
   if (age === WAR.occupyWeeks) {
     w.stats.checks++;
     w.stats.checkSat += sat;
-    w.stats.checkTarget += satTarget(sim, cell);
+    w.stats.checkTarget += satisfactionTarget(sim, cell, sim.civs[sim.world.owner[cell]] ?? null);
     if (sat < 0) w.stats.checksBelow++;
   }
-  const value = WAR.occupyOnTarget ? satTarget(sim, cell) : sat;
-  if (value < 0) {
+  if (sat < 0) {
     w.stats.occupations++;
-    if (!war.splinter) w.stats.estOcc++;
-    war.lastGain = sim.tick;
-    if (WAR.giveUpMode === 1) war.occupied = true;
-    else queueEnd(war, EndType.Conquered);
+    if (!w.wSplinter[s]) w.stats.estOcc++;
+    w.wLastGain[s] = sim.tick;
+    w.wOccupied[s] = 1;
+    w.version++;
+    record(sim, `The ${sim.civs[w.wAtt[s]]!.name} occupied a seat of government of the ${sim.civs[w.wDef[s]]!.name}.`, cell);
   }
-}
-
-function satTarget(sim: Simulation, cell: number): number {
-  return satisfactionTarget(sim, cell, sim.civs[sim.world.owner[cell]] ?? null);
 }
 
 // ---------------------------------------------------------------------------
 // End of a war
 
-function endWar(sim: Simulation, war: War, type: number): void {
+/**
+ * Peace: the siege ends, all armies of the war go home, trust drops by
+ * WAR.trustLoss both ways, borders stay closed and agreements gone, and a
+ * truce of WAR.truceYears begins. If the defender gave up, the goal seat's
+ * district goes to the attacker.
+ */
+export function endWar(sim: Simulation, s: number, type: number): void {
   const w = sim.war;
-  if (w.slots[war.slot] !== war) return;
-  const stats = w.stats;
-  stats.ended[type]++;
-  stats.warBattles += war.battles;
-  if (war.battles === 0) stats.noBattle++;
-  const attName = sim.civs[war.att]?.name ?? '?';
-  const defName = sim.civs[war.def]?.name ?? '?';
-  endSiege(sim, war);
-  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === war.slot) disbandArmy(sim, a);
-  w.slots[war.slot] = null;
+  if (!w.wLive[s]) return;
+  const att = w.wAtt[s];
+  const def = w.wDef[s];
+  const goal = w.wGoal[s];
+  const st = w.stats;
+  st.ended[type]++;
+  if (w.wBattles[s] === 0) st.noBattle++;
+  st.durationSum += sim.tick - w.wStart[s];
+  const attName = sim.civs[att]?.name ?? '?';
+  const defName = sim.civs[def]?.name ?? '?';
+  endSiege(sim, s);
+  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s) disbandArmy(sim, a);
+  w.wLive[s] = 0;
+  w.wEnd[s] = -1;
   w.wars--;
-  if (w.enemy[war.att] === war.def) w.enemy[war.att] = 0;
-  if (w.enemy[war.def] === war.att) w.enemy[war.def] = 0;
-  stats.durations.push(sim.tick - war.start);
-  const dip = sim.diplomacy;
-  for (const [x, y] of [
-    [war.att, war.def],
-    [war.def, war.att],
-  ]) {
-    if (!sim.civs[x] || !sim.civs[y]) continue;
-    addMood(dip, x, y, 'War', -WAR.trustLoss, sim.tick);
-    dip.peace[x * PAIRS + y] = 0;
+  w.version++;
+  if (w.enemy[att] === def) {
+    w.enemy[att] = 0;
+    w.civWar[att] = -1;
   }
-  w.truce.set(pairKey(war.att, war.def), sim.tick + WAR.truceYears * TICKS_PER_YEAR);
-  if (type === EndType.Conquered || type === EndType.GaveUp) {
-    if (sim.civs[war.att] && sim.civs[war.def] && sim.world.owner[war.goal] === war.def) transferDistrict(sim, war);
-    record(sim, `The ${attName} conquered the seat of government of the ${defName}.`, war.goal);
+  if (w.enemy[def] === att) {
+    w.enemy[def] = 0;
+    w.civWar[def] = -1;
+  }
+  w.truce[pairKey(att, def)] = sim.tick + WAR.truceYears * TICKS_PER_YEAR;
+  if (sim.civs[att] && sim.civs[def]) {
+    addMood(sim.diplomacy, att, def, 'War', -WAR.trustLoss, sim.tick);
+    addMood(sim.diplomacy, def, att, 'War', -WAR.trustLoss, sim.tick);
+    sever(sim, att, def);
+  }
+  if (type === EndType.GaveUp && sim.civs[att] && sim.civs[def] && sim.world.owner[goal] === def) {
+    const whole = transferDistrict(sim, s);
+    record(sim, whole ? `The ${defName} gave up: the ${attName} conquered all their land.` : `The ${defName} gave up: the ${attName} conquered their seat of government.`, goal);
+  } else if (type === EndType.AttackerGaveUp) {
+    record(sim, `The ${attName} gave up their war against the ${defName}.`, goal);
+  } else if (type === EndType.Exhausted) {
+    record(sim, `The ${attName} and the ${defName} made peace, exhausted by war.`, goal);
   } else {
-    record(sim, `The war between the ${attName} and the ${defName} ended (${END_NAMES[type]}).`, war.goal);
+    record(sim, `The war between the ${attName} and the ${defName} ended.`, goal);
   }
-  war.fieldAtt = null;
-  war.fieldDef = null;
 }
 
-/** The goal seat's district goes from the loser to the attacker; the conquered get "Conquered". */
-function transferDistrict(sim: Simulation, war: War): void {
+let moveMask = new Uint8Array(0);
+
+/**
+ * The goal seat's district goes from the defender to the attacker: its
+ * inhabitants, soldiers, buildings, stock and half the seat's treasury. A
+ * people whose only seat it was goes over whole (annexed). A conquered
+ * capital makes the rest choose a new one: its most populous seat, else its
+ * most populous settlement. A road joins the district to the conqueror's land
+ * at the border crossing. Returns true if the whole people was annexed.
+ */
+function transferDistrict(sim: Simulation, s: number): boolean {
   const w = sim.war;
   const gov = sim.government;
   const world = sim.world;
   const n = world.cellCount;
   const owner = world.owner;
-  const mask = new Uint8Array(n);
+  const att = w.wAtt[s];
+  const def = w.wDef[s];
+  const goal = w.wGoal[s];
+  const loser = sim.civs[def]!;
+  if (moveMask.length !== n) moveMask = new Uint8Array(n);
+  const mask = moveMask;
+  mask.fill(0);
+  // The defender's seats besides the goal: none means the whole people goes.
+  let otherSeats = loser.capital >= 0 && loser.capital !== goal && owner[loser.capital] === def ? 1 : 0;
+  for (let c = 0; c < n && otherSeats === 0; c++) {
+    if (c !== goal && owner[c] === def && sim.hasBuildings[c] && hasSeat(sim.economy, c)) otherSeats = 1;
+  }
+  const whole = otherSeats === 0;
   let cells = 0;
-  let all = 0;
   let people = 0;
   for (let c = 0; c < n; c++) {
-    if (owner[c] !== war.def || sim.cellPop[c] === 0) continue;
-    all++;
-    if (gov.district[c] !== war.goal) continue;
+    if (owner[c] !== def || sim.cellPop[c] === 0) continue;
+    if (!whole && gov.district[c] !== goal && c !== goal) continue;
     mask[c] = 1;
     cells++;
     people += sim.cellPop[c];
   }
-  if (cells === 0) return;
-  if (cells === all) {
-    w.stats.annexed++;
-    if (!war.splinter) w.stats.estAnnexed++;
+  if (cells === 0) return false;
+  const st = w.stats;
+  if (whole) {
+    st.annexed++;
+    if (!w.wSplinter[s]) st.estAnnexed++;
   }
-  w.stats.cellsMoved += cells;
-  w.stats.peopleMoved += people;
-  // The loser's armies lose the soldiers of the cells (they stay as the conqueror's garrison).
-  for (let c = 0; c < n; c++) {
-    if (!mask[c]) continue;
-    for (let t = 0; t < TROOP_TYPES; t++) {
-      const k = w.away[c * 3 + t];
-      if (k === 0) continue;
-      w.away[c * 3 + t] = 0;
-    }
-  }
+  st.cellsMoved += cells;
+  st.peopleMoved += people;
   const pop = sim.pop;
   for (let i = 0; i < pop.end; i++) {
-    if (!pop.alive[i] || pop.civ[i] !== war.def || !mask[pop.cell[i]]) continue;
-    changeCiv(sim, i, war.att);
+    if (pop.alive[i] && pop.civ[i] === def && mask[pop.cell[i]]) changeCiv(sim, i, att);
   }
   for (let c = 0; c < n; c++) {
     if (!mask[c]) continue;
-    owner[c] = war.att;
+    owner[c] = att;
+    for (let t = 0; t < TROOP_TYPES; t++) w.away[c * TROOP_TYPES + t] = 0;
     w.conqValue[c] = -WAR.conqMalus;
     w.conqTick[c] = sim.tick;
+    w.conqUntil[c] = sim.tick + WAR.conqYears * TICKS_PER_YEAR;
   }
-  gov.treasury[war.goal] *= WAR.loot;
-  if (WAR.conquestRoad) {
-    // One road from the district to the conqueror's old land, so it stays connected to its capital.
-    let built = false;
-    for (let c = 0; c < n && !built; c++) {
-      if (!mask[c]) continue;
-      for (let d = 0; d < DIRECTION_COUNT; d++) {
-        const nb = world.neighbors[c * DIRECTION_COUNT + d];
-        if (nb >= 0 && !mask[nb] && owner[nb] === war.att && sim.cellPop[nb] > 0) {
-          addRoad(world, c, d);
-          w.stats.roads++;
-          built = true;
-          break;
-        }
+  gov.treasury[goal] *= WAR.loot;
+  // A new capital for the rest.
+  if (!whole && mask[loser.capital]) {
+    let best = -1;
+    for (let c = 0; c < n; c++) {
+      if (owner[c] !== def || sim.cellPop[c] === 0 || !sim.hasBuildings[c] || !hasSeat(sim.economy, c)) continue;
+      if (best < 0 || sim.cellPop[c] > sim.cellPop[best]) best = c;
+    }
+    if (best < 0) {
+      for (let c = 0; c < n; c++) if (owner[c] === def && (best < 0 || sim.cellPop[c] > sim.cellPop[best])) best = c;
+    }
+    if (best >= 0) loser.capital = best;
+  }
+  // The conquest road: the first crossing from the district to a settlement of the conqueror's.
+  for (let c = 0; c < n; c++) {
+    if (!mask[c]) continue;
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      if (nb >= 0 && !mask[nb] && owner[nb] === att && sim.cellPop[nb] > 0) {
+        addRoad(world, c, d);
+        st.roads++;
+        return whole;
       }
     }
   }
+  return whole;
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,34 +1263,101 @@ export function reconcileWar(sim: Simulation): void {
   awaySum.fill(0);
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a]) continue;
-    for (let t = 0; t < TROOP_TYPES; t++) armySum[w.aCiv[a] * 3 + t] += w.aN[a * 3 + t];
+    for (let t = 0; t < TROOP_TYPES; t++) armySum[w.aCiv[a] * TROOP_TYPES + t] += w.aN[a * TROOP_TYPES + t];
   }
   for (let c = 0; c < n; c++) {
     for (let t = 0; t < TROOP_TYPES; t++) {
       const i = c * TROOP_TYPES + t;
       if (w.away[i] === 0) continue;
       const civ = owner[c];
-      if (civ === 0 || armySum[civ * 3 + t] === 0) {
+      if (civ === 0 || armySum[civ * TROOP_TYPES + t] === 0) {
         w.away[i] = 0;
         continue;
       }
       if (w.away[i] > m.soldiers[i]) w.away[i] = m.soldiers[i];
-      awaySum[civ * 3 + t] += w.away[i];
+      awaySum[civ * TROOP_TYPES + t] += w.away[i];
     }
   }
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a]) continue;
     for (let t = 0; t < TROOP_TYPES; t++) {
-      const k = w.aCiv[a] * 3 + t;
-      if (armySum[k] > awaySum[k] + 0.5) w.aN[a * 3 + t] *= awaySum[k] / armySum[k];
+      const k = w.aCiv[a] * TROOP_TYPES + t;
+      if (armySum[k] > awaySum[k] + 0.5) w.aN[a * TROOP_TYPES + t] *= awaySum[k] / armySum[k];
     }
   }
   // More away than in armies (rounding): bring the difference home.
   for (let civ = 1; civ < PAIRS; civ++) {
     for (let t = 0; t < TROOP_TYPES; t++) {
-      const k = civ * 3 + t;
+      const k = civ * TROOP_TYPES + t;
       const diff = Math.floor(awaySum[k] - armySum[k] + 0.5);
       if (diff > 0 && armySum[k] > 0) takeAway(sim, civ, t, diff, false);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Queries for the app (panels, map); they allocate, the simulation never calls them.
+
+export type ArmyInfo = { slot: number; civ: number; cell: number; soldiers: number; strength: number; besieging: boolean };
+export type CivWar = {
+  enemy: number;
+  attacker: boolean;
+  /** The goal seat, the year the war began. */
+  goal: number;
+  startTick: number;
+  /** Siege of the goal: tick it began (-1 = none), whether the seat is occupied. */
+  siegeStart: number;
+  occupied: boolean;
+  battles: number;
+  ownArmies: ArmyInfo[];
+  enemyArmies: ArmyInfo[];
+};
+
+/** All armies on the map (markers: cell, people for the flag color, soldiers). */
+export function warArmies(sim: Simulation): ArmyInfo[] {
+  const w = sim.war;
+  const list: ArmyInfo[] = [];
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (!w.live[a]) continue;
+    let strength = 0;
+    for (let t = 0; t < TROOP_TYPES; t++) strength += w.aN[a * TROOP_TYPES + t] * w.aFac[a * TROOP_TYPES + t];
+    const s = w.aWar[a];
+    list.push({
+      slot: a,
+      civ: w.aCiv[a],
+      cell: w.aCell[a],
+      soldiers: Math.round(armySoldiers(w, a)),
+      strength,
+      besieging: w.aCiv[a] === w.wAtt[s] && w.aCell[a] === w.wGoal[s],
+    });
+  }
+  return list;
+}
+
+/** The war of people `civ`, null in peace. */
+export function civWar(sim: Simulation, civ: number): CivWar | null {
+  const w = sim.war;
+  const s = w.civWar[civ];
+  if (s < 0 || !w.wLive[s]) return null;
+  const armies = warArmies(sim).filter((x) => w.aWar[x.slot] === s);
+  return {
+    enemy: w.enemy[civ],
+    attacker: w.wAtt[s] === civ,
+    goal: w.wGoal[s],
+    startTick: w.wStart[s],
+    siegeStart: w.wSiegeStart[s],
+    occupied: w.wOccupied[s] === 1,
+    battles: w.wBattles[s],
+    ownArmies: armies.filter((x) => x.civ === civ),
+    enemyArmies: armies.filter((x) => x.civ !== civ),
+  };
+}
+
+/** Peoples `civ` has a truce with, and the tick each ends. */
+export function civTruces(sim: Simulation, civ: number): { civ: number; until: number }[] {
+  const list: { civ: number; until: number }[] = [];
+  for (let b = 1; b < sim.civs.length; b++) {
+    if (b !== civ && sim.civs[b] && inTruce(sim, civ, b)) list.push({ civ: b, until: sim.war.truce[pairKey(civ, b)] });
+  }
+  return list;
 }

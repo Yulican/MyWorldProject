@@ -265,9 +265,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement is cut off in year 145.
-  const sim = createSimulation(generateWorld({ seed: 144 }));
-  for (let year = 1; year <= 148; year++) {
+  // In this world a settlement is cut off in year 272.
+  const sim = createSimulation(generateWorld({ seed: 8 }));
+  for (let year = 1; year <= 275; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
@@ -329,8 +329,8 @@ test('settlers never go where the connection to a seat would fall below the stop
 });
 
 test('a people of 100 lacking a luxury good settles a free deposit of it nearby', () => {
-  // In this world it happens in year 68.
-  const sim = createSimulation(generateWorld({ seed: 102 }));
+  // In this world it happens in year 65.
+  const sim = createSimulation(generateWorld({ seed: 17 }));
   runYears(sim, 70);
   const settled = sim.chronicle.filter((e) => / settled the /.test(e.text));
   assert.ok(settled.length > 0, 'a deposit was settled');

@@ -135,7 +135,7 @@ test('the government panel lists every district of a people with all its settlem
 });
 
 test('government slots are as many as settlement slots and seats only stand in them', () => {
-  const sim = createSimulation(generateWorld({ seed: 8 }));
+  const sim = createSimulation(generateWorld({ seed: 12 }));
   runYears(sim, 200);
   let seats = 0;
   for (let c = 0; c < sim.world.cellCount; c++) {
