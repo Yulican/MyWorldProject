@@ -11,6 +11,7 @@ import {
   type Simulation,
   type World,
 } from '../sim';
+import type { ExtraArmies } from '../bench/armyDecoys';
 import { countEvent, recordSimWork } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
@@ -86,6 +87,9 @@ let lastNotify = 0;
 let notifiedSnapshot = -1;
 let lastArmyNotify = 0;
 let syncedWar = -1;
+let syncedTick = -1;
+/** Benchmark only: extra army markers up to the world cap (see bench/armyDecoys.ts); null in the game. */
+let extraArmies: ExtraArmies | null = null;
 const armyListeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
@@ -105,6 +109,7 @@ function syncMapWar(sim: Simulation) {
 function syncArmies(sim: Simulation) {
   const w = sim.war;
   syncedWar = w.version;
+  syncedTick = sim.tick;
   let k = 0;
   let changed = false;
   for (let a = 0; a < MAX_ARMIES; a++) {
@@ -114,6 +119,11 @@ function syncArmies(sim: Simulation) {
     mapArmies.civ[k] = w.aCiv[a];
     mapArmies.state[k] = w.aState[a];
     k++;
+  }
+  if (extraArmies) {
+    // Benchmark decoys move every week: their markers are recorded again with every sync.
+    k = extraArmies.fill(sim, mapArmies, k);
+    changed = true;
   }
   if (k !== mapArmies.count) changed = true;
   mapArmies.count = k;
@@ -184,6 +194,11 @@ export function acknowledgeChronicle() {
   const seen = nextShown(sim, chronicleSeen + 1);
   publish({ chronicleSeen: seen });
   if (seen >= sim.chronicle.length) setSpeed(resumeSpeed);
+}
+
+/** Benchmark only: extra army markers on the map (the war scenario's worst case), null to stop. */
+export function setExtraArmies(extra: ExtraArmies | null) {
+  extraArmies = extra;
 }
 
 /** Turns the chronicle dialogs off (and back on) for the benchmark. */
@@ -269,7 +284,7 @@ function runFrame(now: number) {
     return;
   }
   // Moved armies get a frame of their own too (the map records their markers again).
-  if (betweenTicks && sim.war.version !== syncedWar && now - lastArmyNotify >= ARMY_INTERVAL_MS) {
+  if (betweenTicks && (sim.war.version !== syncedWar || (extraArmies && sim.tick !== syncedTick)) && now - lastArmyNotify >= ARMY_INTERVAL_MS) {
     lastArmyNotify = now;
     pendingTicks += ticksPerSecond * seconds;
     syncArmies(sim);

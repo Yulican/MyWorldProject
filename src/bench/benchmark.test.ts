@@ -157,3 +157,27 @@ test('the war scenario puts peoples at war in pairs with as many armies as the c
   assert.ok(sieges >= 3, `${sieges} sieges in ${w.wars} wars`);
   assert.equal(SCENARIOS.war.war, true);
 });
+
+test('the war scenario draws 32 armies: real ones plus map-only decoys that keep moving', async () => {
+  const { MAX_ARMIES, createSimulation, generateWorld, isWaterBiome, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { declareWarsEverywhere } = await import('./declareWars');
+  const { armyDecoys } = await import('./armyDecoys');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  declareWarsEverywhere(sim);
+  const real = sim.war.armies;
+  const markers = { cell: new Int32Array(MAX_ARMIES), civ: new Uint8Array(MAX_ARMIES), state: new Uint8Array(MAX_ARMIES) };
+  const decoys = armyDecoys();
+  assert.equal(decoys.fill(sim, markers, real), 32);
+  const before = markers.cell.slice(real);
+  for (let i = real; i < 32; i++) {
+    assert.ok(!isWaterBiome(sim.world.biome[markers.cell[i]]), 'on land');
+    assert.ok(sim.civs[markers.civ[i]], 'a living people');
+  }
+  for (let t = 0; t < 4; t++) stepSimulation(sim);
+  assert.equal(decoys.fill(sim, markers, real), 32);
+  let moved = 0;
+  for (let i = 0; i < before.length; i++) if (markers.cell[real + i] !== before[i]) moved++;
+  assert.ok(moved > 0, 'decoys march');
+  assert.equal(sim.war.armies, real, 'decoys never enter the simulation');
+});

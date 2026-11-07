@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
 import { perfEvents } from '../state/perfStats';
-import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
+import { advanceYears, createNewWorld, setChronicleDialogs, setExtraArmies } from '../state/worldStore';
+import { armyDecoys } from './armyDecoys';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
 import { declareWarsEverywhere } from './declareWars';
@@ -55,6 +56,8 @@ export function useBenchmark(controller: { current: MapController | null }) {
       const seed = randomSeed();
       createNewWorld(seed);
       const setup = SCENARIOS[scenario];
+      // The war scenario draws the worst case: extra markers up to 32 armies on the map (armyDecoys.ts).
+      setExtraArmies(setup.war ? armyDecoys() : null);
       const prepare = setup.buildings
         ? fillWithBuildings
         : setup.unrest
@@ -93,6 +96,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
     const summary = { ...summarizeBenchmark(results), scenario };
     console.log(`${LOG}_DONE ${JSON.stringify(summary)}`);
     setStatus({ running: false, summary });
+    setExtraArmies(null);
     setChronicleDialogs(true);
     running.current = false;
   }, [controller]);
