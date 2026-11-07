@@ -9,6 +9,8 @@ const SLICE_MS = 8;
  * into fresh map, a snapshot) would all land in one frame.
  */
 const TILES_PER_SLICE = 3;
+/** While the map moves only one per slice: a swipe into fresh map spreads its tiles (and their memory) over more frames. */
+const TILES_PER_SLICE_MOVING = 1;
 const SLICE_PAUSE_MS = 16;
 /** Default memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
@@ -137,7 +139,7 @@ export class TileImages {
     // A further tile only if one more of the recent (worst) duration still fits the slice.
     while (
       this.queue.length > 0 &&
-      rendered < TILES_PER_SLICE &&
+      rendered < (this.resting ? TILES_PER_SLICE : TILES_PER_SLICE_MOVING) &&
       (rendered === 0 || Date.now() - start + this.tileMs <= SLICE_MS)
     ) {
       const r = this.queue[0];

@@ -24,6 +24,7 @@ import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { countEvent, recordMapBuild } from '../state/perfStats';
+import { setMapMoving } from '../state/worldStore';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { ArmySprites, buildArmyPicture, type ArmyMarkers } from './armyLayer';
 import { MapPerfMeter } from './MapPerfMeter';
@@ -135,7 +136,11 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   const onViewChange = useCallback((view: ViewTiles) => tileListener.current(view), []);
   // Told when the map starts moving and when it rests again (outdated tiles are redone while it rests).
   const restListener = useRef<(resting: boolean) => void>(() => {});
-  const onRest = useCallback((resting: boolean) => restListener.current(resting), []);
+  const onRest = useCallback((resting: boolean) => {
+    restListener.current(resting);
+    // Long simulation parts and snapshots wait while the map moves (worldStore).
+    setMapMoving(!resting);
+  }, []);
   const moving = useSharedValue(false);
   /** The map moved in this frame (UI thread). */
   const moved = () => {

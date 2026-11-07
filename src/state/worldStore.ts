@@ -33,6 +33,15 @@ const FRAME_BUDGET_MS = [0, 3, 4, 8] as const;
 const NOTIFY_INTERVAL_MS = 400;
 /** The map's army markers follow the armies (they move weekly) at most this often. */
 const ARMY_INTERVAL_MS = 250;
+/**
+ * While the map moves, a tick part expected to take longer than this (its
+ * longest recent run) and a new map snapshot wait until the map rests, at
+ * most HOLD_MS: such a part costs a frame of the movement on its own. The
+ * ticks that pile up meanwhile are caught up afterwards, so the simulation
+ * keeps its speed.
+ */
+const MOVING_PART_MS = 6;
+const HOLD_MS = 750;
 
 /**
  * The war as the territory layer draws it, copied from the simulation with
@@ -89,6 +98,9 @@ let notifiedSnapshot = -1;
 let lastArmyNotify = 0;
 let syncedWar = -1;
 let syncedTick = -1;
+/** The map moves (WorldMap tells, see setMapMoving); since when work has been held back for it (0 = nothing held). */
+let mapMoving = false;
+let heldSince = 0;
 /** Benchmark only: extra army markers up to the world cap (see bench/armyDecoys.ts); null in the game. */
 let extraArmies: ExtraArmies | null = null;
 const armyListeners = new Set<() => void>();
@@ -197,6 +209,19 @@ export function acknowledgeChronicle() {
   if (seen >= sim.chronicle.length) setSpeed(resumeSpeed);
 }
 
+/** The map started moving (true) or rests again (false): long tick parts and snapshots wait while it moves. */
+export function setMapMoving(moving: boolean) {
+  mapMoving = moving;
+  if (!moving) heldSince = 0;
+}
+
+/** Whether work expected to take `ms` (or a snapshot, Infinity) should wait for the map to rest; starts the hold. */
+function holdForMap(now: number, ms: number): boolean {
+  if (!mapMoving || ms <= MOVING_PART_MS) return false;
+  if (heldSince === 0) heldSince = now;
+  return now - heldSince < HOLD_MS;
+}
+
 /** Benchmark only: extra army markers on the map (the war scenario's worst case), null to stop. */
 export function setExtraArmies(extra: ExtraArmies | null) {
   extraArmies = extra;
@@ -273,8 +298,13 @@ function runFrame(now: number) {
   const seconds = Math.min(0.25, (now - lastFrameTime) / 1000);
   lastFrameTime = now;
 
-  // A new snapshot (complete after its tick) gets a frame of its own.
-  if (betweenTicks && sim.snapshotVersion !== notifiedSnapshot && (sim.gameOver || now - lastNotify >= NOTIFY_INTERVAL_MS)) {
+  // A new snapshot (complete after its tick) gets a frame of its own, once the map rests (or has waited long enough).
+  if (
+    betweenTicks &&
+    sim.snapshotVersion !== notifiedSnapshot &&
+    (sim.gameOver || (now - lastNotify >= NOTIFY_INTERVAL_MS && !holdForMap(now, Infinity)))
+  ) {
+    heldSince = 0;
     syncSnapshot(sim);
     lastNotify = now;
     lastArmyNotify = now;
@@ -309,6 +339,8 @@ function runFrame(now: number) {
     const key = partKey(sim);
     const partStart = performance.now();
     if (parts > 0 && partStart - start + partMs[key] > budget) break;
+    if (holdForMap(now, partMs[key])) break;
+    if (partMs[key] > MOVING_PART_MS) heldSince = 0;
     if (sim.part === TickPart.Start) pendingTicks--;
     const done = stepSimulationPart(sim);
     const ms = performance.now() - partStart;
@@ -317,8 +349,8 @@ function runFrame(now: number) {
     if (done) ticks++;
   }
   recordSimWork(performance.now() - start, ticks);
-  // Drop what didn't fit instead of piling up a backlog.
-  pendingTicks = Math.min(pendingTicks, 2);
+  // Drop what didn't fit instead of piling up a backlog (but keep what waited for the map to rest).
+  pendingTicks = Math.min(pendingTicks, heldSince > 0 ? 2 + (ticksPerSecond * HOLD_MS) / 1000 : 2);
 
   // Something notable happened: pause and show it (the chronicle dialog) once its tick is complete.
   if (state.chronicleDialogs && sim.part === TickPart.Start) {
