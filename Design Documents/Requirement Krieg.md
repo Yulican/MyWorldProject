@@ -53,8 +53,10 @@ Entschieden (Nutzer), Phase 3; Zahlen sind Startwerte (kalibrieren (Simulation))
 
 - Eine Armee ist ein Zähler (Nahkampf / Fernkampf / Schock) mit Position und Volk. Die Soldaten werden aus der Heimatsiedlung abgezogen.
 - **Wer marschiert:** Bei Kriegsbeginn stellen alle Siedlungen des Volks 70 % ihrer Soldaten für die Armeen, 30 % bleiben zu Hause.
-- **Sammeln** (Interpretation, zu bestätigen): Die Soldaten marschieren aus ihren Siedlungen zu einem Sammelpunkt, dem eigenen Sitz des Angreifers, der dem Kriegsziel am nächsten liegt. Die Armee bricht auf, wenn alle Kontingente angekommen sind, spätestens nach 8 Wochen.
-- **Rückzug geschlagener Armeen** (Interpretation, zu bestätigen): Eine geschlagene Armee zieht mit den Soldaten, die nach der 50-%-Rückzugsregel (Abschnitt 3) übrig sind, zum nächsten eigenen Sitz, mit normaler Geschwindigkeit, und schließt sich dort der Besatzung an. Auf dem Weg kann sie erneut angegriffen werden.
+- **Sammeln** (entschieden): Die Soldaten marschieren aus ihren Siedlungen zu einem Sammelpunkt. Die Armee bricht auf, wenn alle Kontingente angekommen sind, spätestens nach 8 Wochen; spätere Kontingente gehen heim.
+  - **Angreifer:** Sammelpunkt ist der eigene Sitz, der dem Kriegsziel am nächsten liegt (eine Hauptarmee).
+  - **Verteidiger:** Sammelpunkte sind seine nächsten anderen Sitze (nicht der belagerte Zielsitz), bis zu 3 Entsatzarmeen aus verschiedenen Sitzen. Sie marschieren zum Ziel und greifen an, sobald sie (mit der Besatzung) gewinnen können, sonst im Zwangsmonat (Abschnitt 5). Hat der Verteidiger keinen anderen Sitz, sammelt er sich als Besatzung im Zielsitz.
+- **Rückzug** (entschieden): Geschlagene Armeen und abziehende Belagerer ziehen mit den Soldaten, die nach der 50-%-Rückzugsregel (Abschnitt 3) übrig sind, zum nächsten eigenen Sitz, mit normaler Geschwindigkeit. Gibt es keinen innerhalb von 25 Reisekosten, gehen sie sofort heim. Auf dem Weg können sie angegriffen werden, greifen aber selbst nicht an. Am Kriegsende gehen alle Armeen heim.
 - **Zahl der Armeen:** höchstens 4 je Volk (1 Hauptarmee, 3 Entsatzarmeen), höchstens 32 Armeen auf der Welt.
 - **Marsch:** 1 Reisekosteneinheit pro Woche (ein Straßenhex kostet meist 0,5). Der Weg geht über Straßen und freies Gelände, durch feindliches Land immer, durch befreundetes nur bei offener Grenze. Keine Schiffe. Der Weg wird nur bei Zielwechsel neu berechnet.
 - **Versorgung:** keine; der Sold läuft weiter aus der Heimatkasse (Entlassung bei leerer Kasse wie in Abschnitt 2). Hat eine Armee 2 Jahre lang kein Ziel, kehrt sie heim.
@@ -133,7 +135,7 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 - Stärke und Gefahr jährlich pro Volkspaar (Zähler); Schlachten pro Schlacht, nicht pro Soldat; Armeen als wenige Zähler.
 - Ziel: ein simuliertes Jahr höchstens 1,3-mal so teuer wie heute.
-- **Neues Benchmark-Szenario `war`:** 300 Jahre gealtert, danach Kriege überall: 3 bis 5 Armeen je Volk unterwegs, alle Völker im Krieg (ab 3b belagerte Sitze, ab Phase 5 Rebellenkriege). Marker und Rahmen erscheinen überall auf der Karte. Alle Szenarien müssen bestehen.
+- **Neues Benchmark-Szenario `war`:** 300 Jahre gealtert, danach Kriege überall: die Obergrenzen voll ausgeschöpft (4 Armeen je Volk, 32 auf der Karte), alle Völker im Krieg (ab 3b belagerte Sitze, ab Phase 5 Rebellenkriege). Marker und Rahmen erscheinen überall auf der Karte. Alle Szenarien müssen bestehen.
 
 ## 12. Abhängigkeiten
 
@@ -159,7 +161,6 @@ Später (bewusste Vereinfachungen für jetzt):
 - Armeen werden jedes Jahr neu aufgestellt.
 
 Offen:
-- Zu bestätigen: Sammeln (spätestens nach 8 Wochen) und Rückzug geschlagener Armeen (Abschnitt 4).
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
