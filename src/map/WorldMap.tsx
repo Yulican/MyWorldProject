@@ -25,7 +25,7 @@ import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
 import { countEvent, recordMapBuild } from '../state/perfStats';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
-import { buildArmyPicture, type ArmyMarkers } from './armyLayer';
+import { ArmySprites, buildArmyPicture, type ArmyMarkers } from './armyLayer';
 import { MapPerfMeter } from './MapPerfMeter';
 import { SELECTION_COLOR } from './palette';
 import {
@@ -43,6 +43,8 @@ const MAX_SCALE = 3;
 const START_SCALE = 1;
 /** A tap right after dragging or pinching is almost always a finger lifting off, not a tap. */
 const TAP_COOLDOWN_MS = 300;
+/** The map rests once it hasn't moved for this long (outdated tiles are redone then, see TileImages.setResting). */
+const REST_MS = 100;
 /** Slower releases just stop; faster ones let the map glide on. */
 const MIN_FLING_VELOCITY = 150;
 /** Lifting the fingers after a pinch reports a pan velocity that isn't a fling. */
@@ -129,6 +131,18 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   // be called from gesture worklets without re-creating them.
   const tileListener = useRef<(view: ViewTiles) => void>(() => {});
   const onViewChange = useCallback((view: ViewTiles) => tileListener.current(view), []);
+  // Told when the map starts moving and when it rests again (outdated tiles are redone while it rests).
+  const restListener = useRef<(resting: boolean) => void>(() => {});
+  const onRest = useCallback((resting: boolean) => restListener.current(resting), []);
+  const moving = useSharedValue(false);
+  /** The map moved in this frame (UI thread). */
+  const moved = () => {
+    'worklet';
+    lastMoveAt.value = Date.now();
+    if (moving.value) return;
+    moving.value = true;
+    scheduleOnRN(onRest, false);
+  };
 
   // Latest tap handler, called through a stable function for the same reason.
   const tapHandler = useRef<(x: number, y: number) => void>(() => {});
@@ -192,7 +206,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
       if (dx === 0 && dy === 0) return;
       tx.value = wrapX(tx.value + dx, mapWidth * scale.value);
       ty.value = clampY(ty.value + dy, mapHeight * scale.value, viewH);
-      lastMoveAt.value = Date.now();
+      moved();
       reportView();
     },
     [mapWidth, mapHeight, viewW, viewH],
@@ -207,6 +221,10 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   const onSwipeDone = useCallback((stats: SwipeStats) => swipeDone.current(stats), []);
   useFrameCallback((frame) => {
     'worklet';
+    if (moving.value && Date.now() - lastMoveAt.value >= REST_MS) {
+      moving.value = false;
+      scheduleOnRN(onRest, true);
+    }
     const dt = frame.timeSincePreviousFrame;
     if (!benchSwipe.value.active || dt === null) return;
     benchSwipe.modify((b) => {
@@ -282,7 +300,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
       'worklet';
       tx.value = wrapX(tx.value + e.changeX, mapWidth * scale.value);
       ty.value = clampY(ty.value + e.changeY, mapHeight * scale.value, viewH);
-      lastMoveAt.value = Date.now();
+      moved();
       reportView();
     },
   });
@@ -310,7 +328,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
       tx.value = wrapX(e.focalX - (e.focalX - tx.value) * k, mapWidth * next);
       ty.value = clampY(e.focalY - (e.focalY - ty.value) * k, mapHeight * next, viewH);
       scale.value = next;
-      lastMoveAt.value = Date.now();
+      moved();
       reportView();
     },
   });
@@ -358,7 +376,14 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
                 fit="fill"
               />
             ))}
-            <TileLayer world={world} layers={layers} listener={tileListener} territory={territory} view={lastView} />
+            <TileLayer
+              world={world}
+              layers={layers}
+              listener={tileListener}
+              restListener={restListener}
+              territory={territory}
+              view={lastView}
+            />
             <ArmyLayer world={world} mapWidth={mapWidth} territory={territory} />
             {selection &&
               [0, 1].map((copy) => (
@@ -378,6 +403,8 @@ type TileLayerProps = {
   world: World;
   layers: WorldLayers;
   listener: { current: (view: ViewTiles) => void };
+  /** Set by the tile layer: called when the map starts moving (false) and rests again (true). */
+  restListener: { current: (resting: boolean) => void };
   territory: TerritorySource;
   /** The current view, kept on the UI thread by the gestures. */
   view: SharedValue<ViewTiles>;
@@ -405,7 +432,7 @@ const EMPTY_PICTURE = createPicture(() => {});
  * ready tier meanwhile, or the overview image underneath; after a snapshot
  * the old territory tiles stay until the new ones are ready.
  */
-const TileLayer = memo(function TileLayer({ world, layers, listener, territory, view }: TileLayerProps) {
+const TileLayer = memo(function TileLayer({ world, layers, listener, restListener, territory, view }: TileLayerProps) {
   countEvent('tileLayerRenders');
   const tileSet = useSharedValue<TileSet>(EMPTY_TILE_SET);
   const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
@@ -442,6 +469,10 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
   );
   useEffect(() => () => terrainTiles.dispose(), [terrainTiles]);
   useEffect(() => () => territoryTiles.dispose(), [territoryTiles]);
+  restListener.current = (resting) => {
+    terrainTiles.setResting(resting);
+    territoryTiles.setResting(resting);
+  };
 
   // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
   const overview = useRef<{ version: number; image: SkImage } | null>(null);
@@ -571,12 +602,14 @@ const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { worl
   const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
   useEffect(() => {
     const { armies, civColor } = territory;
+    // Sprites as sharp as the closest zoom tier, made before the first army appears.
+    const sprites = new ArmySprites(TIER_ZOOMS[TIER_ZOOMS.length - 1] * PixelRatio.get());
     let seen = -1;
     const update = () => {
       const version = armies.getVersion();
       if (version === seen) return;
       seen = version;
-      const next = buildArmyPicture(world, armies.markers, civColor, mapWidth);
+      const next = buildArmyPicture(world, armies.markers, civColor, mapWidth, sprites);
       countEvent('armyPictures');
       scheduleOnUI((p: SkPicture) => {
         'worklet';
@@ -584,7 +617,11 @@ const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { worl
       }, next);
     };
     update();
-    return armies.subscribe(update);
+    const unsubscribe = armies.subscribe(update);
+    return () => {
+      unsubscribe();
+      sprites.dispose();
+    };
   }, [world, mapWidth, territory, picture]);
   return <Picture picture={picture} />;
 });

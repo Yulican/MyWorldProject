@@ -14,13 +14,6 @@ const SLICE_PAUSE_MS = 16;
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
 const KEEP_MS = 1000;
-/**
- * Outdated tiles still show their old image, so they are only redone once the
- * view has rested this long: rendering them while the map moves takes CPU
- * time from drawing frames, and each new image is uploaded to the GPU when
- * first drawn.
- */
-const REDO_IDLE_MS = 300;
 
 /** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
 export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
@@ -45,8 +38,13 @@ export class TileImages {
   /** Tiles of the current view (any tier): never freed. */
   private wanted = new Set<number>();
   private bytes = 0;
-  /** When the view last changed (`want`). */
-  private wantedAt = 0;
+  /**
+   * Whether the map rests (setResting). Outdated tiles still show their old
+   * image, so they are only redone while it rests: rendering them while the
+   * map moves takes CPU time from drawing frames, and each new image is
+   * uploaded to the GPU when first drawn.
+   */
+  private resting = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   /** Longest recent tile render in ms (decays), to stop a slice before it overruns SLICE_MS. */
@@ -82,7 +80,6 @@ export class TileImages {
   /** Replaces the wanted tiles; missing ones are rendered first, then outdated ones, nearest first. */
   want(requests: TileRequest[]) {
     if (this.disposed) return;
-    this.wantedAt = Date.now();
     this.wanted = new Set(requests.map((r) => r.chunk));
     const seen = new Set<string>();
     this.queue = requests
@@ -96,6 +93,12 @@ export class TileImages {
       // Missing tiles first (blank on screen), then outdated ones; nearest first.
       .sort((a, b) => this.redo(a) - this.redo(b) || a.distance - b.distance);
     if (this.queue.length > 0 && this.timer === null) this.timer = setTimeout(this.work, 0);
+  }
+
+  /** The map stopped moving (true) or started (false): outdated tiles are redone only while it rests. */
+  setResting(resting: boolean) {
+    this.resting = resting;
+    if (resting && this.queue.length > 0 && this.timer === null && !this.disposed) this.timer = setTimeout(this.work, 0);
   }
 
   private redo(r: TileRequest): number {
@@ -123,7 +126,8 @@ export class TileImages {
     if (this.disposed) return;
     const start = Date.now();
     let rendered = 0;
-    let wait = 0;
+    /** Only outdated tiles are left and the map moves: go on once it rests (setResting). */
+    let held = false;
     // A further tile only if one more of the recent (worst) duration still fits the slice.
     while (
       this.queue.length > 0 &&
@@ -137,9 +141,9 @@ export class TileImages {
         this.queue.shift();
         continue;
       }
-      if (old) {
-        wait = this.wantedAt + REDO_IDLE_MS - Date.now();
-        if (wait > 0) break;
+      if (old && !this.resting) {
+        held = true;
+        break;
       }
       this.queue.shift();
       const signature = this.signature ? this.signature(r.chunk) : 0;
@@ -154,7 +158,7 @@ export class TileImages {
     }
     this.evict();
     if (rendered > 0) this.onReady();
-    if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(rendered > 0 ? SLICE_PAUSE_MS : 0, wait));
+    if (this.queue.length > 0 && !held) this.timer = setTimeout(this.work, rendered > 0 ? SLICE_PAUSE_MS : 0);
   };
 
   /** Frees the least recently drawn tiles while over budget. */

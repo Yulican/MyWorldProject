@@ -47,6 +47,7 @@ export {
   simulationYear,
   stepSimulation,
   stepSimulationPart,
+  TICK_PARTS,
   TickPart,
   type ChronicleEntry,
   type Simulation,

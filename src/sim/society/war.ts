@@ -386,31 +386,56 @@ function clockStart(): number {
 
 /** The war's yearly part (simulation.ts: WAR_WEEK): end checks and new armies for the running wars, then declarations. */
 export function runWarYear(sim: Simulation): void {
-  if (!WAR.enabled) return;
+  for (let step = 0; step >= 0; step = runWarYearStep(sim, step));
+}
+
+/**
+ * One step of the war's yearly part, so the game clock can spread it over
+ * frames (raising armies and planning marches search the map): steps 0 to
+ * MAX_WARS - 1 check one running war each (end, or new armies), the further
+ * steps roll the declarations in people order up to the next war declared.
+ * Returns the next step, -1 after the last; all steps in a row give exactly
+ * runWarYear.
+ */
+export function runWarYearStep(sim: Simulation, step: number): number {
+  if (!WAR.enabled) return -1;
   const t0 = clockStart();
   const w = sim.war;
-  const m = sim.military;
-  for (let s = 0; s < MAX_WARS; s++) {
-    if (!w.wLive[s]) continue;
-    if (endIfGone(sim, s)) continue;
-    const att = w.wAtt[s];
-    const def = w.wDef[s];
-    const sa = m.strength[att] ?? 0;
-    const sd = m.strength[def] ?? 0;
-    if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
-    else if (givesUp(sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
-    else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
-    else {
-      reraise(sim, s, att);
-      reraise(sim, s, def);
-    }
+  let next = -1;
+  let s = step;
+  while (s < MAX_WARS && !w.wLive[s]) s++;
+  if (s < MAX_WARS) {
+    reviewWar(sim, s);
+    next = s + 1;
+  } else {
+    // Declarations: step MAX_WARS + i goes on from people i + 1.
+    const a = declareWars(sim, Math.max(step, MAX_WARS) - MAX_WARS + 1);
+    if (a >= 0) next = MAX_WARS + a - 1;
   }
-  declareWars(sim);
   if (WAR_PROFILE.clock) {
     const dt = WAR_PROFILE.clock() - t0;
     w.stats.yearMs += dt;
-    w.stats.yearCalls++;
+    if (next < 0) w.stats.yearCalls++;
     if (dt > w.stats.yearMax) w.stats.yearMax = dt;
+  }
+  return next;
+}
+
+/** The yearly check of running war `s`: a side gives up or is exhausted, else both raise what they may still have. */
+function reviewWar(sim: Simulation, s: number): void {
+  const w = sim.war;
+  const m = sim.military;
+  if (endIfGone(sim, s)) return;
+  const att = w.wAtt[s];
+  const def = w.wDef[s];
+  const sa = m.strength[att] ?? 0;
+  const sd = m.strength[def] ?? 0;
+  if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
+  else if (givesUp(sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
+  else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
+  else {
+    reraise(sim, s, att);
+    reraise(sim, s, def);
   }
 }
 
@@ -510,19 +535,24 @@ export function warTargets(sim: Simulation, a: number): number[] {
   return list;
 }
 
-/** Every people with a target rolls WAR.chance; the winner picks its goal and declares. */
-function declareWars(sim: Simulation): void {
+/**
+ * Every people from id `from` on with a target rolls WAR.chance; the winner
+ * picks its goal and declares. Stops after a declared war and returns the
+ * next people's id (to go on from), -1 when all have rolled.
+ */
+function declareWars(sim: Simulation, from: number): number {
   const w = sim.war;
   const civs = findNeighbors(sim);
-  for (let a = 1; a < civs; a++) {
+  for (let a = from; a < civs; a++) {
     if (!markCandidates(sim, a, civs) || w.rng() >= WAR.chance) continue;
     if (worldRoom(w) < 2 || w.wars >= MAX_WARS) {
       w.stats.capBlocked++;
       continue;
     }
     const goal = chooseGoal(sim, a, candidate);
-    if (goal >= 0) startWar(sim, a, goal);
+    if (goal >= 0 && startWar(sim, a, goal) >= 0) return a + 1;
   }
+  return -1;
 }
 
 /**

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import {
   MAX_ARMIES,
   TICKS_PER_YEAR,
+  TICK_PARTS,
   createSimulation,
   generateWorld,
   randomSeed,
@@ -250,7 +251,7 @@ function startClock() {
  * of the year (the yearly plans differ by week), to stop before a part that
  * would overrun the frame budget.
  */
-const partMs = new Float64Array(8 * TICKS_PER_YEAR);
+const partMs = new Float64Array(TICK_PARTS * TICKS_PER_YEAR);
 const partKey = (sim: Simulation) => sim.part * TICKS_PER_YEAR + (sim.tick % TICKS_PER_YEAR);
 
 /**

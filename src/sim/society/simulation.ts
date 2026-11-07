@@ -1,4 +1,4 @@
-import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYear, type WarState } from './war';
+import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
 import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
@@ -223,6 +223,8 @@ export type Simulation = {
   refreshOwner: Uint8Array | null;
   /** The current tick's seat planning while it runs in parts. */
   seatPlan: SeatPlan | null;
+  /** The next step of a yearly plan that runs in several parts (the war's, see runWarYearStep); 0 otherwise. */
+  planStep: number;
 };
 
 /** Settles the player's starting tribe in a freshly generated world. */
@@ -268,6 +270,7 @@ export function createSimulation(world: World): Simulation {
     part: TickPart.Start,
     refreshOwner: null,
     seatPlan: null,
+    planStep: 0,
   };
   computeCapacity(sim);
 
@@ -293,15 +296,23 @@ export const TickPart = {
   /** Inhabitants, the year's end for the peoples, merchants on their way. */
   Start: 0,
   Economy: 1,
-  /** Quarterly: new settlements, cut-off land, satisfaction. */
+  /** Quarterly: new settlements, cut-off land. */
   RefreshLand: 2,
-  /** Quarterly: wants, migration, breakaways, the map snapshot. */
+  /** Quarterly: satisfaction. */
+  RefreshMood: 6,
+  /** Quarterly: wants, migration, breakaways. */
   RefreshPeople: 3,
-  /** The yearly plan of this week (seats of government in several parts). */
+  /** Quarterly: the map snapshot. */
+  Snapshot: 7,
+  /** The yearly plan of this week (seats of government and the war's year in several parts). */
   Plan: 4,
-  /** Government traders, distances, transit hubs, the year's totals. */
+  /** Government traders, armies on their way, battles and sieges. */
+  Armies: 8,
+  /** Distances, transit hubs, the year's totals. */
   Finish: 5,
 } as const;
+/** Number of TickPart values (for tables by part). */
+export const TICK_PARTS = 9;
 export type TickPart = (typeof TickPart)[keyof typeof TickPart];
 
 /** Advances the world by one week (or finishes the week stepSimulationPart has started). */
@@ -346,8 +357,12 @@ export function stepSimulationPart(sim: Simulation): boolean {
       expandSettlements(sim);
       const owner = cellOwners(sim);
       splitCutOffLand(sim, owner);
-      updateSatisfaction(sim, owner);
       sim.refreshOwner = owner;
+      sim.part = TickPart.RefreshMood;
+      return false;
+    }
+    case TickPart.RefreshMood: {
+      updateSatisfaction(sim, sim.refreshOwner!);
       sim.part = TickPart.RefreshPeople;
       return false;
     }
@@ -357,6 +372,10 @@ export function stepSimulationPart(sim: Simulation): boolean {
       sumCivWants(sim, owner);
       emigrate(sim, owner);
       breakAway(sim, owner);
+      sim.part = TickPart.Snapshot;
+      return false;
+    }
+    case TickPart.Snapshot: {
       refreshSnapshot(sim);
       sim.part = TickPart.Plan;
       return false;
@@ -376,17 +395,29 @@ export function stepSimulationPart(sim: Simulation): boolean {
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
       else if (weekOfYear === MILITARY_WEEK) runMilitaryYear(sim);
-      else if (weekOfYear === WAR_WEEK) runWarYear(sim);
+      else if (weekOfYear === WAR_WEEK) {
+        // One running war per part, then the declarations up to one new war per part.
+        const next = runWarYearStep(sim, sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
       else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
+      sim.part = TickPart.Armies;
+      return false;
+    }
+    case TickPart.Armies: {
+      advanceGovernment(sim);
+      advanceWar(sim);
       sim.part = TickPart.Finish;
       return false;
     }
     case TickPart.Finish: {
-      advanceGovernment(sim);
-      advanceWar(sim);
       measureDistances(sim, sim.world.owner);
       updateTransitHubs(sim);
       if (weekOfYear === 0) closeYear(sim);
@@ -1034,7 +1065,8 @@ function refreshSnapshot(sim: Simulation): void {
     world.faith[c] = people > 0 ? faithSum[c] / people : 0;
     let owner = 0;
     let most = 0;
-    for (let id = 1; id < sim.civSlots; id++) {
+    // An empty hex has nobody of any people (most hexes: skip them).
+    for (let id = 1; people > 0 && id < sim.civSlots; id++) {
       const n = sim.cellCivPop[c * sim.civSlots + id];
       civPop[id] += n;
       if (n > most) {
