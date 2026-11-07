@@ -100,6 +100,29 @@ test('the trade scenario opens trade everywhere and merchants set out', async ()
   assert.equal(SCENARIOS.trade.trade, true);
 });
 
+test('the trade scenario runs on in tick parts, as the game clock runs it, like whole ticks', async () => {
+  const { createSimulation, generateWorld, TICKS_PER_YEAR, stepSimulation, stepSimulationPart } = await import('../sim');
+  const { openTrade } = await import('./openTrade');
+  const make = () => {
+    const sim = createSimulation(generateWorld({ seed: 11 }));
+    for (let t = 0; t < 150 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+    openTrade(sim);
+    return sim;
+  };
+  const whole = make();
+  const parts = make();
+  // Two years: every yearly plan that runs in several parts (diplomacy, military, war) comes up twice.
+  for (let t = 0; t < 2 * TICKS_PER_YEAR; t++) {
+    stepSimulation(whole);
+    while (!stepSimulationPart(parts));
+  }
+  assert.equal(parts.tick, whole.tick);
+  assert.deepEqual(parts.world.owner, whole.world.owner);
+  assert.deepEqual(parts.economy.stock, whole.economy.stock);
+  assert.equal(JSON.stringify(parts.diplomacy.agreements), JSON.stringify(whole.diplomacy.agreements));
+  assert.equal(parts.planStep, 0);
+});
+
 test('the diplomacy scenario opens every border and merchants travel abroad', async () => {
   const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
   const { openDiplomacy } = await import('./openDiplomacy');

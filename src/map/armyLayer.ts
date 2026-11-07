@@ -1,4 +1,4 @@
-import { Skia, createPicture, type SkImage, type SkPaint, type SkPathBuilder, type SkPicture } from '@shopify/react-native-skia';
+import { Skia, createPicture, type SkImage, type SkPaint, type SkPathBuilder, type SkPicture, type SkRect } from '@shopify/react-native-skia';
 import { ArmyState, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
 import { sharedFillPaint, sharedStrokePaint } from './paints';
@@ -44,8 +44,8 @@ const SHIELD_BOX: Box = { x: -1.25 * U, y: -1.25 * U, w: 2.5 * U, h: 2.9 * U };
  * outline, shields by state, the swords), rendered at `pxPerUnit` pixels per
  * map pixel (the sharpest zoom tier) and kept until `dispose`.
  */
-/** A sprite image and a picture that draws it into its box around the anchor (placed by translating). */
-type Sprite = { image: SkImage; picture: SkPicture } | null;
+/** A sprite image with its source rect and its box around the anchor (placed by translating), made once. */
+type Sprite = { image: SkImage; src: SkRect; dst: SkRect } | null;
 
 export class ArmySprites {
   private flags = new Map<string, Sprite>();
@@ -74,19 +74,6 @@ export class ArmySprites {
     return sprite;
   }
 
-  /** Frees the sprites once no picture on screen can use them any more. */
-  dispose() {
-    const all = [...this.flags.values(), ...this.shields, this.pole, this.swords];
-    this.flags.clear();
-    setTimeout(
-      () =>
-        all.forEach((sprite) => {
-          sprite?.picture.dispose();
-          sprite?.image.dispose();
-        }),
-      1000,
-    );
-  }
 }
 
 /** Marker positions (map pixels), reused: an army picture is recorded several times a second. */
@@ -96,8 +83,8 @@ const markerY = new Float64Array(256);
 /**
  * Records all army markers into one picture, in two copies side by side (the
  * map wraps: its second copy is drawn at `+ mapWidth`), in layers: the flags
- * by people, the poles, the shields by state, the swords. Only the sprites'
- * pictures are placed, so recording allocates next to nothing.
+ * by people, the poles, the shields by state, the swords. The sprites and their
+ * rects are made once, so recording allocates next to nothing.
  */
 export function buildArmyPicture(
   world: World,
@@ -121,12 +108,13 @@ export function buildArmyPicture(
   }
   return createPicture((canvas) => {
     if (count === 0) return;
+    const paint = Skia.Paint();
     const place = (sprite: Sprite, i: number) => {
       if (!sprite) return;
       for (let copy = 0; copy < 2; copy++) {
         canvas.save();
         canvas.translate(xs[i] + copy * mapWidth, ys[i]);
-        canvas.drawPicture(sprite.picture);
+        canvas.drawImageRect(sprite.image, sprite.src, sprite.dst, paint, true);
         canvas.restore();
       }
     };
@@ -153,16 +141,11 @@ function stateOf(markers: ArmyMarkers, i: number): number {
   return st === ArmyState.Gathering ? 1 : st === ArmyState.Retreating ? 2 : 0;
 }
 
-/** A sprite and the picture that draws it into `box` (see Sprite). */
+/** A sprite drawn into `box` (see Sprite). */
 function makeSprite(box: Box, pxPerUnit: number, paint: SkPaint, add: (path: SkPathBuilder) => void): Sprite {
   const image = renderSprite(box, pxPerUnit, paint, add);
   if (!image) return null;
-  // Its bounds are the box (the default bounds start at 0 and would cut off the box's upper left).
-  const dst = Skia.XYWHRect(box.x, box.y, box.w, box.h);
-  const picture = createPicture((canvas) => {
-    canvas.drawImageRect(image, Skia.XYWHRect(0, 0, image.width(), image.height()), dst, Skia.Paint(), true);
-  }, dst);
-  return { image, picture };
+  return { image, src: Skia.XYWHRect(0, 0, image.width(), image.height()), dst: Skia.XYWHRect(box.x, box.y, box.w, box.h) };
 }
 
 /** Renders one sprite: the path `add` makes, drawn with `paint` into the box. */

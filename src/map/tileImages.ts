@@ -10,7 +10,7 @@ const SLICE_MS = 8;
  */
 const TILES_PER_SLICE = 3;
 const SLICE_PAUSE_MS = 16;
-/** Memory for rendered tiles (4 bytes per pixel). */
+/** Default memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
 const KEEP_MS = 1000;
@@ -20,7 +20,8 @@ export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
 /** A number that only changes when a tile's image would change (see `invalidate`). */
 export type TileSignature = (chunk: number) => number;
 
-type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; signature: number };
+/** `unchecked`: the data changed while the tile was out of view; its signature is compared once it is wanted again. */
+type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; unchecked: boolean; signature: number };
 export type TileRequest = TileRef & { tier: number };
 
 /**
@@ -57,6 +58,8 @@ export class TileImages {
     /** Pixels per picture pixel for each tier. */
     private tierScales: readonly number[],
     private onReady: () => void,
+    /** Memory for this layer's images; least recently drawn tiles out of view are freed beyond it. */
+    private budgetBytes: number = BUDGET_BYTES,
   ) {}
 
   /** The image of a tile at a tier, or at any other tier as a stand-in. */
@@ -86,6 +89,10 @@ export class TileImages {
       .filter((r) => {
         const k = key(r.chunk, r.tier);
         const entry = this.entries.get(k);
+        if (entry?.unchecked) {
+          entry.unchecked = false;
+          if (!this.signature || this.signature(r.chunk) !== entry.signature) entry.stale = true;
+        }
         if ((entry && !entry.stale) || seen.has(k)) return false;
         seen.add(k);
         return true;
@@ -106,18 +113,17 @@ export class TileImages {
   }
 
   /**
-   * The layer's data changed: tiles near the view are rendered again on the
-   * next `want`, the others are dropped.
+   * The layer's data changed: tiles near the view that look different are
+   * rendered again on the next `want`. The others keep their image and are
+   * checked once they are wanted again: coming into view while the map
+   * moves, they show the old image (like any outdated tile) instead of
+   * having to be rendered during the movement.
    */
   invalidate() {
     for (const [k, e] of this.entries) {
-      const chunk = chunkOf(k);
-      if (this.wanted.has(chunk)) {
-        if (!this.signature || this.signature(chunk) !== e.signature) e.stale = true;
-      } else {
-        this.entries.delete(k);
-        this.free(e);
-      }
+      if (this.wanted.has(chunkOf(k))) {
+        if (!this.signature || this.signature(chunkOf(k)) !== e.signature) e.stale = true;
+      } else e.unchecked = true;
     }
   }
 
@@ -151,7 +157,7 @@ export class TileImages {
       const image = this.render(r.chunk, this.tierScales[r.tier]);
       this.tileMs = Math.max(Date.now() - before, this.tileMs * 0.9);
       const bytes = image ? image.width() * image.height() * 4 : 0;
-      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, signature });
+      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, unchecked: false, signature });
       this.bytes += bytes;
       if (old) this.free(old);
       rendered++;
@@ -163,13 +169,13 @@ export class TileImages {
 
   /** Frees the least recently drawn tiles while over budget. */
   private evict() {
-    if (this.bytes <= BUDGET_BYTES) return;
+    if (this.bytes <= this.budgetBytes) return;
     const now = Date.now();
     const old = [...this.entries]
       .filter(([k, e]) => !this.wanted.has(chunkOf(k)) && now - e.usedAt > KEEP_MS)
       .sort((a, b) => a[1].usedAt - b[1].usedAt);
     for (const [k, e] of old) {
-      if (this.bytes <= BUDGET_BYTES) break;
+      if (this.bytes <= this.budgetBytes) break;
       this.entries.delete(k);
       this.free(e);
     }

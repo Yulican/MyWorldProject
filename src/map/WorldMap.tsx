@@ -45,6 +45,8 @@ const START_SCALE = 1;
 const TAP_COOLDOWN_MS = 300;
 /** The map rests once it hasn't moved for this long (outdated tiles are redone then, see TileImages.setResting). */
 const REST_MS = 100;
+/** Memory for territory tile images (the terrain tiles have their own, see tileImages.ts). */
+const TERRITORY_BUDGET_BYTES = 40 * 1024 * 1024;
 /** Slower releases just stop; faster ones let the map glide on. */
 const MIN_FLING_VELOCITY = 150;
 /** Lifting the fingers after a pinch reports a pan velocity that isn't a fling. */
@@ -464,6 +466,8 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
         (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor, territory.war),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
         onReady,
+        // Out-of-view tiles are kept through snapshots (see TileImages.invalidate): a smaller budget than the terrain's.
+        TERRITORY_BUDGET_BYTES,
       ),
     [world, layers, scales, onReady, territory],
   );
@@ -618,10 +622,8 @@ const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { worl
     };
     update();
     const unsubscribe = armies.subscribe(update);
-    return () => {
-      unsubscribe();
-      sprites.dispose();
-    };
+    // The sprites are a few small images: the garbage collector frees them with the last picture using them.
+    return unsubscribe;
   }, [world, mapWidth, territory, picture]);
   return <Picture picture={picture} />;
 });
