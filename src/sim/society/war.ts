@@ -27,11 +27,12 @@ import { changeCiv, record, type Simulation } from './simulation';
 //
 // Simplifications kept from the simulated prototype (the numbers were chosen
 // with them):
-// - Gathering: one army per raise. Its contingents (the soldiers of each
-//   settlement) are not armies on the map: each walks virtually, at army speed
-//   over land the army may enter, to the rally point (the people's seat nearest
-//   the goal; the defender's is the goal itself) and joins the army there when
-//   its travel time is over. The army stands at the rally point meanwhile (one
+// - Gathering: the attacker raises one main army (WAR.mainArmies) at its seat
+//   nearest the goal, the defender up to WAR.reliefArmies relief armies at its
+//   other seats nearest the goal (only without one: a garrison in the goal).
+//   Contingents (the soldiers of each settlement, to the nearest rally point)
+//   are not armies on the map: each walks virtually, at army speed over land
+//   the army may enter, and joins its army when its travel time is over. The army stands at the rally point meanwhile (one
 //   marker) and fights with the soldiers that have arrived. It sets out when
 //   all have arrived, at the latest after WAR.gatherWeeks; the late ones go home.
 // - A beaten army (a draw: both) retreats with what is left along the
@@ -67,12 +68,14 @@ export const WAR = {
   /** Benefit of a district: inhabitants + resPop per deposit (x resMul for strategic and luxury deposits), divided by 1 + its defenders. */
   resPop: 50,
   resMul: 2,
-  /** Armies: share of a people's soldiers that march, armies per people and worldwide, smallest army, hexes between anchors. */
+  /** Armies: share of a people's soldiers that march, armies per people (all, retreating ones too) and worldwide, smallest army. */
   sendShare: 0.7,
   maxArmies: 4,
   worldArmies: 32,
   armyMin: 5,
-  anchorSep: 3,
+  /** The attacker's main armies and the defender's relief armies (each from another seat) at a time. */
+  mainArmies: 1,
+  reliefArmies: 3,
   /** Weeks an army waits at its rally point for its contingents at most. */
   gatherWeeks: 8,
   /** Travel cost per week (a road hex costs mostly 0.5), cost limit of the path search, weeks without a path before an army goes home. */
@@ -441,9 +444,19 @@ function worldRoom(w: WarState): number {
   return Math.min(WAR.worldArmies, MAX_ARMIES) - w.armies;
 }
 
+/**
+ * Raises what `civ` may still have in war `s`: the attacker up to
+ * WAR.mainArmies, the defender up to WAR.reliefArmies (armies not
+ * retreating), all its armies at most WAR.maxArmies, the world WAR.worldArmies.
+ */
 function reraise(sim: Simulation, s: number, civ: number): void {
   const w = sim.war;
-  const room = Math.min(WAR.maxArmies - countArmies(w, s, civ), worldRoom(w));
+  let active = 0;
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === civ && w.aState[a] !== ArmyState.Retreating) active++;
+  }
+  const cap = civ === w.wAtt[s] ? WAR.mainArmies : WAR.reliefArmies;
+  const room = Math.min(cap - active, WAR.maxArmies - countArmies(w, s, civ), worldRoom(w));
   if (room > 0) raiseArmies(sim, s, civ, room);
 }
 
@@ -611,9 +624,8 @@ export function startWar(sim: Simulation, att: number, goal: number): number {
   if (w.wars > st.maxWars) st.maxWars = w.wars;
   sever(sim, att, def);
   planMarch(sim, s);
-  const each = Math.min(WAR.maxArmies, Math.floor(worldRoom(w) / 2));
-  raiseArmies(sim, s, att, each);
-  raiseArmies(sim, s, def, each);
+  reraise(sim, s, att);
+  reraise(sim, s, def);
   record(sim, `The ${sim.civs[att]!.name} declared war on the ${sim.civs[def]!.name}.`, goal);
   return s;
 }
@@ -653,41 +665,68 @@ function isSeatOf(sim: Simulation, c: number, civ: number): boolean {
   return sim.civs[civ]?.capital === c || (sim.hasBuildings[c] === 1 && hasSeat(sim.economy, c));
 }
 
+const rallyBuf = new Int32Array(MAX_ARMIES);
+
 /**
- * Where `civ`'s army for war `s` gathers: its seat nearest the goal (least
- * travel cost to it, else fewest hexes; the defender's is the goal itself).
- * Without a seat: its settlement with the most soldiers to send. -1 if none.
+ * Where `civ`'s armies for war `s` gather (up to `max`, into `out`): its seats
+ * nearest the goal (least travel cost to it, else fewest hexes, else the lower
+ * cell). The attacker's may be any seat; the defender's are its other seats
+ * (relief armies), and only without one the goal itself (its garrison).
  */
-export function rallyPoint(sim: Simulation, s: number, civ: number): number {
+export function rallyPoints(sim: Simulation, s: number, civ: number, max: number, out: Int32Array): number {
   const n = sim.world.cellCount;
   const w = sim.war;
   const goal = w.wGoal[s];
-  const base = (s * 2 + (civ === w.wAtt[s] ? 0 : 1)) * n;
-  let best = -1;
-  let bestCost = Infinity;
-  let bestD = Infinity;
-  for (let c = 0; c < n; c++) {
-    if (!isSeatOf(sim, c, civ)) continue;
-    const cost = w.field[base + c];
-    const d = hexDistance(sim.world, c, goal);
-    if (cost < bestCost || (cost === bestCost && d < bestD)) {
-      best = c;
-      bestCost = cost;
-      bestD = d;
+  const defender = civ !== w.wAtt[s];
+  const base = (s * 2 + (defender ? 1 : 0)) * n;
+  let k = 0;
+  while (k < max) {
+    let best = -1;
+    let bestCost = Infinity;
+    let bestD = Infinity;
+    for (let c = 0; c < n; c++) {
+      if ((defender && c === goal) || !isSeatOf(sim, c, civ)) continue;
+      let taken = false;
+      for (let j = 0; j < k; j++) if (out[j] === c) taken = true;
+      if (taken) continue;
+      const cost = w.field[base + c];
+      const d = hexDistance(sim.world, c, goal);
+      if (best < 0 || cost < bestCost || (cost === bestCost && d < bestD)) {
+        best = c;
+        bestCost = cost;
+        bestD = d;
+      }
     }
+    if (best < 0) break;
+    out[k++] = best;
   }
-  return best;
+  if (k === 0 && defender && max > 0 && isSeatOf(sim, goal, civ)) out[k++] = goal;
+  return k;
 }
 
-/** Travel cost from every hex to `from` over land `civ` may enter in war against `enemy` (up to WAR.fieldMax; Infinity beyond). */
+/** The first rally point of `civ` in war `s`, -1 if none. */
+export function rallyPoint(sim: Simulation, s: number, civ: number): number {
+  return rallyPoints(sim, s, civ, 1, rallyBuf) > 0 ? rallyBuf[0] : -1;
+}
+
+/**
+ * Travel cost from every hex to the nearest of `count` rally points (rallyBuf)
+ * over land `civ` may enter in war against `enemy` (up to WAR.fieldMax;
+ * Infinity beyond), and which one is nearest (`label`, index into rallyBuf).
+ */
 let gatherCost = new Float32Array(0);
-function costFrom(sim: Simulation, from: number, civ: number, enemy: number, dist: Float32Array): void {
+let gatherLabel = new Int8Array(0);
+function costFrom(sim: Simulation, count: number, civ: number, enemy: number, dist: Float32Array, label: Int8Array): void {
   const world = sim.world;
   const owner = world.owner;
   dist.fill(Infinity);
-  dist[from] = 0;
   fieldHeap.size = 0;
-  fieldHeap.push(from, 0);
+  for (let j = 0; j < count; j++) {
+    const r = rallyBuf[j];
+    dist[r] = 0;
+    label[r] = j;
+    fieldHeap.push(r, 0);
+  }
   while (fieldHeap.size > 0) {
     const c = fieldHeap.pop();
     const here = dist[c];
@@ -697,6 +736,7 @@ function costFrom(sim: Simulation, from: number, civ: number, enemy: number, dis
       const next = here + stepCost(world, c, d);
       if (next >= dist[nb] || next > WAR.fieldMax) continue;
       dist[nb] = next;
+      label[nb] = label[c];
       fieldHeap.push(nb, next);
     }
   }
@@ -730,13 +770,18 @@ function newArmy(sim: Simulation, s: number, civ: number, cell: number): number 
   return a;
 }
 
+const labelTotal = new Float64Array(MAX_ARMIES);
+const labelArmy = new Int32Array(MAX_ARMIES);
+
 /**
- * Raises one army of `civ` for war `s` (if `room` allows) from WAR.sendShare
- * of its soldiers (never more than that share away or on the way at a time).
- * It gathers at the rally point: every settlement that can reach it sends its
- * share as a contingent, which joins the army after its travel time (cost /
- * WAR.speed weeks, rounded up). The army sets out when all have arrived, at
- * the latest after WAR.gatherWeeks.
+ * Raises up to `room` armies of `civ` for war `s`, one per rally point
+ * (rallyPoints), from WAR.sendShare of its soldiers (never more than that
+ * share away or on the way at a time). Every settlement that can reach a
+ * rally point sends its share as a contingent to the nearest one; it joins
+ * that army after its travel time (cost / WAR.speed weeks, rounded up). An
+ * army sets out when all its contingents have arrived, at the latest after
+ * WAR.gatherWeeks. A rally point that would gather fewer than WAR.armyMin
+ * soldiers raises no army (its settlements send none).
  */
 function raiseArmies(sim: Simulation, s: number, civ: number, room: number): void {
   const w = sim.war;
@@ -748,14 +793,15 @@ function raiseArmies(sim: Simulation, s: number, civ: number, room: number): voi
     takeBuf = new Int32Array(n * TROOP_TYPES);
     raiseCells = new Int32Array(n);
     gatherCost = new Float32Array(n);
+    gatherLabel = new Int8Array(n);
   }
-  const rally = rallyPoint(sim, s, civ);
-  if (rally < 0) return;
-  costFrom(sim, rally, civ, civ === w.wAtt[s] ? w.wDef[s] : w.wAtt[s], gatherCost);
+  const rallies = rallyPoints(sim, s, civ, Math.min(room, MAX_ARMIES), rallyBuf);
+  if (rallies === 0) return;
+  costFrom(sim, rallies, civ, civ === w.wAtt[s] ? w.wDef[s] : w.wAtt[s], gatherCost, gatherLabel);
   sold.fill(0);
   cov.fill(0);
+  labelTotal.fill(0);
   let cells = 0;
-  let total = 0;
   for (let c = 0; c < n; c++) {
     if (owner[c] !== civ) continue;
     const reach = gatherCost[c] !== Infinity && w.cArmy[c] < 0;
@@ -774,23 +820,32 @@ function raiseArmies(sim: Simulation, s: number, civ: number, room: number): voi
     }
     if (any > 0) {
       raiseCells[cells++] = c;
-      total += any;
+      labelTotal[gatherLabel[c]] += any;
     }
   }
-  if (total < WAR.armyMin) return;
-  const a = newArmy(sim, s, civ, rally);
-  if (a < 0) return;
-  w.aState[a] = ArmyState.Gathering;
-  w.aLeave[a] = sim.tick + WAR.gatherWeeks;
-  w.gathering++;
-  for (let j = 0; j < cells; j++) {
-    const c = raiseCells[j];
+  let raised = 0;
+  for (let j = 0; j < rallies; j++) {
+    labelArmy[j] = -1;
+    if (labelTotal[j] < WAR.armyMin) continue;
+    const a = newArmy(sim, s, civ, rallyBuf[j]);
+    if (a < 0) continue;
+    labelArmy[j] = a;
+    w.aState[a] = ArmyState.Gathering;
+    w.aLeave[a] = sim.tick + WAR.gatherWeeks;
+    w.gathering++;
+    raised++;
+  }
+  if (raised === 0) return;
+  for (let i = 0; i < cells; i++) {
+    const c = raiseCells[i];
+    const a = labelArmy[gatherLabel[c]];
+    if (a < 0) continue;
     const weeks = Math.ceil(gatherCost[c] / WAR.speed);
     if (weeks <= 0) {
       for (let t = 0; t < TROOP_TYPES; t++) {
-        const i = c * TROOP_TYPES + t;
-        w.away[i] += takeBuf[i];
-        w.aN[a * TROOP_TYPES + t] += takeBuf[i];
+        const k = c * TROOP_TYPES + t;
+        w.away[k] += takeBuf[k];
+        w.aN[a * TROOP_TYPES + t] += takeBuf[k];
       }
       continue;
     }
@@ -800,7 +855,10 @@ function raiseArmies(sim: Simulation, s: number, civ: number, room: number): voi
     w.aWait[a]++;
     w.stats.contingents++;
   }
-  if (w.aWait[a] === 0) setOut(sim, a);
+  for (let j = 0; j < rallies; j++) {
+    const a = labelArmy[j];
+    if (a >= 0 && w.aWait[a] === 0) setOut(sim, a);
+  }
 }
 
 /** Contingent of cell `c` arrives at its army. */

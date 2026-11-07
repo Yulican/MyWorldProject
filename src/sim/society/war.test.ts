@@ -80,7 +80,7 @@ type Fixture = { sim: Simulation; att: number; def: number; seats: number[] };
  * old one (`att`). Soldiers: 10 melee in every settlement of att, 8 in every
  * settlement of def; strengths set to match.
  */
-function fixture(districts: 1 | 2): Fixture {
+function fixture(districts: number): Fixture {
   const sim = createSimulation(generateWorld({ seed: 12 }));
   runYears(sim, 200);
   assert.equal(sim.war.wars, 0);
@@ -249,15 +249,18 @@ test('the goal is the bordering seat with the largest benefit: (inhabitants + 50
   assert.equal(chooseGoal(sim, att, new Uint8Array(PAIRS)), -1);
 });
 
-test('70 % of the soldiers march, one army per raise, at most 4 armies per people and 32 in the world', () => {
-  const f = fixture(1);
+test('70 % of the soldiers march: the attacker in 1 main army, the defender in up to 3 relief armies from its other seats, at most 4 per people and 32 in the world', () => {
+  const f = fixture(4);
   const { sim, att, def } = f;
-  sim.war.armies = MAX_ARMIES - 2; // as if 30 armies marched elsewhere
-  const s = startWar(sim, att, f.seats[0]);
-  assert.ok(armiesOf(sim, att).length <= 1 && armiesOf(sim, def).length <= 1, 'only room for one army each');
+  const w = sim.war;
+  const goal = f.seats[0];
+  w.armies = MAX_ARMIES - 2; // as if 30 armies marched elsewhere
+  const s = startWar(sim, att, goal);
+  assert.equal(armiesOf(sim, att).length, 1);
+  assert.equal(armiesOf(sim, def).length, 1, 'room for one relief army only');
   endWar(sim, s, EndType.Exhausted);
-  sim.war.truce.fill(0);
-  sim.war.armies = MAX_ARMIES - 1;
+  w.truce.fill(0);
+  w.armies = MAX_ARMIES - 1;
   const chance = WAR.chance;
   try {
     WAR.chance = 1;
@@ -265,39 +268,87 @@ test('70 % of the soldiers march, one army per raise, at most 4 armies per peopl
   } finally {
     WAR.chance = chance;
   }
-  assert.equal(sim.war.wars, 0, 'no room for two armies: no declaration');
-  assert.ok(sim.war.stats.capBlocked >= 1);
-  sim.war.armies = 0;
+  assert.equal(w.wars, 0, 'no room for two armies: no declaration');
+  assert.ok(w.stats.capBlocked >= 1);
+  w.armies = 0;
 
-  const s2 = startWar(sim, att, f.seats[0]);
+  const s2 = startWar(sim, att, goal);
+  const relief = armiesOf(sim, def);
   assert.equal(armiesOf(sim, att).length, 1);
-  assert.equal(armiesOf(sim, def).length, 1);
+  assert.equal(relief.length, 3);
+  // Each relief army at another seat, the three nearest the goal, never the goal itself.
+  const cells = relief.map((a) => w.aCell[a]);
+  assert.equal(new Set(cells).size, 3);
+  for (const c of cells) assert.ok(c !== goal && f.seats.includes(c));
+  const left = f.seats.filter((c) => c !== goal && !cells.includes(c));
+  for (const c of left) for (const r of cells) assert.ok(travelCost(sim, s2, 1, c) >= travelCost(sim, s2, 1, r));
   ready(sim);
   let marching = 0;
-  for (const a of armiesOf(sim, att)) marching += sim.war.aN[a * TROOP_TYPES + Troop.Melee];
+  for (const a of armiesOf(sim, att)) marching += w.aN[a * TROOP_TYPES + Troop.Melee];
   let away = 0;
   for (const c of settledOf(sim, att)) {
-    const k = sim.war.away[c * TROOP_TYPES + Troop.Melee];
+    const k = w.away[c * TROOP_TYPES + Troop.Melee];
     assert.ok(k === 0 || k === 7, 'the share of a settlement that can reach the rally point, or none');
     away += k;
   }
   assert.ok(marching > 0);
   assert.equal(marching, away);
-  for (const c of settledOf(sim, def)) assert.ok([0, 5].includes(sim.war.away[c * TROOP_TYPES + Troop.Melee]));
-  // Every year one more army from the soldiers not yet away, up to 4.
-  const counts: number[] = [];
-  for (let y = 0; y < 5; y++) {
+  for (const c of settledOf(sim, def)) assert.ok([0, 5].includes(w.away[c * TROOP_TYPES + Troop.Melee]));
+  // Raised again every year, but never beyond the caps.
+  for (let y = 0; y < 3; y++) {
     for (const c of settledOf(sim, att)) sim.military.soldiers[c * TROOP_TYPES + Troop.Melee] += 10;
+    for (const c of settledOf(sim, def)) sim.military.soldiers[c * TROOP_TYPES + Troop.Melee] += 10;
     runWarYear(sim);
     ready(sim);
-    assert.ok(sim.war.wLive[s2]);
-    counts.push(armiesOf(sim, att).length);
+    assert.ok(w.wLive[s2]);
+    assert.equal(armiesOf(sim, att).length, 1);
+    assert.equal(armiesOf(sim, def).length, 3);
   }
-  assert.deepEqual(counts, [2, 3, 4, 4, 4]);
   for (const c of settledOf(sim, att)) {
     const i = c * TROOP_TYPES + Troop.Melee;
-    assert.ok(sim.war.away[i] <= Math.floor(0.7 * sim.military.soldiers[i]));
+    assert.ok(w.away[i] <= Math.floor(0.7 * sim.military.soldiers[i]));
   }
+  // A main army gone: a new one next year. A retreating relief army still counts toward the 4.
+  disbandArmy(sim, armiesOf(sim, att)[0]);
+  w.aState[armiesOf(sim, def)[0]] = ArmyState.Retreating;
+  for (const c of settledOf(sim, att)) sim.military.soldiers[c * TROOP_TYPES + Troop.Melee] += 10;
+  for (const c of settledOf(sim, def)) sim.military.soldiers[c * TROOP_TYPES + Troop.Melee] += 10;
+  runWarYear(sim);
+  assert.equal(armiesOf(sim, att).length, 1);
+  assert.equal(armiesOf(sim, def).length, 4);
+  w.aState[armiesOf(sim, def)[1]] = ArmyState.Retreating;
+  runWarYear(sim);
+  assert.equal(armiesOf(sim, def).length, 4, 'never more than 4');
+});
+
+test('a relief army gathers at the defender’s nearest other seat and marches to the besieged goal; a defender with one seat gathers in the goal', () => {
+  const f = fixture(2);
+  const { sim, att, def } = f;
+  const w = sim.war;
+  const [capital, goal] = f.seats;
+  const s = startWar(sim, att, goal);
+  const [b] = armiesOf(sim, def);
+  assert.equal(armiesOf(sim, def).length, 1);
+  assert.equal(w.aCell[b], capital, 'its other seat');
+  assert.equal(w.aState[b], ArmyState.Gathering);
+  for (const a of armiesOf(sim, att)) disbandArmy(sim, a);
+  ready(sim);
+  assert.ok(travelCost(sim, s, 1, capital) < Infinity, 'a way to the goal');
+  let weeks = 0;
+  let last = travelCost(sim, s, 1, w.aCell[b]);
+  while (w.live[b] && w.aCell[b] !== goal && weeks < 60) {
+    week(sim);
+    weeks++;
+    const now = travelCost(sim, s, 1, w.aCell[b]);
+    assert.ok(now <= last);
+    last = now;
+  }
+  assert.equal(w.aCell[b], goal, 'the relief reached the goal');
+  // One seat only: the garrison gathers in the goal.
+  const g = fixture(1);
+  startWar(g.sim, g.att, g.seats[0]);
+  const [x] = armiesOf(g.sim, g.def);
+  assert.equal(g.sim.war.aCell[x], g.seats[0]);
 });
 
 test('contingents walk to the rally point (the seat nearest the goal) at army speed; the army sets out when all arrived, at the latest after 8 weeks', () => {
