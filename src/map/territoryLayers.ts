@@ -8,7 +8,7 @@ import {
 } from '@shopify/react-native-skia';
 import { DIRECTION_COUNT, DIRECTION_OFFSETS, hexCenterX, hexCenterY, isWaterBiome, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
-import { sharedFillPaint, sharedStrokePaint } from './paints';
+import { BuilderSet, keptBuilder, sharedFillPaint, sharedStrokePaint } from './paints';
 import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
 
 /**
@@ -186,30 +186,36 @@ export function renderTerritoryTile(
  * besieged seats get a red frame. Each hex draws its half of a road (center
  * to edge), so roads join across tiles and the map wrap.
  */
+// Path builders kept from one tile to the next (see BuilderSet); drawTerritory empties all of them.
+const tintPaths = new BuilderSet<number>();
+const borderPaths = new BuilderSet<number>();
+const dotPaths = new BuilderSet<number>();
+const rimPath = keptBuilder();
+const roadPath = keptBuilder();
+const outlinePath = keptBuilder();
+const ruinPath = keptBuilder();
+const anchorPath = keptBuilder();
+const warPath = keptBuilder();
+const seatFlagPath = keptBuilder();
+const capitalFlagPath = keptBuilder();
+
 function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string, war: MapWar) {
-  const tints = new Map<number, SkPathBuilder>();
-  const borders = new Map<number, SkPathBuilder>();
-  const dots = new Map<number, SkPathBuilder>();
-  const rim = Skia.PathBuilder.Make();
-  const roads = Skia.PathBuilder.Make();
-  const outlines = Skia.PathBuilder.Make();
-  const ruins = Skia.PathBuilder.Make();
-  const anchors = Skia.PathBuilder.Make();
-  const warLines = Skia.PathBuilder.Make();
+  const tints = tintPaths;
+  const borders = borderPaths;
+  const dots = dotPaths;
+  const rim = rimPath();
+  const roads = roadPath();
+  const outlines = outlinePath();
+  const ruins = ruinPath();
+  const anchors = anchorPath();
+  const warLines = warPath();
   let wars = 0;
   // Flag poles go with the outlines; the pennants are only drawn on tiles that have seats.
-  const seatFlags = Skia.PathBuilder.Make();
-  const capitalFlags = Skia.PathBuilder.Make();
+  const seatFlags = seatFlagPath();
+  const capitalFlags = capitalFlagPath();
   let seats = 0;
   let capitals = 0;
-  const pathFor = (paths: Map<number, SkPathBuilder>, civ: number) => {
-    let path = paths.get(civ);
-    if (!path) {
-      path = Skia.PathBuilder.Make();
-      paths.set(civ, path);
-    }
-    return path;
-  };
+  const pathFor = (paths: BuilderSet<number>, civ: number) => paths.get(civ);
 
   for (let i = 0; i < cells.length; i++) {
     const c = cells[i];
@@ -293,13 +299,13 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     pathFor(dots, owner).addCircle(x, y, radius);
   }
 
-  for (const [civ, path] of tints) canvas.drawPath(path.detach(), sharedFillPaint(withAlpha(colorOf(civ), 0.28)));
+  tints.drawAll((civ, path) => canvas.drawPath(path.detach(), sharedFillPaint(withAlpha(colorOf(civ), 0.28))));
   canvas.drawPath(roads.detach(), sharedStrokePaint(ROAD_COLOR, HEX_PX * 0.1));
-  for (const [civ, path] of borders) canvas.drawPath(path.detach(), sharedStrokePaint(colorOf(civ), HEX_PX * 0.12));
+  borders.drawAll((civ, path) => canvas.drawPath(path.detach(), sharedStrokePaint(colorOf(civ), HEX_PX * 0.12)));
   if (wars > 0) canvas.drawPath(warLines.detach(), sharedStrokePaint(WAR_COLOR, HEX_PX * 0.14));
   canvas.drawPath(rim.detach(), sharedFillPaint('#1b1b1b'));
   canvas.drawPath(ruins.detach(), sharedFillPaint(RUIN_COLOR));
-  for (const [civ, path] of dots) canvas.drawPath(path.detach(), sharedFillPaint(colorOf(civ)));
+  dots.drawAll((civ, path) => canvas.drawPath(path.detach(), sharedFillPaint(colorOf(civ))));
   canvas.drawPath(outlines.detach(), sharedStrokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
   canvas.drawPath(anchors.detach(), sharedStrokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
   if (seats > 0) canvas.drawPath(seatFlags.detach(), sharedFillPaint(SEAT_COLOR));

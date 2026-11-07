@@ -6,6 +6,7 @@ import {
   type SkCanvas,
   type SkImage,
   type SkPathBuilder,
+  type SkSurface,
 } from '@shopify/react-native-skia';
 import {
   Biome,
@@ -20,7 +21,7 @@ import {
 } from '../sim';
 import { createIconLayers, drawBiomeIcon } from './hexIcons';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
-import { fillPaint, strokePaint } from './paints';
+import { BuilderSet, keptBuilder, sharedFillPaint, sharedStrokePaint } from './paints';
 import { BIOME_COLORS, DEPOSIT_COLORS, RIVER_COLOR, START_COLOR } from './palette';
 
 /** Largest overview image side; stays within the texture limit of every phone. */
@@ -143,9 +144,11 @@ export function renderTileWith(
   const tileH = CHUNK_H + 2 * TILE_BLEED;
   const w = Math.ceil(tileW * pxPerUnit);
   const h = Math.ceil(tileH * pxPerUnit);
-  const surface = Skia.Surface.Make(w, h);
+  const surface = tileSurface(w, h);
   if (!surface) return null;
   const canvas = surface.getCanvas();
+  canvas.save();
+  canvas.clear(TRANSPARENT());
   canvas.scale(w / tileW, h / tileH);
   canvas.translate(-x, -y);
   canvas.clipRect(Skia.XYWHRect(x, y, tileW, tileH), ClipOp.Intersect, true);
@@ -159,11 +162,42 @@ export function renderTileWith(
     }
   }
 
+  canvas.restore();
   surface.flush();
-  const image = surface.makeImageSnapshot();
-  surface.dispose();
-  return image;
+  // The image takes the surface's pixels; the surface gets new ones when it is drawn into next (copy on write).
+  // It goes into the JS object of a 1-pixel image: the object then tells the
+  // garbage collector about 1 pixel instead of the whole tile. Tile images are
+  // freed explicitly (TileImages disposes every one it drops), so the collector
+  // needn't run for their memory, and doesn't set off collections while tiles
+  // render during a swipe.
+  return surface.makeImageSnapshot(undefined, smallImage());
 }
+
+/** A new 1-pixel image (a JS object with a small memory hint for the garbage collector). */
+function smallImage(): SkImage {
+  pixelSurface ??= Skia.Surface.Make(1, 1);
+  return pixelSurface!.makeImageSnapshot();
+}
+let pixelSurface: SkSurface | null = null;
+
+/**
+ * One surface per tile size, kept for every tile of that size: a new surface
+ * per tile would count its pixels as new memory for the JS garbage collector
+ * each time (and set off collections while tiles render during a swipe).
+ */
+const surfaces = new Map<number, SkSurface>();
+function tileSurface(w: number, h: number): SkSurface | null {
+  const key = w * 100003 + h;
+  let surface = surfaces.get(key);
+  if (!surface) {
+    surface = Skia.Surface.Make(w, h) ?? undefined;
+    if (!surface) return null;
+    surfaces.set(key, surface);
+  }
+  return surface;
+}
+let transparent: Float32Array | null = null;
+const TRANSPARENT = () => (transparent ??= Skia.Color('transparent'));
 
 export function cellsInRange(world: World, col0: number, col1: number, row0: number, row1: number): Int32Array {
   const cells = new Int32Array((col1 - col0) * (row1 - row0));
@@ -199,6 +233,18 @@ function shadeStep(elevation: number): number {
   return elevation >= 0 ? Math.min(3, Math.floor(elevation * 4)) : Math.min(3, Math.floor(-elevation * 4));
 }
 
+/** shadeColor's results by biome color, lowland or water, and step: the same few strings for every tile. */
+const shades = new Map<string, string>();
+function shadeOf(color: string, elevation: number, step: number): string {
+  const key = `${color}${elevation >= 0 ? '+' : '-'}${step}`;
+  let shade = shades.get(key);
+  if (shade === undefined) {
+    shade = shadeColor(color, elevation, step);
+    shades.set(key, shade);
+  }
+  return shade;
+}
+
 function shadeColor(color: string, elevation: number, step: number): string {
   const v = parseInt(color.slice(1), 16);
   const f = elevation >= 0 ? 1.08 - step * 0.09 : 1 - step * 0.08;
@@ -207,26 +253,26 @@ function shadeColor(color: string, elevation: number, step: number): string {
 }
 
 /** Hex fills, batched by color. Slightly oversized to hide anti-aliasing seams. */
+const fills = new BuilderSet<string>();
 function drawFills(canvas: SkCanvas, world: World, cells: Int32Array) {
-  const fills = new Map<string, SkPathBuilder>();
   forEachCenter(world, cells, (c, x, y) => {
     const e = world.elevation[c];
-    const color = shadeColor(BIOME_COLORS[world.biome[c]], e, shadeStep(e));
-    let path = fills.get(color);
-    if (!path) {
-      path = Skia.PathBuilder.Make();
-      fills.set(color, path);
-    }
-    addHex(path, x, y, HEX_PX + 0.5);
+    addHex(fills.get(shadeOf(BIOME_COLORS[world.biome[c]], e, shadeStep(e))), x, y, HEX_PX + 0.5);
   });
-  for (const [color, path] of fills) canvas.drawPath(path.detach(), fillPaint(color));
+  fills.drawAll((color, path) => canvas.drawPath(path.detach(), sharedFillPaint(color)));
 }
+
+// Path builders kept between tiles (see BuilderSet).
+const riverPaths = [keptBuilder(), keptBuilder(), keptBuilder()];
+const rimPath = keptBuilder();
+const dotPaths = new BuilderSet<string>();
+const outlinePath = keptBuilder();
 
 /** Rivers, deposits and the start marker. */
 function drawFeatures(canvas: SkCanvas, world: World, cells: Int32Array) {
   // Rivers: a line from each river hex towards the next hex downstream,
   // in three widths by water volume.
-  const rivers = [Skia.PathBuilder.Make(), Skia.PathBuilder.Make(), Skia.PathBuilder.Make()];
+  const rivers = [riverPaths[0](), riverPaths[1](), riverPaths[2]()];
   forEachCenter(world, cells, (c, x, y) => {
     const flow = world.riverFlow[c];
     const dir = world.riverDir[c];
@@ -240,35 +286,29 @@ function drawFeatures(canvas: SkCanvas, world: World, cells: Int32Array) {
     rivers[size].lineTo(x + dx * HEX_PX * reach, y + dy * HEX_PX * reach);
   });
   rivers.forEach((path, size) => {
-    canvas.drawPath(path.detach(), strokePaint(RIVER_COLOR, HEX_PX * (0.12 + size * 0.07)));
+    canvas.drawPath(path.detach(), sharedStrokePaint(RIVER_COLOR, HEX_PX * (0.12 + size * 0.07)));
   });
 
   // Deposits: small colored dots with a dark rim, by category.
-  const rim = Skia.PathBuilder.Make();
-  const dots = new Map<string, SkPathBuilder>();
+  const rim = rimPath();
   forEachCenter(world, cells, (c, x, y) => {
     const id = world.deposit[c];
     if (!id) return;
-    const color = DEPOSIT_COLORS[DEPOSITS[id].category];
-    let path = dots.get(color);
-    if (!path) {
-      path = Skia.PathBuilder.Make();
-      dots.set(color, path);
-    }
+    const path = dotPaths.get(DEPOSIT_COLORS[DEPOSITS[id].category]);
     const dx = x + HEX_PX * 0.45;
     const dy = y + HEX_PX * 0.45;
     rim.addCircle(dx, dy, HEX_PX * 0.2);
     path.addCircle(dx, dy, HEX_PX * 0.14);
   });
-  canvas.drawPath(rim.detach(), fillPaint('#1b1b1b'));
-  for (const [color, path] of dots) canvas.drawPath(path.detach(), fillPaint(color));
+  canvas.drawPath(rim.detach(), sharedFillPaint('#1b1b1b'));
+  dotPaths.drawAll((color, path) => canvas.drawPath(path.detach(), sharedFillPaint(color)));
 
   // Start marker: a ring with a small hut.
   forEachCenter(world, cells, (c, x, y) => {
     if (c !== world.startCell) return;
     const ring = Skia.PathBuilder.Make();
     ring.addCircle(x, y, HEX_PX * 0.72);
-    canvas.drawPath(ring.detach(), strokePaint(START_COLOR, HEX_PX * 0.12));
+    canvas.drawPath(ring.detach(), sharedStrokePaint(START_COLOR, HEX_PX * 0.12));
     const s = HEX_PX * 0.3;
     const hut = Skia.PathBuilder.Make()
       .moveTo(x - s, y + s * 0.8)
@@ -277,18 +317,22 @@ function drawFeatures(canvas: SkCanvas, world: World, cells: Int32Array) {
       .lineTo(x + s, y)
       .lineTo(x + s, y + s * 0.8)
       .close();
-    canvas.drawPath(hut.detach(), fillPaint(START_COLOR));
+    canvas.drawPath(hut.detach(), sharedFillPaint(START_COLOR));
   });
 }
 
+/** The icon layers, kept between tiles: drawIcons empties every one of them. */
+let icons: ReturnType<typeof createIconLayers> | null = null;
+const iconLayers = () => (icons ??= createIconLayers(HEX_PX));
+
 /** Hex outlines and biome icons. */
 function drawIcons(canvas: SkCanvas, world: World, cells: Int32Array) {
-  const outlines = Skia.PathBuilder.Make();
-  const layers = createIconLayers(HEX_PX);
+  const outlines = outlinePath();
+  const layers = iconLayers();
   forEachCenter(world, cells, (c, x, y) => {
     addHex(outlines, x, y, HEX_PX);
     if (world.biome[c] !== Biome.Lake) drawBiomeIcon(layers, world, c, x, y, HEX_PX);
   });
-  canvas.drawPath(outlines.detach(), strokePaint('rgba(0,0,0,0.12)', 1));
+  canvas.drawPath(outlines.detach(), sharedStrokePaint('rgba(0,0,0,0.12)', 1));
   for (const layer of layers.values()) canvas.drawPath(layer.path.detach(), layer.paint);
 }
