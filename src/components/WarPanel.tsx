@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
+  ArmyState,
   TICKS_PER_YEAR,
   WAR,
   civMilitary,
@@ -170,6 +171,7 @@ function ArmyRow({ world, army }: { world: World; army: ArmyInfo }) {
     <View style={styles.termRow}>
       <Text style={styles.termLabel}>
         At {place(world, army.cell)}
+        {army.state === ArmyState.Gathering ? ' · gathering' : army.state === ArmyState.Retreating ? ' · retreating' : ''}
         {army.besieging ? ' · besieging the goal' : ''}
       </Text>
       <Text style={styles.termValue}>

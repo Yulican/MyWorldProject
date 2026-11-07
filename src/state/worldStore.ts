@@ -42,9 +42,16 @@ export const mapWar = { enemy: new Uint8Array(256), siege: new Uint8Array(0) };
 
 /**
  * The map's army markers: `count` armies, each on hex `cell[i]` with the
- * people `civ[i]` (its flag color). Filled in place, never reallocated.
+ * people `civ[i]` (its flag color) and its state `state[i]`. Filled in place, never reallocated.
  */
-export const mapArmies = { count: 0, cell: new Int32Array(MAX_ARMIES), civ: new Uint8Array(MAX_ARMIES), version: 0 };
+export const mapArmies = {
+  count: 0,
+  cell: new Int32Array(MAX_ARMIES),
+  civ: new Uint8Array(MAX_ARMIES),
+  /** ArmyState: marching, gathering, retreating (the marker's shield color). */
+  state: new Uint8Array(MAX_ARMIES),
+  version: 0,
+};
 
 export type GameState = {
   sim: Simulation | null;
@@ -102,9 +109,10 @@ function syncArmies(sim: Simulation) {
   let changed = false;
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a]) continue;
-    if (mapArmies.cell[k] !== w.aCell[a] || mapArmies.civ[k] !== w.aCiv[a]) changed = true;
+    if (mapArmies.cell[k] !== w.aCell[a] || mapArmies.civ[k] !== w.aCiv[a] || mapArmies.state[k] !== w.aState[a]) changed = true;
     mapArmies.cell[k] = w.aCell[a];
     mapArmies.civ[k] = w.aCiv[a];
+    mapArmies.state[k] = w.aState[a];
     k++;
   }
   if (k !== mapArmies.count) changed = true;

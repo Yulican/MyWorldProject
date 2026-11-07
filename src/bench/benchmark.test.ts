@@ -129,22 +129,31 @@ test('the government scenario puts up seats and government buildings everywhere 
   assert.equal(SCENARIOS.government.government, true);
 });
 
-test('the war scenario puts peoples at war in pairs, raises armies within the caps and besieges the goals', async () => {
-  const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR, WAR } = await import('../sim');
+test('the war scenario puts peoples at war in pairs with as many armies as the caps allow and sieges', async () => {
+  const { ArmyState, createSimulation, generateWorld, stepSimulation, TICKS_PER_YEAR, WAR } = await import('../sim');
   const { declareWarsEverywhere } = await import('./declareWars');
   const sim = createSimulation(generateWorld({ seed: 5 }));
   for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
   declareWarsEverywhere(sim);
   const w = sim.war;
-  const civs = livingCivilizations(sim).length;
-  assert.ok(w.wars >= Math.floor(civs / 2) - 1 && w.wars >= 2, `${w.wars} wars among ${civs} peoples`);
-  const perCiv = new Map<number, number>();
-  for (let a = 0; a < w.live.length; a++) if (w.live[a]) perCiv.set(w.aCiv[a], (perCiv.get(w.aCiv[a]) ?? 0) + 1);
-  for (const k of perCiv.values()) assert.ok(k <= WAR.maxArmies, `${k} armies of one people`);
+  assert.ok(w.wars >= 5, `${w.wars} wars`);
+  // Per war and people: at most WAR.maxArmies; the attacker has its one main army (retreating ones aside).
+  const all = new Map<number, number>();
+  const main = new Map<number, number>();
+  for (let a = 0; a < w.live.length; a++) {
+    if (!w.live[a]) continue;
+    const s = w.aWar[a];
+    const key = s * 256 + w.aCiv[a];
+    all.set(key, (all.get(key) ?? 0) + 1);
+    if (w.aCiv[a] === w.wAtt[s] && w.aState[a] !== ArmyState.Retreating) main.set(s, (main.get(s) ?? 0) + 1);
+    assert.notEqual(w.aState[a], ArmyState.Gathering, 'all gathered');
+  }
+  for (const k of all.values()) assert.ok(k <= WAR.maxArmies, `${k} armies of one people`);
+  for (const k of main.values()) assert.equal(k, WAR.mainArmies);
+  // 32 armies (WAR.worldArmies) are out of reach under the caps: one war per people, 1 + up to 3 armies per war.
   assert.ok(w.armies <= WAR.worldArmies);
-  // One army per side and raise (it gathers at its rally point): two per war at the declaration.
-  assert.ok(w.armies >= 2 * w.wars, `${w.armies} armies in ${w.wars} wars`);
+  assert.ok(w.armies >= 10 && w.armies >= w.wars + 2, `${w.armies} armies in ${w.wars} wars`);
   const sieges = w.siege.reduce((n, v) => n + v, 0);
-  assert.ok(sieges >= w.wars - 1 && sieges >= 2, `${sieges} sieges in ${w.wars} wars`);
+  assert.ok(sieges >= 3, `${sieges} sieges in ${w.wars} wars`);
   assert.equal(SCENARIOS.war.war, true);
 });

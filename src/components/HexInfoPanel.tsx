@@ -4,6 +4,7 @@ import {
   BIOMES,
   DEPOSITS,
   GOOD_NAMES,
+  ArmyState,
   MAX_ARMIES,
   MIL,
   RESOURCE_COUNT,
@@ -361,7 +362,7 @@ export function strategicStock(sim: Simulation, cell: number): StrategicStock[] 
   return goods;
 }
 
-/** The war on a hex, e.g. "Besieged by the Arani", "Army of the Arani (40 soldiers)"; empty in peace. */
+/** The war on a hex, e.g. "Besieged by the Arani", "Army of the Arani (40 soldiers, retreating)"; empty in peace. */
 export function hexWar(sim: Simulation, cell: number): string[] {
   const w = sim.war;
   const lines: string[] = [];
@@ -375,7 +376,8 @@ export function hexWar(sim: Simulation, cell: number): string[] {
   }
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a] || w.aCell[a] !== cell) continue;
-    lines.push(`Army of the ${name(w.aCiv[a])} (${Math.round(armySoldiers(w, a))} soldiers)`);
+    const state = w.aState[a] === ArmyState.Gathering ? ', gathering' : w.aState[a] === ArmyState.Retreating ? ', retreating' : '';
+    lines.push(`Army of the ${name(w.aCiv[a])} (${Math.round(armySoldiers(w, a))} soldiers${state})`);
   }
   return lines;
 }

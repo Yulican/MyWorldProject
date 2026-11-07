@@ -1,53 +1,67 @@
-import { hexDistance, livingCivilizations, stepSimulation, type Simulation } from '../sim';
+import { MAX_ARMIES, finishGathering, hexDistance, livingCivilizations, stepSimulation, type Simulation } from '../sim';
 import { PAIRS } from '../sim/society/diplomacy';
 import { chooseGoal, startWar } from '../sim/society/war';
 import { empowerGovernment } from './empowerGovernment';
+import { stirUnrest } from './stirUnrest';
 
 // The "war" benchmark scenario: the most the war shows on the map at once.
-// First the government scenario's setup (empowerGovernment: military
-// buildings everywhere and a year of training), so every people has soldiers
-// for its armies. Then the peoples pair up, nearest capitals first, and every pair goes to war
-// (one war per people, the rule): the stronger declares on the weaker, both
-// raise their armies up to the real caps (WAR.maxArmies per people,
-// WAR.worldArmies worldwide), and the attackers' armies stand on their goal
-// seats, so every war has a siege: army markers, siege frames and red dashed
-// war borders all over the map. Then a few weeks run so the sieges begin and
-// the defenders' armies march.
+// The armies' caps make 32 armies on the map out of reach (one war per
+// people, per war the attacker's 1 main army and the defender's relief armies
+// from up to 3 other seats with soldiers), so the setup makes as many wars and
+// seats as it can: first the unrest scenario's uprisings (stirUnrest: the most
+// peoples), then the government scenario's seats and military buildings with
+// a year of training (empowerGovernment: soldiers and seats everywhere). Then
+// the peoples pair up by size (the two with the most seats, the next two,
+// ...), the stronger declares war on the weaker, every army gathers at once
+// (finishGathering) and the attackers stand on their goal seats, so every war
+// has a siege: army markers, siege frames and red dashed war borders all over
+// the map. A few weeks run so the sieges begin and the relief armies march.
 //
 // Aged worlds rarely have peoples with adjacent settlements (the game's rule
-// for a declaration), so pairs are formed by distance; the goal is the seat
-// chooseGoal picks where the two do border, else the defender's seat nearest
-// to the attacker's capital.
+// for a declaration), so pairs ignore it; the goal is the seat chooseGoal
+// picks where the two do border, else the defender's seat nearest to the
+// attacker's capital.
 
 /** Weeks simulated after the declarations: the sieges begin in the first one. */
 const WEEKS = 2;
 
-/** Soldiers everywhere, then a war between as many pairs of peoples as possible, the attackers on their goals. */
+/** Uprisings, seats and soldiers everywhere, then a war between as many pairs of peoples as possible. */
 export function declareWarsEverywhere(sim: Simulation): void {
+  stirUnrest(sim);
   empowerGovernment(sim);
+  declarePairs(sim);
+}
+
+/** Wars between the peoples in pairs of similar size; all armies gathered and the attackers on their goals. */
+export function declarePairs(sim: Simulation): void {
   const w = sim.war;
   const world = sim.world;
-  const strength = (a: number) => sim.military.strength[a] ?? 0;
-  const civs = livingCivilizations(sim).filter((c) => c.capital >= 0 && w.enemy[c.id] === 0);
-  const pairs: { a: number; b: number; d: number }[] = [];
-  for (const x of civs) {
-    for (const y of civs) {
-      if (x.id < y.id) pairs.push({ a: x.id, b: y.id, d: hexDistance(world, x.capital, y.capital) });
-    }
+  // Relief armies come from the defender's other seats: peoples of similar size pair up (the two with the most
+  // seats, then the next two, ...), the stronger attacks, so defenders have seats to send relief from and the
+  // attackers hold out. Peoples already at war keep their war.
+  const district = sim.government.district;
+  const seats = new Map<number, number>();
+  for (let c = 0; c < world.cellCount; c++) {
+    if (district[c] === c && sim.cellPop[c] > 0) seats.set(world.owner[c], (seats.get(world.owner[c]) ?? 0) + 1);
   }
-  pairs.sort((p, q) => p.d - q.d || p.a - q.a || p.b - q.b);
+  const strength = (a: number) => sim.military.strength[a] ?? 0;
+  const civs = livingCivilizations(sim)
+    .filter((c) => c.capital >= 0 && w.enemy[c.id] === 0)
+    .sort((x, y) => (seats.get(y.id) ?? 0) - (seats.get(x.id) ?? 0) || x.id - y.id);
   const candidate = new Uint8Array(PAIRS);
-  for (const { a, b } of pairs) {
-    if (w.enemy[a] !== 0 || w.enemy[b] !== 0) continue;
-    const [att, def] = strength(a) >= strength(b) ? [a, b] : [b, a];
+  for (let i = 0; i + 1 < civs.length; i += 2) {
+    const [x, y] = [civs[i].id, civs[i + 1].id];
+    const [att, def] = strength(x) >= strength(y) ? [x, y] : [y, x];
     candidate.fill(0);
     candidate[def] = 1;
     let goal = chooseGoal(sim, att, candidate);
     if (goal < 0) goal = nearestSeat(sim, def, sim.civs[att]!.capital);
     if (goal >= 0) startWar(sim, att, goal);
   }
+  // Every contingent arrives at once, so the armies are full when they set out.
+  for (let a = 0; a < MAX_ARMIES; a++) finishGathering(sim, a);
   // The attackers besiege their goals at once.
-  for (let a = 0; a < w.live.length; a++) {
+  for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a]) continue;
     const s = w.aWar[a];
     if (w.aCiv[a] !== w.wAtt[s]) continue;

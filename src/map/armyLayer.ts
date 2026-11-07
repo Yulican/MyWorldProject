@@ -1,19 +1,21 @@
 import { Skia, createPicture, type SkPathBuilder, type SkPicture } from '@shopify/react-native-skia';
-import { hexCenterX, hexCenterY, type World } from '../sim';
+import { ArmyState, hexCenterX, hexCenterY, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
 import { sharedFillPaint, sharedStrokePaint } from './paints';
 
 // Army markers ("Design Documents/Requirement Krieg.md", section 10, phase
-// 3a): a dark shield with crossed swords and a flag in the people's color on
-// every hex with an army, no march line. At most MAX_ARMIES (32) armies
+// 3a): a shield with crossed swords (dark when marching, grey while gathering,
+// pale brown when retreating) and a flag in the people's color on every hex
+// with an army, no march line. At most MAX_ARMIES (32) armies
 // exist, so all markers are recorded into one small picture whenever an army
 // moves (a few times a second at most, see worldStore.armyStore); drawing it
 // in a frame only replays that picture.
 
-/** Compact marker data (worldStore.mapArmies): `count` armies on `cell` of people `civ`. */
-export type ArmyMarkers = { readonly count: number; readonly cell: Int32Array; readonly civ: Uint8Array };
+/** Compact marker data (worldStore.mapArmies): `count` armies on `cell` of people `civ` in ArmyState `state`. */
+export type ArmyMarkers = { readonly count: number; readonly cell: Int32Array; readonly civ: Uint8Array; readonly state: Uint8Array };
 
-const SHIELD_COLOR = '#2a2a2a';
+/** Shield color by ArmyState: marching dark, gathering grey, retreating pale brown. */
+const SHIELD_COLORS = ['#2a2a2a', '#7a7a7a', '#9c7b55'] as const;
 const SWORD_COLOR = '#f2f2f2';
 const POLE_COLOR = '#1b1b1b';
 /** Shield half-width in hex sizes; more armies on one hex stand side by side, this far apart. */
@@ -25,7 +27,8 @@ const SIDE_STEP = 0.32;
  * map wraps: its second copy is drawn at `+ mapWidth`).
  */
 export function buildArmyPicture(world: World, markers: ArmyMarkers, colorOf: (civ: number) => string, mapWidth: number): SkPicture {
-  const shields = Skia.PathBuilder.Make();
+  const shields = SHIELD_COLORS.map(() => Skia.PathBuilder.Make());
+  const used = [false, false, false];
   const swords = Skia.PathBuilder.Make();
   const poles = Skia.PathBuilder.Make();
   const flags = new Map<number, SkPathBuilder>();
@@ -44,13 +47,15 @@ export function buildArmyPicture(world: World, markers: ArmyMarkers, colorOf: (c
       flag = Skia.PathBuilder.Make();
       flags.set(civ, flag);
     }
-    for (let copy = 0; copy < 2; copy++) addMarker(shields, swords, poles, flag, x + copy * mapWidth, y);
+    const st = markers.state[i] === ArmyState.Gathering ? 1 : markers.state[i] === ArmyState.Retreating ? 2 : 0;
+    used[st] = true;
+    for (let copy = 0; copy < 2; copy++) addMarker(shields[st], swords, poles, flag, x + copy * mapWidth, y);
   }
   return createPicture((canvas) => {
     if (markers.count === 0) return;
     for (const [civ, flag] of flags) canvas.drawPath(flag.detach(), sharedFillPaint(colorOf(civ)));
     canvas.drawPath(poles.detach(), sharedStrokePaint(POLE_COLOR, HEX_PX * 0.05));
-    canvas.drawPath(shields.detach(), sharedFillPaint(SHIELD_COLOR));
+    for (let st = 0; st < shields.length; st++) if (used[st]) canvas.drawPath(shields[st].detach(), sharedFillPaint(SHIELD_COLORS[st]));
     canvas.drawPath(swords.detach(), sharedStrokePaint(SWORD_COLOR, HEX_PX * 0.045));
   });
 }
