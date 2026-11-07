@@ -223,7 +223,7 @@ export type Simulation = {
   refreshOwner: Uint8Array | null;
   /** The current tick's seat planning while it runs in parts. */
   seatPlan: SeatPlan | null;
-  /** The next step of a yearly plan that runs in several parts (the war's, see runWarYearStep); 0 otherwise. */
+  /** The next step of a yearly plan that runs in several parts (the military's, the war's, diplomacy's); 0 otherwise. */
   planStep: number;
 };
 
@@ -394,7 +394,14 @@ export function stepSimulationPart(sim: Simulation): boolean {
         sim.seatPlan = null;
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
-      else if (weekOfYear === MILITARY_WEEK) runMilitaryYear(sim);
+      else if (weekOfYear === MILITARY_WEEK) {
+        const next = runMilitaryYearStep(sim, sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
       else if (weekOfYear === WAR_WEEK) {
         // One running war per part, then the declarations up to one new war per part.
         const next = runWarYearStep(sim, sim.planStep);
@@ -404,7 +411,15 @@ export function stepSimulationPart(sim: Simulation): boolean {
         }
         sim.planStep = 0;
       }
-      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell));
+      else if (weekOfYear === DIPLOMACY_WEEK) {
+        // Relations, the running trade agreements, new ones: a part each.
+        const next = updateDiplomacy(sim, owner, (text, cell) => record(sim, text, cell), sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell) => record(sim, text, cell));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
@@ -469,11 +484,20 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
 
 /** The military's year (military.ts: updateMilitary): pay, dismissals, training; trained adults leave the population, dismissed soldiers return to it. */
 export function runMilitaryYear(sim: Simulation): void {
+  for (let step = 0; step >= 0; step = runMilitaryYearStep(sim, step));
+}
+
+/** runMilitaryYear in two steps (0, then 1; returns the next, -1 after the last), so the game clock can spread it over frames. */
+function runMilitaryYearStep(sim: Simulation, step: number): number {
   const owner = sim.world.owner;
-  updateMilitary(sim, owner);
-  drawSoldiers(sim);
+  if (step === 0) {
+    updateMilitary(sim, owner);
+    drawSoldiers(sim);
+    return 1;
+  }
   returnSoldiers(sim, owner);
   reconcileWar(sim);
+  return -1;
 }
 
 /**
@@ -1042,12 +1066,26 @@ function moveGroup(sim: Simulation, from: number, to: number, civId: number, cou
  * Recomputes the per-hex snapshot the map shows (owner, population, faith),
  * civilization stats, extinctions and game over.
  */
+/** refreshSnapshot's sums, reused (a new world or more peoples make them anew). */
+let snapFaith = new Float64Array(0);
+let snapCivFaith = new Float64Array(0);
+let snapBelievers = new Int32Array(0);
+let snapCivPop = new Int32Array(0);
+let snapTerritory = new Int32Array(0);
+
 function refreshSnapshot(sim: Simulation): void {
   const { world, pop } = sim;
 
-  const faithSum = new Float64Array(world.cellCount);
-  const believers = new Int32Array(sim.civSlots);
-  const civFaithSum = new Float64Array(sim.civSlots);
+  if (snapFaith.length !== world.cellCount) snapFaith = new Float64Array(world.cellCount);
+  if (snapCivPop.length !== sim.civSlots) {
+    snapCivFaith = new Float64Array(sim.civSlots);
+    snapBelievers = new Int32Array(sim.civSlots);
+    snapCivPop = new Int32Array(sim.civSlots);
+    snapTerritory = new Int32Array(sim.civSlots);
+  }
+  const faithSum = snapFaith.fill(0);
+  const believers = snapBelievers.fill(0);
+  const civFaithSum = snapCivFaith.fill(0);
   sim.cellAdults.fill(0);
   for (let i = 0; i < pop.end; i++) {
     if (!pop.alive[i]) continue;
@@ -1057,8 +1095,8 @@ function refreshSnapshot(sim: Simulation): void {
     if (pop.faith[i] >= BELIEVER_FAITH) believers[pop.civ[i]]++;
   }
 
-  const civPop = new Int32Array(sim.civSlots);
-  const territory = new Int32Array(sim.civSlots);
+  const civPop = snapCivPop.fill(0);
+  const territory = snapTerritory.fill(0);
   for (let c = 0; c < world.cellCount; c++) {
     const people = sim.cellPop[c];
     world.population[c] = people;

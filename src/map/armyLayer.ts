@@ -44,45 +44,60 @@ const SHIELD_BOX: Box = { x: -1.25 * U, y: -1.25 * U, w: 2.5 * U, h: 2.9 * U };
  * outline, shields by state, the swords), rendered at `pxPerUnit` pixels per
  * map pixel (the sharpest zoom tier) and kept until `dispose`.
  */
+/** A sprite image and a picture that draws it into its box around the anchor (placed by translating). */
+type Sprite = { image: SkImage; picture: SkPicture } | null;
+
 export class ArmySprites {
-  private flags = new Map<string, SkImage | null>();
-  readonly shields: (SkImage | null)[];
-  readonly pole: SkImage | null;
-  readonly swords: SkImage | null;
+  private flags = new Map<string, Sprite>();
+  readonly shields: Sprite[];
+  readonly pole: Sprite;
+  readonly swords: Sprite;
 
   constructor(private pxPerUnit: number) {
     this.shields = SHIELD_COLORS.map((color) =>
-      renderSprite(SHIELD_BOX, pxPerUnit, sharedFillPaint(color), (path) => addShield(path, null, 0, 0)),
+      makeSprite(SHIELD_BOX, pxPerUnit, sharedFillPaint(color), (path) => addShield(path, null, 0, 0)),
     );
-    this.swords = renderSprite(SHIELD_BOX, pxPerUnit, sharedStrokePaint(SWORD_COLOR, SWORD_WIDTH), (path) =>
+    this.swords = makeSprite(SHIELD_BOX, pxPerUnit, sharedStrokePaint(SWORD_COLOR, SWORD_WIDTH), (path) =>
       addShield(null, path, 0, 0),
     );
-    this.pole = renderSprite(FLAG_BOX, pxPerUnit, sharedStrokePaint(POLE_COLOR, POLE_WIDTH), (path) =>
+    this.pole = makeSprite(FLAG_BOX, pxPerUnit, sharedStrokePaint(POLE_COLOR, POLE_WIDTH), (path) =>
       addFlag(null, path, 0, 0),
     );
   }
 
-  flag(color: string): SkImage | null {
-    let image = this.flags.get(color);
-    if (image === undefined) {
-      image = renderSprite(FLAG_BOX, this.pxPerUnit, sharedFillPaint(color), (path) => addFlag(path, null, 0, 0));
-      this.flags.set(color, image);
+  flag(color: string): Sprite {
+    let sprite = this.flags.get(color);
+    if (sprite === undefined) {
+      sprite = makeSprite(FLAG_BOX, this.pxPerUnit, sharedFillPaint(color), (path) => addFlag(path, null, 0, 0));
+      this.flags.set(color, sprite);
     }
-    return image;
+    return sprite;
   }
 
   /** Frees the sprites once no picture on screen can use them any more. */
   dispose() {
     const all = [...this.flags.values(), ...this.shields, this.pole, this.swords];
     this.flags.clear();
-    setTimeout(() => all.forEach((image) => image?.dispose()), 1000);
+    setTimeout(
+      () =>
+        all.forEach((sprite) => {
+          sprite?.picture.dispose();
+          sprite?.image.dispose();
+        }),
+      1000,
+    );
   }
 }
+
+/** Marker positions (map pixels), reused: an army picture is recorded several times a second. */
+const markerX = new Float64Array(256);
+const markerY = new Float64Array(256);
 
 /**
  * Records all army markers into one picture, in two copies side by side (the
  * map wraps: its second copy is drawn at `+ mapWidth`), in layers: the flags
- * by people, the poles, the shields by state, the swords.
+ * by people, the poles, the shields by state, the swords. Only the sprites'
+ * pictures are placed, so recording allocates next to nothing.
  */
 export function buildArmyPicture(
   world: World,
@@ -91,9 +106,9 @@ export function buildArmyPicture(
   mapWidth: number,
   sprites: ArmySprites,
 ): SkPicture {
-  const count = markers.count;
-  const xs = new Float64Array(count);
-  const ys = new Float64Array(count);
+  const count = Math.min(markers.count, markerX.length);
+  const xs = markerX;
+  const ys = markerY;
   for (let i = 0; i < count; i++) {
     const cell = markers.cell[i];
     // Armies earlier in the list on the same hex: this one stands beside them.
@@ -104,16 +119,15 @@ export function buildArmyPicture(
     xs[i] = (hexCenterX(col) + 0.3 + before * SIDE_STEP) * HEX_PX;
     ys[i] = (hexCenterY(col, row) + 0.3) * HEX_PX;
   }
-  const stateOf = (i: number) =>
-    markers.state[i] === ArmyState.Gathering ? 1 : markers.state[i] === ArmyState.Retreating ? 2 : 0;
   return createPicture((canvas) => {
     if (count === 0) return;
-    const paint = Skia.Paint();
-    const place = (image: SkImage | null, box: Box, x: number, y: number) => {
-      if (!image) return;
-      const src = Skia.XYWHRect(0, 0, image.width(), image.height());
+    const place = (sprite: Sprite, i: number) => {
+      if (!sprite) return;
       for (let copy = 0; copy < 2; copy++) {
-        canvas.drawImageRect(image, src, Skia.XYWHRect(x + copy * mapWidth + box.x, y + box.y, box.w, box.h), paint, true);
+        canvas.save();
+        canvas.translate(xs[i] + copy * mapWidth, ys[i]);
+        canvas.drawPicture(sprite.picture);
+        canvas.restore();
       }
     };
     // Flags grouped by people, in the order the peoples first appear.
@@ -123,14 +137,32 @@ export function buildArmyPicture(
       for (let j = 0; j < i; j++) if (markers.civ[j] === civ) first = false;
       if (!first) continue;
       const flag = sprites.flag(colorOf(civ));
-      for (let j = i; j < count; j++) if (markers.civ[j] === civ) place(flag, FLAG_BOX, xs[j], ys[j]);
+      for (let j = i; j < count; j++) if (markers.civ[j] === civ) place(flag, j);
     }
-    for (let i = 0; i < count; i++) place(sprites.pole, FLAG_BOX, xs[i], ys[i]);
+    for (let i = 0; i < count; i++) place(sprites.pole, i);
     for (let st = 0; st < SHIELD_COLORS.length; st++) {
-      for (let i = 0; i < count; i++) if (stateOf(i) === st) place(sprites.shields[st], SHIELD_BOX, xs[i], ys[i]);
+      for (let i = 0; i < count; i++) if (stateOf(markers, i) === st) place(sprites.shields[st], i);
     }
-    for (let i = 0; i < count; i++) place(sprites.swords, SHIELD_BOX, xs[i], ys[i]);
+    for (let i = 0; i < count; i++) place(sprites.swords, i);
   });
+}
+
+/** The marker's shield: 0 marching, 1 gathering, 2 retreating. */
+function stateOf(markers: ArmyMarkers, i: number): number {
+  const st = markers.state[i];
+  return st === ArmyState.Gathering ? 1 : st === ArmyState.Retreating ? 2 : 0;
+}
+
+/** A sprite and the picture that draws it into `box` (see Sprite). */
+function makeSprite(box: Box, pxPerUnit: number, paint: SkPaint, add: (path: SkPathBuilder) => void): Sprite {
+  const image = renderSprite(box, pxPerUnit, paint, add);
+  if (!image) return null;
+  // Its bounds are the box (the default bounds start at 0 and would cut off the box's upper left).
+  const dst = Skia.XYWHRect(box.x, box.y, box.w, box.h);
+  const picture = createPicture((canvas) => {
+    canvas.drawImageRect(image, Skia.XYWHRect(0, 0, image.width(), image.height()), dst, Skia.Paint(), true);
+  }, dst);
+  return { image, picture };
 }
 
 /** Renders one sprite: the path `add` makes, drawn with `paint` into the box. */

@@ -502,6 +502,10 @@ function isPartner(sim: Simulation, civ: number, other: number): boolean {
 let trialSupplier = -1;
 let trialBuyer = -1;
 
+/** exportHub's candidate settlements and their sort keys. */
+const hubHomes = new Int32Array(HUB_CANDIDATES);
+const hubKeys = new Float64Array(HUB_CANDIDATES);
+
 /**
  * The export hub for a trade agreement: the settlement of `supplier` with
  * merchants that reaches a settlement of `buyer` soonest on ways (as under
@@ -520,18 +524,33 @@ export function exportHub(sim: Simulation, supplier: number, buyer: number, good
   // Only HUB_CANDIDATES settlements with merchants are searched from: the
   // nearest to the buyer's capital, or those with the most in stock.
   const capital = sim.civs[buyer]?.capital ?? -1;
-  const homes: number[] = [];
+  // The first HUB_CANDIDATES by that order (ties: the lower cell), kept sorted while scanning.
+  let count = 0;
   for (let home = 0; home < world.cellCount; home++) {
-    if (owner[home] === supplier && trade.merchants[home] && (stocked <= 0 || stockOf(economy, home, good) >= stocked)) homes.push(home);
-  }
-  if (stocked > 0) homes.sort((a, b) => stockOf(economy, b, good) - stockOf(economy, a, good) || a - b);
-  else if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
-  for (const home of homes.slice(0, HUB_CANDIDATES)) {
-    let nearest = Infinity;
-    for (const t of searchWays(sim, owner, home, MAX_TRIP_COST, -1)) {
-      if (owner[t] === buyer && sim.cellPop[t] > 0) nearest = Math.min(nearest, wayCost[t]);
+    if (owner[home] !== supplier || !trade.merchants[home]) continue;
+    let key = 0;
+    if (stocked > 0) {
+      const stock = stockOf(economy, home, good);
+      if (stock < stocked) continue;
+      key = -stock;
+    } else if (capital >= 0) key = hexDistance(world, home, capital);
+    // Cells come in rising order, so an equal key stays behind the earlier cell.
+    let i = Math.min(count, HUB_CANDIDATES);
+    if (i === HUB_CANDIDATES && key >= hubKeys[i - 1]) continue;
+    while (i > 0 && key < hubKeys[i - 1]) {
+      if (i < HUB_CANDIDATES) {
+        hubKeys[i] = hubKeys[i - 1];
+        hubHomes[i] = hubHomes[i - 1];
+      }
+      i--;
     }
-    resetWays();
+    hubKeys[i] = key;
+    hubHomes[i] = home;
+    count++;
+  }
+  for (let j = 0; j < Math.min(count, HUB_CANDIDATES); j++) {
+    const home = hubHomes[j];
+    const nearest = nearestWay(sim, owner, home, MAX_TRIP_COST, buyer, hubCost);
     if (nearest < hubCost) {
       hubCost = nearest;
       hub = home;
@@ -612,6 +631,54 @@ function searchWays(sim: Simulation, owner: Uint8Array, from: number, maxCost: n
     }
   }
   return wayReached;
+}
+
+/**
+ * The cost of the cheapest way (as searchWays finds it) from `from` to a
+ * settlement of `buyer`; Infinity if there is none, or none cheaper than
+ * `below`. The search stops at the first such settlement it takes from the
+ * queue: its cost is final and no other can be cheaper.
+ */
+function nearestWay(sim: Simulation, owner: Uint8Array, from: number, maxCost: number, buyer: number, below: number): number {
+  const { world } = sim;
+  const n = world.cellCount;
+  if (wayCost.length !== n) {
+    wayCost = new Float32Array(n).fill(Infinity);
+    wayPrev = new Int32Array(n).fill(-1);
+    waySea = new Uint8Array(n);
+    wayToll = new Float32Array(n);
+  }
+  const civ = owner[from];
+  wayReached.length = 0;
+  wayCost[from] = 0;
+  wayReached.push(from);
+  wayHeap.push(from, 0);
+  let found = Infinity;
+  while (wayHeap.size > 0) {
+    const c = wayHeap.pop();
+    const here = wayCost[c];
+    if (here >= below) break;
+    if (owner[c] === buyer && sim.cellPop[c] > 0) {
+      found = here;
+      break;
+    }
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const step = wayStep(sim, owner, civ, -1, c, d);
+      if (step === Infinity) continue;
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      const sea = waterOf[nb] === 1 ? waySea[c] + 1 : 0;
+      if (sea > MAX_SEA_HEXES) continue;
+      const next = here + step;
+      if (next >= wayCost[nb] || next > maxCost) continue;
+      if (wayCost[nb] === Infinity) wayReached.push(nb);
+      wayCost[nb] = next;
+      waySea[nb] = sea;
+      wayHeap.push(nb, next);
+    }
+  }
+  wayHeap.size = 0;
+  resetWays();
+  return found;
 }
 
 function resetWays(): void {
