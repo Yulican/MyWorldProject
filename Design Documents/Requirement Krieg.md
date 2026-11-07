@@ -248,3 +248,10 @@ Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`
 | Abkommen | 2,8 (4,6) |
 | Rechenzeit | etwas niedriger als heute (kleinere Karte) |
 | Schlimmste Kriegswoche | ca. 2 ms |
+
+### Sammeln, Rückzug und Entsatz (Phase 3)
+
+12 Welten, Jahr 500: Kriege 7,5, Schlachten 3,8, Besetzungen 7,1, annektierte Völker 5,6, höchstens 5 Armeen gleichzeitig, Rechenzeit ca. 9,6 ms pro Jahr.
+
+- Verteidiger gewinnen praktisch keine Schlachten: Die meisten haben nur einen Sitz und damit keine Entsatzarmee. Der Nutzer akzeptiert das so.
+- Benchmark `war`: An den Obergrenzen entstehen 11 bis 13 echte Armeen je Welt; bis zu den 32 Armeen auf der Karte füllen reine Karten-Marker (Attrappen), die weitermarschieren.
