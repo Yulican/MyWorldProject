@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { livingCivilizations, relationsOf, type Relation, type Simulation, type Term } from '../sim';
+import { ALLY, Pact, livingCivilizations, relationsOf, type Relation, type Simulation, type Term } from '../sim';
 import { colors, spacing } from '../theme';
 
 type Props = {
@@ -55,7 +55,9 @@ export function DiplomacyPanel({ sim, onClose }: Props) {
         <Text style={styles.note}>
           Trust grows between peaceful neighbors; danger comes from the other's military strength against ours
           and how near they are. Borders open at trust 50 and danger up to 40; open borders let
-          settlers and merchants pass for a toll. Tap a people for the details.
+          settlers and merchants pass for a toll. Peoples that trust each other {ALLY.pactTrust} and both fear the same
+          third people sign a defense pact; at trust {ALLY.allianceTrust} they form an alliance. Allies may join a
+          war when it starts. Tap a people for the details.
         </Text>
       </ScrollView>
     </View>
@@ -82,6 +84,10 @@ function RelationRow({ sim, relation: r, expanded, onPress }: { sim: Simulation;
         Borders: ours {r.weOpen ? 'open' : 'closed'} to them · theirs {r.theyOpen ? 'open' : 'closed'} to us
       </Text>
       {agreements.length > 0 && <Text style={styles.line}>Agreements: {agreements.join(', ')}</Text>}
+      {r.pact === Pact.Alliance && <Text style={styles.pact}>Alliance</Text>}
+      {r.pact === Pact.Pact && (
+        <Text style={styles.pact}>Defense pact{sim.civs[r.pactThreat] ? ` (against the ${sim.civs[r.pactThreat]!.name})` : ''}</Text>
+      )}
       {expanded && (
         <>
           <Text style={styles.section}>Trust {Math.round(r.trust)}</Text>
@@ -148,6 +154,7 @@ const styles = StyleSheet.create({
   distance: { color: colors.panelMuted, fontSize: 12 },
   line: { color: colors.panelText, fontSize: 13, marginTop: 4 },
   muted: { color: colors.panelMuted },
+  pact: { color: colors.accent, fontSize: 13, fontWeight: '600', marginTop: 4 },
   section: { color: colors.panelText, fontSize: 13, fontWeight: '700', marginTop: spacing.sm },
   termRow: { flexDirection: 'row', paddingLeft: spacing.md, paddingVertical: 1 },
   termLabel: { color: colors.panelMuted, fontSize: 12, flex: 1 },

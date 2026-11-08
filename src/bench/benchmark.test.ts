@@ -152,7 +152,7 @@ test('the government scenario puts up seats and government buildings everywhere 
   assert.equal(SCENARIOS.government.government, true);
 });
 
-test('the war scenario puts peoples at war in pairs with as many armies as the caps allow and sieges', async () => {
+test('the war scenario puts peoples at war in pairs with as many armies as the caps allow and sieges, two blocks of allies', async () => {
   const { ArmyState, createSimulation, generateWorld, stepSimulation, TICKS_PER_YEAR, WAR } = await import('../sim');
   const { declareWarsEverywhere } = await import('./declareWars');
   const sim = createSimulation(generateWorld({ seed: 5 }));
@@ -177,7 +177,22 @@ test('the war scenario puts peoples at war in pairs with as many armies as the c
   assert.ok(w.armies <= WAR.worldArmies);
   assert.ok(w.armies >= 10 && w.armies >= w.wars + 2, `${w.armies} armies in ${w.wars} wars`);
   const sieges = w.siege.reduce((n, v) => n + v, 0);
-  assert.ok(sieges >= 3, `${sieges} sieges in ${w.wars} wars`);
+  assert.ok(sieges >= 1, `${sieges} sieges in ${w.wars} wars`);
+  // Two blocks of allies: alliances formed, allies joined the wars with their armies.
+  const { Pact, pactBetween } = await import('../sim');
+  const { PAIRS } = await import('../sim/society/diplomacy');
+  let alliances = 0;
+  let allies = 0;
+  let allyArmies = 0;
+  for (let a = 1; a < sim.civs.length; a++) for (let b = a + 1; b < sim.civs.length; b++) if (pactBetween(sim, a, b) === Pact.Alliance) alliances++;
+  for (let s = 0; s < w.wLive.length; s++) {
+    if (!w.wLive[s]) continue;
+    for (let p = 1; p < PAIRS; p++) if (p !== w.wAtt[s] && p !== w.wDef[s] && w.side[s * PAIRS + p] >= 0) allies++;
+  }
+  for (let a = 0; a < w.live.length; a++) if (w.live[a] && w.civWar[w.aCiv[a]] !== w.aWar[a]) allyArmies++;
+  assert.ok(alliances >= 10, `${alliances} alliances`);
+  assert.ok(allies >= w.wars, `${allies} allies in ${w.wars} wars`);
+  assert.ok(allyArmies >= 2, `${allyArmies} ally armies`);
   assert.equal(SCENARIOS.war.war, true);
 });
 

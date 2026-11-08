@@ -32,10 +32,10 @@ const WAR_COLOR = '#e01e1e';
 
 /**
  * The war as the map draws it (a copy taken with each society snapshot, see
- * worldStore.mapWar): per people the people it is at war with (0 = none), per
- * cell 1 while besieged.
+ * worldStore.mapWar): per people pair (a * 256 + b) the wars they fight on
+ * opposite sides (allies too), per cell 1 while besieged.
  */
-export type MapWar = { readonly enemy: Uint8Array; readonly siege: Uint8Array };
+export type MapWar = { readonly foe: Uint8Array; readonly siege: Uint8Array };
 
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
@@ -148,14 +148,14 @@ function openEdges(world: World, c: number, owner: number): number {
   return mask;
 }
 
-/** Bit d set when the hex's border towards direction d faces the people its owner is at war with (red, dashed). */
+/** Bit d set when the hex's border towards direction d faces a people its owner is at war with (red, dashed). */
 function warEdges(world: World, c: number, owner: number, war: MapWar): number {
-  const enemy = war.enemy[owner];
-  if (enemy === 0) return 0;
   let mask = 0;
   for (let d = 0; d < DIRECTION_COUNT; d++) {
     const nb = world.neighbors[c * DIRECTION_COUNT + d];
-    if (nb >= 0 && world.owner[nb] === enemy) mask |= 1 << d;
+    if (nb < 0) continue;
+    const other = world.owner[nb];
+    if (other !== 0 && other !== owner && war.foe[owner * 256 + other] > 0) mask |= 1 << d;
   }
   return mask;
 }

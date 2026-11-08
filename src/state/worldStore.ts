@@ -46,10 +46,11 @@ const HOLD_MS = 750;
 /**
  * The war as the territory layer draws it, copied from the simulation with
  * every map snapshot (so borders, sieges and owners always match): per people
- * the people it is at war with (0 = none), per cell 1 while besieged.
+ * pair (a * 256 + b) the wars they fight on opposite sides (allies too), per
+ * cell 1 while besieged.
  * Arrays are reused; only a new world replaces `siege`.
  */
-export const mapWar = { enemy: new Uint8Array(256), siege: new Uint8Array(0) };
+export const mapWar = { foe: new Uint8Array(256 * 256), siege: new Uint8Array(0) };
 
 /**
  * The map's army markers: `count` armies, each on hex `cell[i]` with the
@@ -114,7 +115,7 @@ function subscribe(listener: () => void): () => void {
 function syncMapWar(sim: Simulation) {
   const w = sim.war;
   if (mapWar.siege.length !== sim.world.cellCount) mapWar.siege = new Uint8Array(sim.world.cellCount);
-  mapWar.enemy.set(w.enemy.subarray(0, mapWar.enemy.length));
+  mapWar.foe.set(w.foe.subarray(0, mapWar.foe.length));
   mapWar.siege.set(w.siege);
 }
 

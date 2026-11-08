@@ -1,4 +1,4 @@
-import { MAX_ARMIES, finishGathering, hexDistance, livingCivilizations, stepSimulation, type Simulation } from '../sim';
+import { MAX_ARMIES, finishGathering, formAlliance, hexDistance, livingCivilizations, stepSimulation, type Simulation } from '../sim';
 import { PAIRS } from '../sim/society/diplomacy';
 import { chooseGoal, startWar } from '../sim/society/war';
 import { empowerGovernment } from './empowerGovernment';
@@ -11,11 +11,13 @@ import { stirUnrest } from './stirUnrest';
 // seats as it can: first the unrest scenario's uprisings (stirUnrest: the most
 // peoples), then the government scenario's seats and military buildings with
 // a year of training (empowerGovernment: soldiers and seats everywhere). Then
-// the peoples pair up by size (the two with the most seats, the next two,
-// ...), the stronger declares war on the weaker, every army gathers at once
-// (finishGathering) and the attackers stand on their goal seats, so every war
-// has a siege: army markers, siege frames and red dashed war borders all over
-// the map. A few weeks run so the sieges begin and the relief armies march.
+// two blocks of allies form (by strength, alternately; alliances within each
+// block), the n-th of block A declares war on the n-th of block B, the allies
+// join (one army each), every army gathers at once (finishGathering) and the
+// attackers stand on their goal seats, so every war has a siege: army
+// markers, siege frames and red dashed war borders all over the map. A few
+// weeks run so the sieges begin and the relief armies march. armyDecoys.ts
+// fills the map up to 32 army markers.
 //
 // Aged worlds rarely have peoples with adjacent settlements (the game's rule
 // for a declaration), so pairs ignore it; the goal is the seat chooseGoal
@@ -32,26 +34,27 @@ export function declareWarsEverywhere(sim: Simulation): void {
   declarePairs(sim);
 }
 
-/** Wars between the peoples in pairs of similar size; all armies gathered and the attackers on their goals. */
+/** Two blocks of allies at war in pairs; all armies gathered and the attackers on their goals. */
 export function declarePairs(sim: Simulation): void {
   const w = sim.war;
   const world = sim.world;
-  // Relief armies come from the defender's other seats: peoples of similar size pair up (the two with the most
-  // seats, then the next two, ...), the stronger attacks, so defenders have seats to send relief from and the
-  // attackers hold out. Peoples already at war keep their war.
-  const district = sim.government.district;
-  const seats = new Map<number, number>();
-  for (let c = 0; c < world.cellCount; c++) {
-    if (district[c] === c && sim.cellPop[c] > 0) seats.set(world.owner[c], (seats.get(world.owner[c]) ?? 0) + 1);
-  }
+  // Two blocks of allies (phase 4): the peoples by strength, alternately into block A and B, every pair within a
+  // block forms an alliance. Then the n-th of A declares war on the n-th of B (similar strength, A's the
+  // stronger), so the allies of both join the wars as they start. Peoples already at war keep their war.
   const strength = (a: number) => sim.military.strength[a] ?? 0;
   const civs = livingCivilizations(sim)
     .filter((c) => c.capital >= 0 && w.enemy[c.id] === 0)
-    .sort((x, y) => (seats.get(y.id) ?? 0) - (seats.get(x.id) ?? 0) || x.id - y.id);
+    .map((c) => c.id)
+    .sort((x, y) => strength(y) - strength(x) || x - y);
+  const blockA = civs.filter((_, i) => i % 2 === 0);
+  const blockB = civs.filter((_, i) => i % 2 === 1);
+  for (const block of [blockA, blockB]) {
+    for (let i = 0; i < block.length; i++) for (let j = i + 1; j < block.length; j++) formAlliance(sim, block[i], block[j]);
+  }
   const candidate = new Uint8Array(PAIRS);
-  for (let i = 0; i + 1 < civs.length; i += 2) {
-    const [x, y] = [civs[i].id, civs[i + 1].id];
-    const [att, def] = strength(x) >= strength(y) ? [x, y] : [y, x];
+  for (let i = 0; i < blockB.length; i++) {
+    const [att, def] = [blockA[i], blockB[i]];
+    if (w.enemy[att] !== 0 || w.enemy[def] !== 0) continue;
     candidate.fill(0);
     candidate[def] = 1;
     let goal = chooseGoal(sim, att, candidate);

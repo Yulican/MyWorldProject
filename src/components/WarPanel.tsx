@@ -5,16 +5,20 @@ import {
   TICKS_PER_YEAR,
   WAR,
   civMilitary,
+  Pact,
+  civPacts,
   civTruces,
-  civWar,
+  civWars,
   livingCivilizations,
   relationsOf,
   type ArmyInfo,
+  type CivWar,
   type Simulation,
   type Term,
   type World,
 } from '../sim';
 import { BATTLE } from '../sim/society/battle';
+import { PAIRS } from '../sim/society/diplomacy';
 import { colors, spacing } from '../theme';
 
 /** Marks peoples at war (the map's war borders are red too). */
@@ -40,7 +44,8 @@ export function WarPanel({ sim, onClose }: Props) {
   const self = sim.civs[chosen] ? chosen : (civs[0]?.id ?? 0);
   const name = (civ: number) => sim.civs[civ]?.name ?? 'vanished people';
   const military = self ? civMilitary(sim, self) : null;
-  const war = self ? civWar(sim, self) : null;
+  const wars = self ? civWars(sim, self) : [];
+  const pacts = self ? civPacts(sim, self) : [];
   const truces = self ? civTruces(sim, self) : [];
   const relations = self ? relationsOf(sim, self).sort((a, b) => b.danger + b.theirDanger - (a.danger + a.theirDanger)) : [];
   const year = (tick: number) => Math.floor(tick / TICKS_PER_YEAR) + 1;
@@ -66,7 +71,7 @@ export function WarPanel({ sim, onClose }: Props) {
           >
             <View style={[styles.swatch, { backgroundColor: civ.color }]} />
             <Text style={styles.chipText}>{civ.name}</Text>
-            {sim.war.enemy[civ.id] !== 0 && <View style={styles.warDot} />}
+            {(sim.war.enemy[civ.id] !== 0 || sim.war.allyWarsOf[civ.id] > 0) && <View style={styles.warDot} />}
           </Pressable>
         ))}
       </ScrollView>
@@ -78,39 +83,22 @@ export function WarPanel({ sim, onClose }: Props) {
           </Text>
         )}
 
-        {war ? (
+        {wars.length === 0 && <Text style={styles.line}>At peace.</Text>}
+        {wars.map((war) => (
+          <WarBlock key={war.war} sim={sim} war={war} name={name} year={year} />
+        ))}
+
+        {pacts.length > 0 && (
           <View style={styles.block}>
-            <Text style={styles.name}>
-              {war.attacker ? `At war against the ${name(war.enemy)}` : `Attacked by the ${name(war.enemy)}`}
-            </Text>
-            <Text style={styles.line}>
-              Since year {year(war.startTick)} · {war.battles} battle{war.battles === 1 ? '' : 's'}
-            </Text>
-            <Text style={styles.line}>
-              {war.attacker
-                ? `Goal: a seat of government of the ${name(war.enemy)} at ${place(sim.world, war.goal)}`
-                : `Their goal: our seat of government at ${place(sim.world, war.goal)}`}
-            </Text>
-            <Text style={styles.line}>
-              {war.siegeStart < 0
-                ? 'The goal is not besieged.'
-                : war.occupied
-                  ? `Occupied, besieged since year ${year(war.siegeStart)}`
-                  : `Besieged since year ${year(war.siegeStart)}`}
-            </Text>
-            <Text style={styles.section}>Our armies ({war.ownArmies.length})</Text>
-            {war.ownArmies.length === 0 && <Text style={styles.termLabel}>None in the field.</Text>}
-            {war.ownArmies.map((a) => (
-              <ArmyRow key={a.slot} world={sim.world} army={a} />
-            ))}
-            <Text style={styles.section}>Their armies ({war.enemyArmies.length})</Text>
-            {war.enemyArmies.length === 0 && <Text style={styles.termLabel}>None in the field.</Text>}
-            {war.enemyArmies.map((a) => (
-              <ArmyRow key={a.slot} world={sim.world} army={a} />
+            <Text style={styles.section}>Alliances and defense pacts</Text>
+            {pacts.map((p) => (
+              <Text key={p.civ} style={styles.termLabel}>
+                {p.kind === Pact.Alliance
+                  ? `Alliance with the ${name(p.civ)}`
+                  : `Defense pact with the ${name(p.civ)}${sim.civs[p.threat] ? ` against the ${name(p.threat)}` : ''}`}
+              </Text>
             ))}
           </View>
-        ) : (
-          <Text style={styles.line}>At peace.</Text>
         )}
 
         {truces.length > 0 && (
@@ -131,7 +119,7 @@ export function WarPanel({ sim, onClose }: Props) {
             <View style={styles.relationHeader}>
               <View style={[styles.swatch, { backgroundColor: sim.civs[r.other]!.color }]} />
               <Text style={styles.relationName}>{name(r.other)}</Text>
-              {sim.war.enemy[self] === r.other && <Text style={styles.atWar}>at war</Text>}
+              {sim.war.foe[self * PAIRS + r.other] > 0 && <Text style={styles.atWar}>at war</Text>}
             </View>
             <Text style={styles.line}>
               Danger from them {Math.round(r.danger)}
@@ -152,11 +140,80 @@ export function WarPanel({ sim, onClose }: Props) {
           sends {Math.round(WAR.sendShare * 100)} % of its soldiers in up to {WAR.maxArmies} armies; they march to the
           goal seat and fight whoever they meet. A seat besieged for {WAR.occupyWeeks / TICKS_PER_YEAR} years whose
           settlement is unhappy is occupied. Only then may the defender give up, when it has less than{' '}
-          {Math.round(BATTLE.giveUp * 100)} % of the attacker's strength; the goal's district changes hands. After {WAR.exhaustYears} years without success the war ends, followed by a truce of {WAR.truceYears} years. Tap
+          {Math.round(BATTLE.giveUp * 100)} % of the attacker's strength; the goal's district changes hands. After {WAR.exhaustYears} years without success the war ends, followed by a truce of {WAR.truceYears} years. Allies join a war only when it starts, each with one army. Tap
           a people for the parts of its danger.
         </Text>
       </ScrollView>
     </View>
+  );
+}
+
+/** One war of the people: as main party (attacker or defender) or as an ally of one. */
+function WarBlock({
+  sim,
+  war,
+  name,
+  year,
+}: {
+  sim: Simulation;
+  war: CivWar;
+  name: (civ: number) => string;
+  year: (tick: number) => number;
+}) {
+  const list = (civs: number[]) => civs.map((c) => `the ${name(c)}`).join(', ');
+  const title = war.ally
+    ? `Ally of the ${name(war.partner)} against the ${name(war.enemy)}`
+    : war.attacker
+      ? `At war against the ${name(war.enemy)}`
+      : `Attacked by the ${name(war.enemy)}`;
+  const goalOwner = war.attacker ? `the ${name(war.enemy)}` : war.ally ? `the ${name(war.partner)}` : 'ours';
+  return (
+    <View style={styles.block}>
+      <Text style={styles.name}>{title}</Text>
+      <Text style={styles.line}>
+        Since year {year(war.startTick)} · {war.battles} battle{war.battles === 1 ? '' : 's'}
+      </Text>
+      {war.ownSide.length > 0 && <Text style={styles.line}>On our side: {list(war.ownSide)}</Text>}
+      <Text style={styles.line}>Against: {list(war.otherSide)}</Text>
+      <Text style={styles.line}>
+        Goal: a seat of government ({goalOwner}) at {place(sim.world, war.goal)}
+      </Text>
+      <Text style={styles.line}>
+        {war.siegeStart < 0
+          ? 'The goal is not besieged.'
+          : war.occupied
+            ? `Occupied, besieged since year ${year(war.siegeStart)}`
+            : `Besieged since year ${year(war.siegeStart)}`}
+      </Text>
+      <ArmyList sim={sim} title="Our armies" armies={war.ownArmies} name={null} />
+      {war.allyArmies.length > 0 && <ArmyList sim={sim} title="Allied armies" armies={war.allyArmies} name={name} />}
+      <ArmyList sim={sim} title="Their armies" armies={war.enemyArmies} name={war.otherSide.length > 1 ? name : null} />
+    </View>
+  );
+}
+
+function ArmyList({
+  sim,
+  title,
+  armies,
+  name,
+}: {
+  sim: Simulation;
+  title: string;
+  armies: ArmyInfo[];
+  /** Shows each army's people (for lists of several peoples). */
+  name: ((civ: number) => string) | null;
+}) {
+  return (
+    <>
+      <Text style={styles.section}>
+        {title} ({armies.length})
+      </Text>
+      {armies.length === 0 && <Text style={styles.termLabel}>None in the field.</Text>}
+      {armies.map((a) => (
+        <ArmyRow key={a.slot} world={sim.world} army={a} people={name ? name(a.civ) : null} />
+      ))}
+    </>
   );
 }
 
@@ -166,11 +223,12 @@ function place(world: World, cell: number): string {
   return `${col}, ${(cell - col) / world.width}`;
 }
 
-function ArmyRow({ world, army }: { world: World; army: ArmyInfo }) {
+function ArmyRow({ world, army, people }: { world: World; army: ArmyInfo; people: string | null }) {
   return (
     <View style={styles.termRow}>
       <Text style={styles.termLabel}>
-        At {place(world, army.cell)}
+        {people ? `${people} at ` : 'At '}
+        {place(world, army.cell)}
         {army.state === ArmyState.Gathering ? ' · gathering' : army.state === ArmyState.Retreating ? ' · retreating' : ''}
         {army.besieging ? ' · besieging the goal' : ''}
       </Text>

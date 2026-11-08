@@ -66,7 +66,7 @@ const scenarioText = {
   trade: 'worlds after 300 years, a trade center in every settlement and a harbor on every coast',
   diplomacy: 'worlds after 300 years, all borders open and free trade between all peoples',
   government: 'worlds after 300 years, seats of government and government buildings everywhere',
-  war: 'worlds after 300 years, uprisings, seats and soldiers everywhere, all peoples at war, sieges, 32 army markers',
+  war: 'worlds after 300 years, uprisings, seats and soldiers everywhere, two blocks of allies at war, sieges, 32 army markers',
 }[scenario] ?? scenario;
 const summary = JSON.parse(fs.readFileSync(`${out}/summary.json`, 'utf8'));
 const swipes = fs.readFileSync(`${out}/swipes.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
