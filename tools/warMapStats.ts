@@ -133,6 +133,7 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'joins declined: ally of other side': st.joinOwnAlly,
     'joins without army room': st.joinNoRoom,
     'wars with allies': st.allyWars,
+    'wars with allies on both sides': st.allyWarsBoth,
     'ally wars: battles': st.allyBattles,
     'ally wars: sieges': st.allySieges,
     'ally wars: occupations': st.allyOcc,

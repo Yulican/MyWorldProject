@@ -183,6 +183,8 @@ export type WarStats = {
   joinNoRoom: number;
   /** Wars with at least one ally, and their battles, sieges, occupations, whole peoples annexed. */
   allyWars: number;
+  /** Wars with allies on both sides. */
+  allyWarsBoth: number;
   allyBattles: number;
   allySieges: number;
   allyOcc: number;
@@ -395,6 +397,7 @@ export function createWar(seed: number, cellCount: number): WarState {
       joinOwnAlly: 0,
       joinNoRoom: 0,
       allyWars: 0,
+      allyWarsBoth: 0,
       allyBattles: 0,
       allySieges: 0,
       allyOcc: 0,
@@ -825,16 +828,20 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
     if (w.pactCount > 0) joinAllies(sim, s);
   }
   planMarch(sim, s);
+  if (w.wAllies[s] > 0) {
+    st.allyWars++;
+    let sides = 0;
+    for (let p = 1; p <= sim.diplomacy.maxId; p++) if (p !== att && p !== def && sideOf(w, s, p) >= 0) sides |= 1 << sideOf(w, s, p);
+    if (sides === 3) st.allyWarsBoth++;
+  }
   if (later) {
     // The armies in the next steps of the war's year (declareWars).
-    if (w.wAllies[s] > 0) st.allyWars++;
     raiseLater(w, s);
     return s;
   }
   reraise(sim, s, att);
   reraise(sim, s, def);
   if (w.wAllies[s] > 0) {
-    st.allyWars++;
     for (let p = 1; p <= sim.diplomacy.maxId; p++) if (p !== att && p !== def && sideOf(w, s, p) >= 0) reraise(sim, s, p);
   }
   return s;
@@ -845,11 +852,12 @@ const candD = new Uint8Array(PAIRS);
 
 /**
  * Phase 4b: the allies of both parties join war `s` (only at its start). The
- * defender's pact and alliance partners and the attacker's alliance partners
- * are candidates; a partner allied to the other party stays out. A side's
- * candidates join if their side with them is stronger than the other side
- * with all its pacts and alliances; none that is allied to a member of the
- * other side joins. Joining ends agreements and pacts with the other side.
+ * defender's pact and alliance partners always join it first; the attacker's
+ * alliance partners then join if the attacker's side with them is stronger
+ * than the defender with all its pacts and alliances. A people that is the
+ * ally of one party and a partner of the other (pact or alliance) joins
+ * neither; none that is allied to a member of the other side joins. Joining
+ * ends agreements and pacts with the other side.
  */
 function joinAllies(sim: Simulation, s: number): void {
   const w = sim.war;
@@ -861,36 +869,28 @@ function joinAllies(sim: Simulation, s: number): void {
   candA.fill(0);
   candD.fill(0);
   let sumA = m.strength[att] ?? 0;
-  let sumD = m.strength[def] ?? 0;
   for (let p = 1; p <= max; p++) {
     if (p === att || p === def || !sim.civs[p]) continue;
     const ka = w.pact[att * PAIRS + p];
     const kd = w.pact[def * PAIRS + p];
-    // An attacker's ally that is also the defender's ally stays out (breakAlliances has ended such alliances already).
-    if (ka === Pact.Alliance && kd === Pact.Alliance) {
+    if (ka === Pact.Alliance && kd !== Pact.None) {
+      // Bound to both parties (breakAlliances has ended an alliance with both already): it stays out.
       st.joinOwnAlly++;
     } else if (ka === Pact.Alliance) {
       candA[p] = 1;
       sumA += m.strength[p] ?? 0;
     } else if (kd !== Pact.None) {
       candD[p] = 1;
-      sumD += m.strength[p] ?? 0;
     }
   }
-  // The other side with all its pacts and alliances (the candidates' own side counts only the candidates).
-  const foeA = foeStrength(sim, def, att);
-  const foeD = foeStrength(sim, att, def);
-  const okA = sumA > foeA;
-  const okD = sumD > foeD;
+  // The defender's partners always join.
+  for (let p = 1; p <= max; p++) if (candD[p]) joinMember(sim, s, p, 1);
+  // The attacker's allies only if their side can win against the defender with all its pacts and alliances.
+  const okA = sumA > foeStrength(sim, def, att);
   for (let p = 1; p <= max; p++) {
-    if (candA[p] || candD[p]) {
-      const side = candA[p] ? 0 : 1;
-      if (!(side === 0 ? okA : okD)) {
-        st.joinWeak++;
-        continue;
-      }
-      joinMember(sim, s, p, side);
-    }
+    if (!candA[p]) continue;
+    if (!okA) st.joinWeak++;
+    else joinMember(sim, s, p, 0);
   }
 }
 

@@ -280,7 +280,8 @@ test('land cut off from its capital becomes its own people', () => {
 });
 
 test('splinters may go beyond the soft cap, new tribes may not', () => {
-  const sim = createSimulation(generateWorld({ seed: 77 }));
+  // A world whose splinters pass the cap within 650 years (seed 77 stays at 9 peoples since allies on both sides join wars).
+  const sim = createSimulation(generateWorld({ seed: 1 }));
   let most = 0;
   for (let year = 1; year <= 650 && most <= MAX_CIVS; year++) {
     runYears(sim, 1);

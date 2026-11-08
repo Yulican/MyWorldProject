@@ -1130,48 +1130,50 @@ test('a declaration on an ally of a partner ends that alliance (−30 trust at t
   assert.equal(hostile(sim, c, att), true);
 });
 
-test('pact partners join only a defensive war, alliance partners both, if their side can win and unless the opponent is their own ally', () => {
+test('the defender’s pact and alliance partners always join; the attacker’s allies only if their side can win; never against an own ally; both sides can have allies', () => {
   const f = blocFixture();
   const { sim, att } = f;
   const target = f.def;
   const [c, d, e] = [f.ally, f.far[0], f.far[1]];
   const m = sim.military;
   m.strength[att] = 100;
-  m.strength[target] = 40;
-  m.strength[c] = 90;
+  m.strength[target] = 10;
+  m.strength[c] = 5;
   m.strength[d] = 20;
   m.strength[e] = 5;
   setPact(sim, target, c, Pact.Pact); // defends the target
   setPact(sim, att, d, Pact.Pact); // a pact of the attacker: never joins its attack
   setPact(sim, att, e, Pact.Alliance); // an ally of the attacker
-  // The defender's side 40 + 90 > the attacker with its pacts and alliances 100 + 20 + 5: c joins; e's side 105 < 130 does not.
+  // The defender's pact joins though its side (10 + 5) is far weaker; e's side 105 > 10 + 5 joins too: allies on both sides.
   let s = startWar(sim, att, f.seats[0]);
   const side = (p: number) => sim.war.side[s * PAIRS + p];
-  assert.equal(side(c), 1);
+  assert.equal(side(c), 1, 'the defender’s partner joins even when weaker');
   assert.equal(side(d), -1);
-  assert.equal(side(e), -1, 'the attacker’s side cannot win');
-  assert.equal(sim.war.wAllies[s], 1);
+  assert.equal(side(e), 0);
+  assert.equal(sim.war.wAllies[s], 2);
   assert.ok(sim.chronicle.some((x) => x.text.includes('joined the')));
-  // Agreements and open borders between the opposing sides end.
+  // Agreements and open borders between the opposing sides end, pairwise.
   assert.equal(sim.diplomacy.open[c * PAIRS + att], 0);
   assert.equal(sim.diplomacy.freeTrade[c * PAIRS + att], 0);
+  assert.equal(sim.diplomacy.open[c * PAIRS + e], 0);
   assert.equal(hostile(sim, c, att), true);
+  assert.equal(hostile(sim, c, e), true);
+  assert.equal(hostile(sim, e, target), true);
   assert.equal(hostile(sim, d, target), false);
   endWar(sim, s, EndType.Exhausted);
   sim.war.truce.fill(0);
-  // Just not stronger is not enough: 40 + 85 against 125.
-  m.strength[c] = 85;
+  // The attacker's ally needs its side to be stronger than the defender with all its pacts and alliances: 105 against 10 + 95.
+  m.strength[c] = 95;
   s = startWar(sim, att, f.seats[0]);
-  assert.equal(side(c), -1);
-  assert.equal(sim.war.wAllies[s], 0);
+  assert.equal(side(c), 1);
+  assert.equal(side(e), -1, 'just not stronger is not enough');
+  assert.equal(sim.war.wAllies[s], 1);
   endWar(sim, s, EndType.Exhausted);
   sim.war.truce.fill(0);
-  // With more strength the attacker's ally joins its attack (100 + 50 > 40 + 85), the defender's pact then cannot win.
-  m.strength[e] = 50;
+  m.strength[e] = 6;
   s = startWar(sim, att, f.seats[0]);
   assert.equal(side(e), 0);
-  assert.equal(side(c), -1);
-  assert.equal(hostile(sim, e, target), true);
+  assert.equal(side(c), 1);
   endWar(sim, s, EndType.Exhausted);
   sim.war.truce.fill(0);
   // Allied to the attacker and to the defender: the declaration breaks its alliance with the attacker, and it defends its ally.
@@ -1181,20 +1183,28 @@ test('pact partners join only a defensive war, alliance partners both, if their 
   assert.equal(side(e), 1);
   endWar(sim, s, EndType.Exhausted);
   sim.war.truce.fill(0);
-  setPact(sim, e, target, Pact.None);
+  // An ally of the attacker with a defense pact with the defender joins neither side.
+  setPact(sim, e, target, Pact.Pact);
   setPact(sim, att, e, Pact.Alliance);
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(side(e), -1);
+  assert.equal(kindOf(sim, att, e), Pact.Alliance);
+  endWar(sim, s, EndType.Exhausted);
+  sim.war.truce.fill(0);
+  setPact(sim, e, target, Pact.None);
   // An ally of the attacker never joins against an ally of its own on the other side.
   setPact(sim, e, c, Pact.Alliance);
   setPact(sim, target, c, Pact.Alliance);
-  m.strength[c] = 200;
+  m.strength[e] = 500;
   s = startWar(sim, att, f.seats[0]);
   assert.equal(side(c), 1);
   assert.equal(side(e), -1);
   endWar(sim, s, EndType.Exhausted);
   sim.war.truce.fill(0);
-  // The defender's ally joins its partner's attack too (alliances join offensive wars, pacts don't).
+  // The defender's ally joins its partner's attack too if that side can win (alliances join offensive wars, pacts don't).
   setPact(sim, e, c, Pact.None);
   setPact(sim, att, e, Pact.None);
+  setPact(sim, att, d, Pact.None);
   setPact(sim, target, d, Pact.Pact);
   m.strength[target] = 200;
   s = startWar(sim, target, sim.civs[att]!.capital);
