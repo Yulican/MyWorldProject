@@ -21,7 +21,7 @@ const variants = process.argv.slice(4).length ? process.argv.slice(4) : ['nowar:
 const defaults = { ...WAR };
 const tribeDefaults = { ...TRIBE_TUNING };
 const allyDefaults = { ...ALLY };
-// Phase 4 (alliance.ts, ALLY): on=1 for 4a, on=1,join=1 for 4b, e.g. "4a:on=1" "4ab:on=1,join=1".
+// Phase 4 (alliance.ts, ALLY, on by default): variants over ALLY, e.g. "noally:pactTrust=999,allianceTrust=999" for the world without pacts and alliances.
 // Non-WAR keys of a variant: map size in hex columns/rows (default: the game's), maxCivs and chance of new tribes (TRIBE_TUNING).
 const WORLD_KEYS = ['width', 'height'];
 
@@ -131,13 +131,13 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'allies joined (total)': st.joins,
     'joins declined: side too weak': st.joinWeak,
     'joins declined: ally of other side': st.joinOwnAlly,
-    'joins declined: no army room': st.joinNoRoom,
+    'joins without army room': st.joinNoRoom,
     'wars with allies': st.allyWars,
     'ally wars: battles': st.allyBattles,
     'ally wars: sieges': st.allySieges,
     'ally wars: occupations': st.allyOcc,
     'ally wars: whole people annexed': st.allyAnnexed,
-    'peoples on one side (max)': st.maxSide + 1,
+    'peoples on one side (max)': st.maxSide,
     'wars declared': st.declared,
     'wars vs established peoples': st.estDeclared,
     'wars vs own splinters': st.declared - st.estDeclared,

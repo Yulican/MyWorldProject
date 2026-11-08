@@ -6,9 +6,11 @@ import { Deposit } from '../world/deposits';
 import { generateWorld } from '../world/generate';
 import { hasRoad, stepCost } from '../world/roads';
 import { BUILDINGS, GOV_SLOT, Good, SLOTS, SlotState } from './buildings';
-import { PAIRS } from './diplomacy';
+import { PAIRS, trustValue } from './diplomacy';
+import { civPacts, formAlliance, updateAlliances } from './alliance';
+import { ALLY, Pact, mayOutweigh, pactTrust } from './pacts';
 import { updateGovernment } from './government';
-import { TROOP_TYPES, Troop } from './military';
+import { MIL, TROOP_TYPES, Troop, hostile, strengthSize } from './military';
 import { conqueredValue, hasSeat, satisfactionTerms } from './satisfaction';
 import { SUPPLY_KINDS, SupplyKind } from './supply';
 import { TICKS_PER_YEAR, changeCiv, createSimulation, foundCivilization, stepSimulation, type Simulation } from './simulation';
@@ -21,6 +23,7 @@ import {
   advanceWar,
   armySoldiers,
   chooseGoal,
+  civWars,
   disbandArmy,
   endWar,
   finishGathering,
@@ -28,6 +31,7 @@ import {
   planMarch,
   rallyPoint,
   runWarYear,
+  sideStrength,
   startWar,
   travelCost,
   warTargets,
@@ -857,6 +861,479 @@ test('wars run the same for the same seed', () => {
     runYears(f.sim, 4);
     const w = f.sim.war;
     return [Array.from(w.aCell), Array.from(w.aN), Array.from(w.live), Array.from(w.wLive), Array.from(f.sim.world.owner), f.sim.chronicle.map((e) => e.text)];
+  };
+  assert.deepEqual(run(), run());
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4: defense pacts and alliances
+
+const kindOf = (sim: Simulation, a: number, b: number) => sim.war.pact[a * PAIRS + b];
+
+function setPact(sim: Simulation, a: number, b: number, kind: number): void {
+  const w = sim.war;
+  if (w.pact[a * PAIRS + b] === 0 && kind !== 0) w.pactCount++;
+  else if (w.pact[a * PAIRS + b] !== 0 && kind === 0) w.pactCount--;
+  w.pact[a * PAIRS + b] = kind;
+  w.pact[b * PAIRS + a] = kind;
+}
+
+function clearPacts(sim: Simulation): void {
+  sim.war.pact.fill(0);
+  sim.war.pactX.fill(0);
+  sim.war.pactCount = 0;
+}
+
+const setTrust = (sim: Simulation, a: number, b: number, ab: number, ba = ab) => {
+  sim.diplomacy.trust[a * PAIRS + b] = ab;
+  sim.diplomacy.trust[b * PAIRS + a] = ba;
+};
+
+const moodOf = (sim: Simulation, a: number, b: number, label: string) => sim.diplomacy.moods.get(a * PAIRS + b)?.find((m) => m.label === label)?.value;
+
+type Bloc = Fixture & { ally: number; far: number[] };
+
+/**
+ * fixture(2), then the district of the second seat breaks away from `def` as
+ * a third people (`ally`, its capital seats[1]) with 20 melee per settlement;
+ * no pacts or alliances anywhere. `far` are the other living peoples (no soldiers).
+ */
+function blocFixture(): Bloc {
+  const f = fixture(2);
+  const { sim } = f;
+  const owner = sim.world.owner;
+  const civ = foundCivilization(sim, 'secession', f.seats[1], sim.civs[f.def]!)!;
+  const ally = civ.id;
+  const moving = new Uint8Array(sim.world.cellCount);
+  for (const c of settledOf(sim, f.def)) if (sim.government.district[c] === f.seats[1]) moving[c] = 1;
+  for (let i = 0; i < sim.pop.end; i++) if (sim.pop.alive[i] && moving[sim.pop.cell[i]]) changeCiv(sim, i, ally);
+  for (let c = 0; c < sim.world.cellCount; c++) if (moving[c]) owner[c] = ally;
+  const m = sim.military;
+  if (m.strength.length < sim.civSlots) {
+    const grown = new Float64Array(sim.civSlots);
+    grown.set(m.strength);
+    m.strength = grown;
+  }
+  for (const c of settledOf(sim, ally)) m.soldiers[c * TROOP_TYPES + Troop.Melee] = 20;
+  m.strength[f.def] = 8 * settledOf(sim, f.def).length;
+  m.strength[ally] = 20 * settledOf(sim, ally).length;
+  clearPacts(sim);
+  const far: number[] = [];
+  for (const c of sim.civs) if (c && c.id !== f.att && c.id !== f.def && c.id !== ally) far.push(c.id);
+  assert.ok(far.length >= 2, 'other peoples live');
+  assert.ok(settledOf(sim, ally).length > 0 && settledOf(sim, f.def).length > 0);
+  return { ...f, ally, far };
+}
+
+test('a defense pact needs trust ≥ 40 both ways and a common threat (both danger ≥ 50 from the same third people); it ends below trust 30 or when the threat falls below 35', () => {
+  const f = blocFixture();
+  const { sim } = f;
+  const [a, b] = f.far;
+  const x = f.att;
+  const dip = sim.diplomacy;
+  dip.known[a * PAIRS + b] = 1;
+  dip.known[b * PAIRS + a] = 1;
+  const danger = (p: number, v: number) => (dip.danger[p * PAIRS + x] = v);
+  const year = () => {
+    for (let o = 1; o < PAIRS; o++) if (o !== x) dip.danger[a * PAIRS + o] = dip.danger[b * PAIRS + o] = 0;
+    updateAlliances(sim);
+  };
+  setTrust(sim, a, b, 60);
+  danger(a, 60);
+  danger(b, 49);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None, 'no common threat');
+  danger(b, 50);
+  setTrust(sim, a, b, 60, 39);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None, 'trust 40 needed both ways');
+  setTrust(sim, a, b, 40);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Pact);
+  assert.equal(sim.war.pactX[a * PAIRS + b], x);
+  assert.deepEqual(civPacts(sim, a).find((p) => p.civ === b), { civ: b, kind: Pact.Pact, threat: x });
+  assert.ok(sim.chronicle.some((e) => e.text.includes('signed a defense pact')));
+  // The threat may fall to 35 and trust to 30 without ending it.
+  danger(a, 35);
+  setTrust(sim, a, b, 30);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Pact);
+  danger(b, 34.9);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None, 'threat below 35 at one partner');
+  danger(b, 50);
+  danger(a, 50);
+  setTrust(sim, a, b, 45);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Pact);
+  setTrust(sim, a, b, 29.9, 60);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None, 'trust below 30');
+  assert.ok(sim.chronicle.some((e) => e.text.includes('defense pact') && e.text.includes('ended')));
+});
+
+test('an alliance needs trust ≥ 80 both ways and no threat; below 65 it becomes a pact (with a common threat ≥ 35) or ends; a pact at 80 becomes an alliance', () => {
+  const f = blocFixture();
+  const { sim } = f;
+  const [a, b] = f.far;
+  const x = f.att;
+  const dip = sim.diplomacy;
+  dip.known[a * PAIRS + b] = 1;
+  dip.known[b * PAIRS + a] = 1;
+  const year = () => {
+    for (let o = 1; o < PAIRS; o++) if (o !== x) dip.danger[a * PAIRS + o] = dip.danger[b * PAIRS + o] = 0;
+    updateAlliances(sim);
+  };
+  dip.danger[a * PAIRS + x] = dip.danger[b * PAIRS + x] = 0;
+  setTrust(sim, a, b, 90, 79.9);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None);
+  setTrust(sim, a, b, 80);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Alliance);
+  assert.ok(sim.chronicle.some((e) => e.text.includes('formed an alliance')));
+  setTrust(sim, a, b, 65);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Alliance, 'kept at 65');
+  // Below 65 with a common threat: a pact against it.
+  dip.danger[a * PAIRS + x] = dip.danger[b * PAIRS + x] = 40;
+  setTrust(sim, a, b, 64.9, 70);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Pact);
+  assert.equal(sim.war.pactX[a * PAIRS + b], x);
+  assert.ok(sim.chronicle.some((e) => e.text.includes('became a defense pact')));
+  // The pact is an alliance again at 80.
+  setTrust(sim, a, b, 80);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Alliance);
+  // Below 65 without a common threat it ends.
+  dip.danger[a * PAIRS + x] = dip.danger[b * PAIRS + x] = 0;
+  setTrust(sim, a, b, 60);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None);
+  // An alliance made without trust (the peoples of a won revolution) follows the same rule.
+  formAlliance(sim, a, b);
+  assert.equal(kindOf(sim, a, b), Pact.Alliance);
+  setTrust(sim, a, b, 70);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.Alliance);
+  setTrust(sim, a, b, 50);
+  year();
+  assert.equal(kindOf(sim, a, b), Pact.None);
+  // No limit per people: one people allied with all others.
+  const all = [f.att, f.def, f.ally, ...f.far];
+  for (const p of all) for (const q of all) if (p !== q) {
+    dip.known[p * PAIRS + q] = 1;
+    sim.diplomacy.trust[p * PAIRS + q] = p === a || q === a ? 90 : 0;
+  }
+  updateAlliances(sim);
+  for (const q of all) if (q !== a) assert.equal(kindOf(sim, a, q), Pact.Alliance);
+});
+
+test('trust: a pact +5, an alliance +10 for good, signing +10 fading over 10 years; it counts for open borders and free trade', () => {
+  const f = blocFixture();
+  const { sim } = f;
+  const [a, b] = f.far;
+  const dip = sim.diplomacy;
+  dip.known[a * PAIRS + b] = 1;
+  dip.known[b * PAIRS + a] = 1;
+  dip.moods.delete(a * PAIRS + b);
+  dip.moods.delete(b * PAIRS + a);
+  const plain = trustValue(sim, a, b);
+  assert.ok(plain <= 80, 'room below the clamp');
+  setTrust(sim, a, b, 85);
+  for (let o = 1; o < PAIRS; o++) dip.danger[a * PAIRS + o] = dip.danger[b * PAIRS + o] = 0;
+  updateAlliances(sim);
+  assert.equal(kindOf(sim, a, b), Pact.Alliance);
+  assert.equal(pactTrust(sim, a, b), ALLY.allianceBonus);
+  assert.equal(moodOf(sim, a, b, 'Formed an alliance with us'), ALLY.signBonus);
+  assert.equal(moodOf(sim, b, a, 'Formed an alliance with us'), ALLY.signBonus);
+  assert.equal(trustValue(sim, a, b), Math.min(100, plain + 10 + 10));
+  sim.tick += 5 * TICKS_PER_YEAR;
+  const half = trustValue(sim, a, b);
+  setPact(sim, a, b, Pact.Pact);
+  assert.ok(Math.abs(trustValue(sim, a, b) - (half - 5)) < 1e-9, 'a pact gives 5 less');
+  setPact(sim, a, b, Pact.None);
+  assert.ok(Math.abs(trustValue(sim, a, b) - (half - 10)) < 1e-9);
+  sim.tick += 5 * TICKS_PER_YEAR;
+  const faded = trustValue(sim, a, b);
+  setPact(sim, a, b, Pact.Alliance);
+  assert.ok(Math.abs(trustValue(sim, a, b) - (faded + 10)) < 1e-9, 'the signing bonus is gone after 10 years, the alliance stays');
+});
+
+test('danger and the 2× declaration check count the other side with pacts and alliances, the own side with alliances, not a partner the declaration would lose; allies never attack each other', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const [c, d] = f.far;
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[target] = 60;
+  m.strength[c] = 30;
+  m.strength[d] = 10;
+  m.strength[f.ally] = 0;
+  assert.deepEqual(warTargets(sim, att), []);
+  // An ally of the attacker counts, a defense pact of the attacker does not.
+  setPact(sim, att, c, Pact.Pact);
+  assert.equal(mayOutweigh(sim, att, target, WAR.ratio), false);
+  setPact(sim, att, c, Pact.Alliance);
+  assert.equal(mayOutweigh(sim, att, target, WAR.ratio), true);
+  assert.ok(warTargets(sim, att).includes(target));
+  // The target's pacts and alliances count.
+  setPact(sim, target, d, Pact.Pact);
+  assert.equal(mayOutweigh(sim, att, target, WAR.ratio), false);
+  setPact(sim, target, d, Pact.None);
+  // A partner allied to the target would be lost by the declaration: it counts for the target, not for the attacker.
+  setPact(sim, c, target, Pact.Alliance);
+  assert.equal(mayOutweigh(sim, att, target, WAR.ratio), false);
+  m.strength[att] = 200;
+  assert.equal(mayOutweigh(sim, att, target, WAR.ratio), true);
+  setPact(sim, c, target, Pact.None);
+  // Allies never attack each other, however strong.
+  setPact(sim, att, target, Pact.Alliance);
+  m.strength[att] = 1e6;
+  assert.ok(!warTargets(sim, att).includes(target));
+  setPact(sim, att, target, Pact.None);
+  // Danger of the target for the attacker: (target + its pacts and alliances + floor) / (attacker + its alliances + floor).
+  m.strength[att] = 100;
+  setPact(sim, target, d, Pact.Pact);
+  setPact(sim, target, f.ally, Pact.Alliance);
+  m.strength[f.ally] = 15;
+  setPact(sim, att, c, Pact.Alliance);
+  const expected = Math.min(100, (50 * (60 + 10 + 15 + MIL.floor)) / (100 + 30 + MIL.floor));
+  assert.ok(Math.abs(strengthSize(sim, att, target, 50) - expected) < 1e-9);
+  // The attacker's pact does not count for its own side.
+  setPact(sim, att, c, Pact.Pact);
+  assert.ok(Math.abs(strengthSize(sim, att, target, 50) - Math.min(100, (50 * (60 + 10 + 15 + MIL.floor)) / (100 + MIL.floor))) < 1e-9);
+});
+
+test('a declaration on an ally of a partner ends that alliance (−30 trust at the partner), who may then join the other side', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const c = f.ally;
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[target] = 40;
+  m.strength[c] = 70;
+  setPact(sim, att, c, Pact.Alliance);
+  setPact(sim, c, target, Pact.Alliance);
+  const s = startWar(sim, att, f.seats[0]);
+  assert.ok(s >= 0);
+  assert.equal(kindOf(sim, att, c), Pact.None);
+  assert.equal(moodOf(sim, c, att, 'Attacked our ally'), -ALLY.breakLoss);
+  assert.ok(sim.chronicle.some((e) => e.text.includes('attacked an ally')));
+  // 40 + 70 > 100: the lost partner joins the defender.
+  assert.equal(sim.war.side[s * PAIRS + c], 1);
+  assert.equal(hostile(sim, c, att), true);
+});
+
+test('pact partners join only a defensive war, alliance partners both, unless the opponent is their own ally', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const [c, d, e] = [f.ally, f.far[0], f.far[1]];
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[target] = 40;
+  m.strength[c] = 70;
+  m.strength[d] = 20;
+  m.strength[e] = 5;
+  setPact(sim, target, c, Pact.Pact); // defends the target
+  setPact(sim, att, d, Pact.Pact); // a pact of the attacker: stays out
+  setPact(sim, att, e, Pact.Alliance); // an ally of the attacker: joins
+  // The attacker's side with its joining ally: 105 against 40 + 70: it does not join (cannot win) …
+  let s = startWar(sim, att, f.seats[0]);
+  const side = (p: number) => sim.war.side[s * PAIRS + p];
+  assert.equal(side(c), 1);
+  assert.equal(side(d), -1);
+  assert.equal(side(e), -1, 'the attacker’s side cannot win');
+  assert.equal(sim.war.wAllies[s], 1);
+  endWar(sim, s, EndType.Exhausted);
+  sim.war.truce.fill(0);
+  // … with more strength it joins (the side: 100 + 30 > 40 + 70).
+  m.strength[e] = 30;
+  setPact(sim, target, c, Pact.Pact);
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(side(e), 0);
+  assert.equal(side(c), 1);
+  assert.ok(sim.chronicle.some((x) => x.text.includes('joined the')));
+  // Agreements and open borders between the opposing sides end.
+  assert.equal(sim.diplomacy.open[e * PAIRS + c], 0);
+  assert.equal(sim.diplomacy.freeTrade[e * PAIRS + c], 0);
+  assert.equal(hostile(sim, e, c), true);
+  assert.equal(hostile(sim, e, target), true);
+  assert.equal(hostile(sim, d, target), false);
+  endWar(sim, s, EndType.Exhausted);
+  sim.war.truce.fill(0);
+  // An ally of both main parties stays out (here: e allied to the attacker and to the defender's ally c).
+  setPact(sim, target, c, Pact.Alliance);
+  setPact(sim, e, c, Pact.Alliance);
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(side(c), 1);
+  assert.equal(side(e), -1, 'never against its own ally');
+  endWar(sim, s, EndType.Exhausted);
+  // The defender's ally joins when the defender attacks (an offensive war of the alliance).
+  sim.war.truce.fill(0);
+  m.strength[target] = 200;
+  const goal = sim.civs[att]!.capital;
+  s = startWar(sim, target, goal);
+  assert.ok(s >= 0);
+  assert.equal(side(c), 0);
+});
+
+test('a people starts a war only when it is in none (as a main party or an ally), but joins many wars as an ally; allies join only at the start', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const [c, x, y] = [f.ally, f.far[0], f.far[1]];
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[target] = 40;
+  m.strength[c] = 70;
+  m.strength[x] = 10;
+  m.strength[y] = 10;
+  setPact(sim, target, c, Pact.Alliance);
+  setPact(sim, y, c, Pact.Alliance);
+  const s1 = startWar(sim, att, f.seats[0]);
+  assert.equal(sim.war.side[s1 * PAIRS + c], 1);
+  // A second war: c is allied to its defender too and joins it as well.
+  const s2 = startWar(sim, x, sim.civs[y]!.capital);
+  assert.ok(s2 >= 0);
+  assert.equal(sim.war.side[s2 * PAIRS + c], 1);
+  assert.equal(sim.war.allyWarsOf[c], 2);
+  assert.deepEqual(civWars(sim, c).map((w) => [w.war, w.ally, w.partner]), [[s1, true, target], [s2, true, y]]);
+  const info = civWars(sim, target)[0];
+  assert.deepEqual([info.enemy, info.ownSide, info.otherSide], [att, [c], [att]]);
+  // Fighting as an ally, it starts no war of its own, however strong.
+  m.strength[c] = 1e6;
+  assert.deepEqual(warTargets(sim, c), []);
+  // An alliance formed during the war does not join it, nor count for its sides.
+  const before = sideStrength(sim, s1, 0);
+  formAlliance(sim, att, y);
+  reviewYear(sim);
+  assert.equal(sim.war.side[s1 * PAIRS + y], -1);
+  assert.equal(sideStrength(sim, s1, 0), before);
+  assert.equal(sideStrength(sim, s1, 1), m.strength[target] + m.strength[c]);
+});
+
+/** The war checks of a year alone (no declarations). */
+function reviewYear(sim: Simulation): void {
+  const chance = WAR.chance;
+  try {
+    WAR.chance = 0;
+    runWarYear(sim);
+  } finally {
+    WAR.chance = chance;
+  }
+}
+
+test('in the war only the allies that joined count: the 40 % give-up weighs the sides with them', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const c = f.ally;
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[target] = 30;
+  m.strength[c] = 80;
+  setPact(sim, target, c, Pact.Pact);
+  const s = startWar(sim, att, f.seats[0]);
+  assert.equal(sim.war.side[s * PAIRS + c], 1);
+  // 100 against 30 + 80: the attacker keeps fighting; at 43.9 (< 40 % of 110) it gives up, though 40 % of the defender alone is 12.
+  reviewYear(sim);
+  assert.equal(sim.war.wLive[s], 1);
+  m.strength[att] = 43.9;
+  reviewYear(sim);
+  assert.equal(sim.war.wLive[s], 0, 'the attacker gave up');
+  assert.equal(sim.war.stats.ended[EndType.AttackerGaveUp], 1);
+});
+
+test('an ally sends one army with 50 % of its soldiers from its seat nearest the goal, and relieves the besieged seat of its partner', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const c = f.ally;
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[target] = 40;
+  m.strength[c] = 20 * settledOf(sim, c).length;
+  setPact(sim, target, c, Pact.Alliance);
+  const s = startWar(sim, att, f.seats[0]);
+  assert.equal(sim.war.side[s * PAIRS + c], 1);
+  const mine = armiesOf(sim, c);
+  assert.equal(mine.length, 1);
+  const a = mine[0];
+  assert.equal(sim.war.aCell[a], f.seats[1], 'its only seat');
+  ready(sim);
+  const sent = armySoldiers(sim.war, a);
+  const all = settledOf(sim, c).length * 20;
+  assert.ok(sent >= WAR.armyMin && sent <= all * ALLY.send + 1e-9, `${sent} of ${all}`);
+  // Raised again the next year: still one army.
+  reviewYear(sim);
+  assert.equal(armiesOf(sim, c).length, 1);
+  // Relief: the attacker besieges the goal; the ally's army reaches it and breaks the siege.
+  for (const b of armiesOf(sim, target)) disbandArmy(sim, b);
+  const [besieger, ...rest] = armiesOf(sim, att);
+  for (const b of rest) disbandArmy(sim, b);
+  for (let t = 0; t < TROOP_TYPES; t++) sim.war.aN[besieger * TROOP_TYPES + t] = 0;
+  sim.war.aN[besieger * TROOP_TYPES + Troop.Melee] = 5;
+  put(sim, besieger, f.seats[0]);
+  week(sim);
+  assert.ok(sim.war.wSiegeStart[s] >= 0, 'besieged');
+  assert.ok(travelCost(sim, s, 1, sim.war.aCell[a]) < Infinity, 'the ally has a way to the goal');
+  for (let k = 0; k < 60 && sim.war.wSiegeStart[s] >= 0; k++) week(sim);
+  assert.equal(sim.war.wSiegeStart[s], -1, 'the siege is broken');
+  assert.ok(sim.war.stats.battles > 0);
+});
+
+test('the main parties’ peace ends the war for all: allies go home without loot, the winner trusts its allies +10 and the loser’s allies −10', () => {
+  const f = blocFixture();
+  const { sim, att } = f;
+  const target = f.def;
+  const c = f.ally;
+  const e = f.far[0];
+  const m = sim.military;
+  m.strength[att] = 100;
+  m.strength[e] = 30;
+  m.strength[target] = 40;
+  m.strength[c] = 60;
+  setPact(sim, att, e, Pact.Alliance);
+  setPact(sim, target, c, Pact.Pact);
+  const s = startWar(sim, att, f.seats[0]);
+  assert.equal(sim.war.side[s * PAIRS + e], 0);
+  assert.equal(sim.war.side[s * PAIRS + c], 1);
+  const cOwned = settledOf(sim, c).length;
+  const eLand = settledOf(sim, e).length;
+  endWar(sim, s, EndType.GaveUp);
+  assert.equal(sim.war.wLive[s], 0);
+  for (const p of [att, target, c, e]) {
+    assert.equal(sim.war.side[s * PAIRS + p], -1);
+    assert.equal(sim.war.allyWarsOf[p], 0);
+    assert.equal(armiesOf(sim, p).length, 0);
+    for (const q of [att, target, c, e]) assert.equal(sim.war.foe[p * PAIRS + q], 0);
+  }
+  assert.equal(sim.war.armies, 0);
+  assert.equal(settledOf(sim, c).length, cOwned, 'allies lose no land');
+  assert.equal(settledOf(sim, e).length, eLand, 'allies get no land');
+  assert.equal(sim.world.owner[f.seats[0]], att, 'the goal goes to the attacker');
+  assert.equal(moodOf(sim, att, e, 'Fought at our side'), ALLY.winBonus);
+  assert.equal(moodOf(sim, att, c, 'Fought against us'), -ALLY.loseLoss);
+  assert.equal(hostile(sim, e, c), false);
+});
+
+test('wars with allies run the same for the same seed', () => {
+  const run = () => {
+    const f = blocFixture();
+    const m = f.sim.military;
+    m.strength[f.att] = 100;
+    m.strength[f.def] = 40;
+    m.strength[f.ally] = 70;
+    setPact(f.sim, f.def, f.ally, Pact.Alliance);
+    startWar(f.sim, f.att, f.seats[0]);
+    runYears(f.sim, 4);
+    const w = f.sim.war;
+    return [Array.from(w.aCell), Array.from(w.aN), Array.from(w.live), Array.from(w.wLive), Array.from(w.pact), Array.from(f.sim.world.owner), f.sim.chronicle.map((e) => e.text)];
   };
   assert.deepEqual(run(), run());
 });

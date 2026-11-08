@@ -6,7 +6,7 @@ import { Deposit } from '../world/deposits';
 import { addRoad, stepCost } from '../world/roads';
 import { BUILDINGS } from './buildings';
 import { BO, BI, Defense, fightBattle, givesUp, remainingSoldiers } from './battle';
-import { ALLY, Pact, foeStrength, mayOutweigh, ownStrength } from './pacts';
+import { ALLY, Pact, foeStrength, mayOutweigh } from './pacts';
 import { breakAlliances, endPact, updateAlliances } from './alliance';
 import { PAIRS, addMood, rebuildPartners } from './diplomacy';
 import { updateCellSupply } from './economy';
@@ -17,7 +17,9 @@ import { changeCiv, record, type Simulation } from './simulation';
 
 // War on the map, phase 3a + 3b ("Design Documents/Requirement Krieg.md",
 // sections 4 to 6): declaration, armies, march, battles, siege, occupation,
-// peace and conquest.
+// peace and conquest; phase 4b (section 7): allies join a war at its start
+// (joinAllies) and fight on its sides (`side` per war and people, `foe` per
+// pair), each with one army; the main parties' peace ends it for all.
 //
 // Soldiers stay in their cells' counters (military.soldiers), so pay,
 // training and strength work as before; an army is a count of soldiers
@@ -174,7 +176,7 @@ export type WarStats = {
   downgraded: number;
   pactsEnded: number;
   alliesBroken: number;
-  /** Allies that joined a war, and declined: side too weak, an ally of the other side, no room for an army. */
+  /** Allies that joined a war, declined (side too weak, an ally of the other side), and joined without room for an army. */
   joins: number;
   joinWeak: number;
   joinOwnAlly: number;
@@ -426,10 +428,13 @@ export function resetWarCiv(sim: Simulation, id: number): void {
   const w = sim.war;
   const s = w.civWar[id];
   if (s >= 0 && w.wLive[s]) endWar(sim, s, EndType.Vanished);
+  // Wars the old people fought as an ally: it leaves them (their foes count down).
+  for (let q = 0; q < MAX_WARS; q++) if (w.wLive[q] && w.side[q * PAIRS + id] >= 0) dropMember(sim, q, id);
   w.enemy[id] = 0;
   w.civWar[id] = -1;
   for (let b = 0; b < PAIRS; b++) endPact(sim, id, b);
   for (let q = 0; q < MAX_WARS; q++) w.side[q * PAIRS + id] = -1;
+  w.allyWarsOf[id] = 0;
   for (let b = 0; b < PAIRS; b++) w.truce[pairKey(id, b)] = 0;
 }
 
@@ -500,22 +505,36 @@ function reviewWar(sim: Simulation, s: number): void {
   if (endIfGone(sim, s)) return;
   const att = w.wAtt[s];
   const def = w.wDef[s];
-  const sa = ownStrength(sim, att);
-  const sd = ownStrength(sim, def);
-  if (defenderGivesUp(w, s, sd, foeStrength(sim, att, def))) endWar(sim, s, EndType.GaveUp);
-  else if (givesUp(sa, foeStrength(sim, def, att))) endWar(sim, s, EndType.AttackerGaveUp);
+  if (w.wAllies[s] > 0) {
+    // Allies that vanished leave before the sides are weighed.
+    for (let p = 1; p <= sim.diplomacy.maxId; p++) if (p !== att && p !== def && sideOf(w, s, p) >= 0 && !sim.civs[p]) dropMember(sim, s, p);
+  }
+  const sa = sideStrength(sim, s, 0);
+  const sd = sideStrength(sim, s, 1);
+  if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
+  else if (givesUp(sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
   else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
   else {
     reraise(sim, s, att);
     reraise(sim, s, def);
     if (w.wAllies[s] > 0) {
-      for (let p = 1; p <= sim.diplomacy.maxId; p++) {
-        if (p === att || p === def || sideOf(w, s, p) < 0) continue;
-        if (!sim.civs[p]) dropMember(sim, s, p);
-        else reraise(sim, s, p);
-      }
+      for (let p = 1; p <= sim.diplomacy.maxId; p++) if (p !== att && p !== def && sideOf(w, s, p) >= 0) reraise(sim, s, p);
     }
   }
+}
+
+/** Strength of `side` (0 attacker's, 1 defender's) of war `s`: its main party and the allies that joined it. */
+export function sideStrength(sim: Simulation, s: number, side: number): number {
+  const w = sim.war;
+  const m = sim.military.strength;
+  const main = side === 0 ? w.wAtt[s] : w.wDef[s];
+  let sum = main < m.length ? m[main] : 0;
+  if (w.wAllies[s] === 0) return sum;
+  const max = sim.diplomacy.maxId;
+  for (let p = 1; p <= max; p++) {
+    if (p !== main && w.side[s * PAIRS + p] === side && sim.civs[p] && p < m.length) sum += m[p];
+  }
+  return sum;
 }
 
 /** The defender gives up only once the goal seat is occupied, and then below BATTLE.giveUp of the attacker's strength. */
@@ -592,13 +611,15 @@ function markCandidates(sim: Simulation, a: number, civs: number): boolean {
   const w = sim.war;
   const m = sim.military;
   candidate.fill(0);
-  if (!sim.civs[a] || w.enemy[a] !== 0 || (ALLY.on && ALLY.allyBlocksStart && w.allyWarsOf[a] > 0)) return false;
+  // Only a people at peace starts a war (neither a main party nor an ally in one).
+  if (!sim.civs[a] || w.enemy[a] !== 0 || w.allyWarsOf[a] > 0) return false;
   const sa = m.strength[a] ?? 0;
   if (sa <= 0) return false;
   let any = false;
   for (let b = 1; b < civs; b++) {
     if (b === a || !sim.civs[b] || w.enemy[b] !== 0 || adj[a * civs + b] === 0 || inTruce(sim, a, b)) continue;
-    if (ALLY.on && w.pact[a * PAIRS + b] === Pact.Alliance) continue;
+    // Allies never attack each other.
+    if (w.pact[a * PAIRS + b] === Pact.Alliance) continue;
     if (!mayOutweigh(sim, a, b, WAR.ratio)) continue;
     candidate[b] = 1;
     any = true;
@@ -742,11 +763,11 @@ export function startWar(sim: Simulation, att: number, goal: number): number {
   if (w.wars > st.maxWars) st.maxWars = w.wars;
   sever(sim, att, def);
   record(sim, `The ${sim.civs[att]!.name} declared war on the ${sim.civs[def]!.name}.`, goal);
-  if (ALLY.on) {
-    // A declaration ends the alliances with partners allied to the target; a war ends the pact between its parties.
+  // A declaration ends the alliances with partners allied to the target; a war ends the pact between its parties.
+  if (w.pactCount > 0) {
     breakAlliances(sim, att, def);
     endPact(sim, att, def);
-    if (ALLY.join) joinAllies(sim, s);
+    if (w.pactCount > 0) joinAllies(sim, s);
   }
   planMarch(sim, s);
   reraise(sim, s, att);
@@ -758,17 +779,16 @@ export function startWar(sim: Simulation, att: number, goal: number): number {
   return s;
 }
 
-
 const candA = new Uint8Array(PAIRS);
 const candD = new Uint8Array(PAIRS);
 
 /**
- * Phase 4b: the allies of both parties join war `s`. The defender's pact and
- * alliance partners and the attacker's alliance partners are candidates; a
- * partner allied to the other party stays out. A side's candidates join if
- * their side with them is stronger than the other side with all its pacts
- * and alliances (ALLY.needWin = 0: always); none that is allied to a member
- * of the other side joins. Joining ends agreements with the other side.
+ * Phase 4b: the allies of both parties join war `s` (only at its start). The
+ * defender's pact and alliance partners and the attacker's alliance partners
+ * are candidates; a partner allied to the other party stays out. A side's
+ * candidates join if their side with them is stronger than the other side
+ * with all its pacts and alliances; none that is allied to a member of the
+ * other side joins. Joining ends agreements and pacts with the other side.
  */
 function joinAllies(sim: Simulation, s: number): void {
   const w = sim.war;
@@ -785,25 +805,22 @@ function joinAllies(sim: Simulation, s: number): void {
     if (p === att || p === def || !sim.civs[p]) continue;
     const ka = w.pact[att * PAIRS + p];
     const kd = w.pact[def * PAIRS + p];
-    if (ka === Pact.Alliance) {
-      if (w.pact[def * PAIRS + p] === Pact.Alliance) {
-        st.joinOwnAlly++;
-      } else if (w.pact[p * PAIRS + def] === Pact.Alliance) st.joinOwnAlly++;
-      else {
-        candA[p] = 1;
-        sumA += m.strength[p] ?? 0;
-      }
-    }
-    if (kd !== Pact.None && w.pact[att * PAIRS + p] !== Pact.Alliance) {
+    // An attacker's ally that is also the defender's ally stays out (breakAlliances has ended such alliances already).
+    if (ka === Pact.Alliance && kd === Pact.Alliance) {
+      st.joinOwnAlly++;
+    } else if (ka === Pact.Alliance) {
+      candA[p] = 1;
+      sumA += m.strength[p] ?? 0;
+    } else if (kd !== Pact.None) {
       candD[p] = 1;
       sumD += m.strength[p] ?? 0;
-    } else if (kd !== Pact.None) st.joinOwnAlly++;
+    }
   }
   // The other side with all its pacts and alliances (the candidates' own side counts only the candidates).
   const foeA = foeStrength(sim, def, att);
   const foeD = foeStrength(sim, att, def);
-  const okA = !ALLY.needWin || sumA > foeA;
-  const okD = !ALLY.needWin || sumD > foeD;
+  const okA = sumA > foeA;
+  const okD = sumD > foeD;
   for (let p = 1; p <= max; p++) {
     if (candA[p] || candD[p]) {
       const side = candA[p] ? 0 : 1;
@@ -826,10 +843,8 @@ function joinMember(sim: Simulation, s: number, p: number, side: number): void {
       return;
     }
   }
-  if (worldRoom(w) < 1) {
-    w.stats.joinNoRoom++;
-    return;
-  }
+  // It joins even without room for its army on the map (it raises one yearly once there is room).
+  if (worldRoom(w) < 1 || countArmies(w, p) >= WAR.maxArmies) w.stats.joinNoRoom++;
   w.side[s * PAIRS + p] = side;
   w.wAllies[s]++;
   w.allyWarsOf[p]++;
@@ -841,6 +856,7 @@ function joinMember(sim: Simulation, s: number, p: number, side: number): void {
     if (sq !== 1 - side) continue;
     w.foe[p * PAIRS + q]++;
     w.foe[q * PAIRS + p]++;
+    endPact(sim, p, q);
     sever(sim, p, q);
   }
   if (count > w.stats.maxSide) w.stats.maxSide = count;
@@ -1571,11 +1587,11 @@ function fight(sim: Simulation, s: number, cell: number, na: number, nb: number)
   // The loser retreats with what is left; a draw sends both back.
   if (result >= 0) for (let i = 0; i < nb; i++) startRetreat(sim, groupB[i]);
   if (result <= 0) for (let i = 0; i < na; i++) startRetreat(sim, groupA[i]);
-  // Giving up after the battle.
-  const att = w.wAtt[s];
-  const def = w.wDef[s];
-  if (defenderGivesUp(w, s, ownStrength(sim, def), foeStrength(sim, att, def))) w.wEnd[s] = EndType.GaveUp;
-  else if (givesUp(ownStrength(sim, att), foeStrength(sim, def, att))) w.wEnd[s] = EndType.AttackerGaveUp;
+  // Giving up after the battle: the sides with the allies that joined.
+  const sa = sideStrength(sim, s, 0);
+  const sd = sideStrength(sim, s, 1);
+  if (defenderGivesUp(w, s, sd, sa)) w.wEnd[s] = EndType.GaveUp;
+  else if (givesUp(sa, sd)) w.wEnd[s] = EndType.AttackerGaveUp;
 }
 
 /** Scales the group's armies to what is left of `side` after the battle and kills the difference in the cells. */
@@ -1747,7 +1763,7 @@ export function endWar(sim: Simulation, s: number, type: number): void {
   const defName = sim.civs[def]?.name ?? '?';
   endSiege(sim, s);
   for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s) disbandArmy(sim, a);
-  if (w.wAllies[s] > 0 || ALLY.on) endAllies(sim, s, type);
+  if (w.wAllies[s] > 0) endAllies(sim, s, type);
   w.foe[att * PAIRS + def] = Math.max(0, w.foe[att * PAIRS + def] - 1);
   w.foe[def * PAIRS + att] = Math.max(0, w.foe[def * PAIRS + att] - 1);
   w.side[s * PAIRS + att] = -1;
@@ -1953,8 +1969,18 @@ export type ArmyInfo = {
   state: number;
 };
 export type CivWar = {
+  /** War slot. */
+  war: number;
+  /** The main party on the other side (the people `civ`, or the partner it fights for, is at war with). */
   enemy: number;
+  /** Whether `civ`'s side is the attacker's. */
   attacker: boolean;
+  /** Whether `civ` fights as an ally (not a main party), and for which main party. */
+  ally: boolean;
+  partner: number;
+  /** Peoples on `civ`'s side besides itself (main party first), and on the other side (main party first). */
+  ownSide: number[];
+  otherSide: number[];
   /** The goal seat, the year the war began. */
   goal: number;
   startTick: number;
@@ -1962,7 +1988,9 @@ export type CivWar = {
   siegeStart: number;
   occupied: boolean;
   battles: number;
+  /** Armies of `civ` itself, of its allies in this war, of the other side. */
   ownArmies: ArmyInfo[];
+  allyArmies: ArmyInfo[];
   enemyArmies: ArmyInfo[];
 };
 
@@ -1988,23 +2016,59 @@ export function warArmies(sim: Simulation): ArmyInfo[] {
   return list;
 }
 
-/** The war of people `civ`, null in peace. */
-export function civWar(sim: Simulation, civ: number): CivWar | null {
+function warInfo(sim: Simulation, s: number, civ: number): CivWar {
   const w = sim.war;
-  const s = w.civWar[civ];
-  if (s < 0 || !w.wLive[s]) return null;
+  const side = w.side[s * PAIRS + civ];
+  const att = w.wAtt[s];
+  const def = w.wDef[s];
+  const ownMain = side === 0 ? att : def;
+  const otherMain = side === 0 ? def : att;
+  const ownSide: number[] = ownMain !== civ ? [ownMain] : [];
+  const otherSide: number[] = [otherMain];
+  for (let p = 1; p < PAIRS; p++) {
+    if (p === att || p === def || p === civ) continue;
+    const q = w.side[s * PAIRS + p];
+    if (q === side) ownSide.push(p);
+    else if (q === 1 - side) otherSide.push(p);
+  }
   const armies = warArmies(sim).filter((x) => w.aWar[x.slot] === s);
   return {
-    enemy: w.enemy[civ],
-    attacker: w.wAtt[s] === civ,
+    war: s,
+    enemy: otherMain,
+    attacker: side === 0,
+    ally: civ !== att && civ !== def,
+    partner: ownMain,
+    ownSide,
+    otherSide,
     goal: w.wGoal[s],
     startTick: w.wStart[s],
     siegeStart: w.wSiegeStart[s],
     occupied: w.wOccupied[s] === 1,
     battles: w.wBattles[s],
     ownArmies: armies.filter((x) => x.civ === civ),
-    enemyArmies: armies.filter((x) => x.civ !== civ),
+    allyArmies: armies.filter((x) => x.civ !== civ && w.side[s * PAIRS + x.civ] === side),
+    enemyArmies: armies.filter((x) => w.side[s * PAIRS + x.civ] === 1 - side),
   };
+}
+
+/** The war people `civ` fights as a main party, null if none. */
+export function civWar(sim: Simulation, civ: number): CivWar | null {
+  const w = sim.war;
+  const s = w.civWar[civ];
+  if (s < 0 || !w.wLive[s]) return null;
+  return warInfo(sim, s, civ);
+}
+
+/** All wars of people `civ`: its own (as a main party) first, then those it fights in as an ally. */
+export function civWars(sim: Simulation, civ: number): CivWar[] {
+  const w = sim.war;
+  const list: CivWar[] = [];
+  const own = civWar(sim, civ);
+  if (own) list.push(own);
+  for (let s = 0; s < MAX_WARS; s++) {
+    if (w.wLive[s] && s !== w.civWar[civ] && w.side[s * PAIRS + civ] >= 0) list.push(warInfo(sim, s, civ));
+  }
+  return list;
 }
 
 /** Peoples `civ` has a truce with, and the tick each ends. */

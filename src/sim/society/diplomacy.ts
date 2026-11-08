@@ -911,6 +911,11 @@ export type Relation = {
   /** Trade agreements between the two, as "12 wood a year to the X" (one-sided) or "… for 3 tools" (two-sided). */
   deals: string[];
   distance: number;
+  /** War phase 4: 0 none, 1 defense pact, 2 alliance (pacts.ts: Pact), a defense pact's common threat (people id, else 0). */
+  pact: number;
+  pactThreat: number;
+  /** Whether the two are on opposite sides of a war (main parties or allies). */
+  atWar: boolean;
 };
 
 export function relationsOf(sim: Simulation, a: number): Relation[] {
@@ -937,6 +942,9 @@ export function relationsOf(sim: Simulation, a: number): Relation[] {
       migration: dip.migration[pair(a, b)] === 1,
       deals,
       distance: dip.distance[pair(a, b)],
+      pact: sim.war.pact[pair(a, b)],
+      pactThreat: sim.war.pact[pair(a, b)] === 1 ? sim.war.pactX[pair(a, b)] : 0,
+      atWar: sim.war.foe[pair(a, b)] > 0,
     });
   }
   return out;

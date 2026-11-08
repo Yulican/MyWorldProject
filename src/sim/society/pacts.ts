@@ -1,21 +1,20 @@
 import type { Simulation } from './simulation';
 
-// War phase 4 PROTOTYPE, the leaf part (no imports besides a type, so military.ts and diplomacy.ts can use it
-// without import cycles at load time): the numbers, pact kinds and the strength sums. alliance.ts has the yearly update.
+// War phase 4 ("Design Documents/Requirement Krieg.md", section 7), the leaf
+// part (no imports besides a type, so military.ts and diplomacy.ts can use it
+// without import cycles at load time): the numbers, pact kinds and the
+// strength sums that estimate a side before anyone joined (danger, the 2x
+// declaration check). alliance.ts has the yearly update, war.ts the joining.
 
 /** People pair stride (diplomacy.ts: PAIRS). */
 const PAIRS = 256;
 
-/** The numbers of phase 4 (user-approved start values); mutable only for the stats tool. */
+/** The numbers of phase 4 (chosen by the user after the simulation, section 15); mutable only so tools/warMapStats.ts can compare values. */
 export const ALLY = {
-  /** 4a: pacts and alliances exist (0 = off). */
-  on: 0,
-  /** 4b: allies join wars (needs `on`). */
-  join: 0,
   /** Mutual trust for a pact (with a common threat), for an alliance, and below which an alliance becomes a pact / a pact ends. */
   pactTrust: 40,
-  allianceTrust: 70,
-  downgradeTrust: 55,
+  allianceTrust: 80,
+  downgradeTrust: 65,
   pactEnd: 30,
   /** Common threat: both peoples' danger from the same third people at least this to form a pact, below threatEnd for either to end it. */
   threatForm: 50,
@@ -28,13 +27,9 @@ export const ALLY = {
   /** 4b: an ally sends this many armies (per war) with this share of its soldiers. */
   armies: 1,
   send: 0.5,
-  /** 4b: an ally joins only if its side (with the joining allies) is stronger than the other side with its pacts and alliances (0 = always joins). */
-  needWin: 1,
   /** 4b: trust the partner gains in an ally who fought at its side and a winner loses in the loser's allies. */
   winBonus: 10,
   loseLoss: 10,
-  /** 4b: a people fighting as an ally cannot start a war (1) or can (0). */
-  allyBlocksStart: 1,
 };
 
 export const Pact = { None: 0, Pact: 1, Alliance: 2 } as const;
@@ -71,7 +66,7 @@ export function foeStrength(sim: Simulation, b: number, except: number): number 
  */
 export function mayOutweigh(sim: Simulation, a: number, t: number, ratio: number): boolean {
   const w = sim.war;
-  if (!ALLY.on || w.pactCount === 0) return strengthOf(sim, a) >= ratio * strengthOf(sim, t);
+  if (w.pactCount === 0) return strengthOf(sim, a) >= ratio * strengthOf(sim, t);
   let own = strengthOf(sim, a);
   const max = sim.diplomacy.maxId;
   for (let p = 1; p <= max; p++) {

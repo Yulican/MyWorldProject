@@ -27,13 +27,17 @@ export {
   armySoldiers,
   civTruces,
   civWar,
+  civWars,
   finishGathering,
   inTruce,
+  sideStrength,
   warArmies,
   type ArmyInfo,
   type CivWar,
   type WarState,
 } from './society/war';
+export { ALLY, Pact } from './society/pacts';
+export { civPacts, formAlliance, pactBetween, type PactInfo } from './society/alliance';
 export { governmentOf, type District, type GovBuilding } from './society/government';
 export { hexEconomy, type BuildingInfo, type HexEconomy, type HexGovernment, type HexTrade } from './society/economy';
 export { resourceCapacityTerms } from './world/features';

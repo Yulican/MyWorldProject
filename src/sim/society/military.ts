@@ -167,6 +167,8 @@ export function yearlyGoodNeed(sim: Simulation, cell: number, type: number): num
 /**
  * The size term of the danger `b` poses to `a`: 50 × (b's strength + floor) ÷
  * (a's strength + floor), at most 100 (diplomacy.ts multiplies it by nearness).
+ * War phase 4: b's side counts its pacts and alliances, a's side its alliances
+ * (pacts.ts: foeStrength, ownStrength).
  */
 export function strengthSize(sim: Simulation, a: number, b: number, scale: number): number {
   const m = sim.military;
@@ -189,8 +191,8 @@ export function districtPay(sim: Simulation, seat: number): number {
 }
 
 /**
- * Hook for war (phase 3+): whether `a` and `b` are at war, or `b` is allied to
- * an enemy of `a`. Strategic goods are never sold then. No wars yet.
+ * Whether `a` and `b` are on opposite sides of a war (main parties or allies
+ * that joined it). Strategic goods are never sold then.
  */
 export function hostile(sim: Simulation, a: number, b: number): boolean {
   return sim.war.foe[a * PAIRS + b] > 0;
