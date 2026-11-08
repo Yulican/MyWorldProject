@@ -6,6 +6,7 @@ import { stepCost } from '../world/roads';
 import type { CivMood } from './satisfaction';
 import type { Simulation } from './simulation';
 import { mayBuyStrategic, strengthSize } from './military';
+import { pactTrust } from './pacts';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, isStrategic, stockOf } from './trade';
 
 // Diplomacy, stage 1 (agreed requirement: "Design Documents/Requirement
@@ -304,6 +305,8 @@ export function trustTerms(sim: Simulation, a: number, b: number): Term[] {
   }
   if (deals > 0) terms.push({ label: `Trade agreements (${deals})`, value: deals * AGREEMENT_TRUST });
   if (lack > 0) terms.push({ label: 'Delivers goods we lack', value: lack * LACK_TRUST });
+  const bond = sim.war.pactCount > 0 ? pactTrust(sim, a, b) : 0;
+  if (bond !== 0) terms.push({ label: sim.war.pact[k] === 2 ? 'Alliance' : 'Defense pact', value: bond });
   for (const m of dip.moods.get(k) ?? []) {
     const v = moodNow(m, sim.tick);
     if (v !== 0) terms.push({ label: m.label, value: v });
@@ -549,7 +552,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         if (a === b || !dip.known[pair(a, b)]) continue;
         // Borders: open to those we trust and don't fear; close when that ends.
         const k = pair(a, b);
-        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER && sim.war.enemy[a] !== b) {
+        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER && sim.war.foe[k] === 0) {
           dip.open[k] = 1;
           dip.bordersVersion++;
           addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
@@ -566,7 +569,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         if (a >= b || !dip.known[pair(a, b)]) continue;
         const k = pair(a, b);
         const both = dip.open[k] && dip.open[pair(b, a)];
-        if (sim.war.enemy[a] === b) continue;
+        if (sim.war.foe[k] > 0) continue;
         if (!dip.freeTrade[k] && both && mutual(a, b, FREE_TRADE_TRUST)) {
           setSymmetric(dip.freeTrade, a, b, 1);
           celebrate(dip, a, b, 'Signed free trade with us', sim.tick);
@@ -700,7 +703,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   };
   for (const a of living) {
     for (const b of living) {
-      if (a === b || !dip.known[pair(a, b)] || sim.war.enemy[a] === b || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
+      if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
@@ -876,6 +879,7 @@ export function trustValue(sim: Simulation, a: number, b: number): number {
     sum += AGREEMENT_TRUST;
     if (deliversUs(t, a, b)) sum += LACK_TRUST;
   }
+  if (sim.war.pactCount > 0) sum += pactTrust(sim, a, b);
   const moods = dip.moods.get(k);
   if (moods) for (const m of moods) sum += moodNow(m, sim.tick);
   return clamp100(sum);

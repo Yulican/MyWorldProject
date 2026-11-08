@@ -2,6 +2,8 @@ import { BUILDINGS, Good, SLOTS, STORED_COUNT, SlotState, FIRST_LUXURY } from '.
 import { GOV_TUNING } from './taxes';
 import { PRICE, TradeGood } from './trade';
 import type { Simulation } from './simulation';
+import { PAIRS } from './diplomacy';
+import { foeStrength, ownStrength } from './pacts';
 
 // Soldiers without combat (war phase 1; "Design Documents/Requirement
 // Krieg.md", sections 2 and 10). Barracks, shooting ranges and stables (built
@@ -168,6 +170,7 @@ export function yearlyGoodNeed(sim: Simulation, cell: number, type: number): num
  */
 export function strengthSize(sim: Simulation, a: number, b: number, scale: number): number {
   const m = sim.military;
+  if (sim.war.pactCount > 0) return Math.min(100, (scale * (foeStrength(sim, b, a) + MIL.floor)) / (ownStrength(sim, a) + MIL.floor));
   const sa = (a < m.strength.length ? m.strength[a] : 0) + MIL.floor;
   const sb = (b < m.strength.length ? m.strength[b] : 0) + MIL.floor;
   return Math.min(100, (scale * sb) / sa);
@@ -190,7 +193,7 @@ export function districtPay(sim: Simulation, seat: number): number {
  * an enemy of `a`. Strategic goods are never sold then. No wars yet.
  */
 export function hostile(sim: Simulation, a: number, b: number): boolean {
-  return sim.war.enemy[a] === b;
+  return sim.war.foe[a * PAIRS + b] > 0;
 }
 
 /** Whether `buyer` may buy strategic goods of `seller`: its danger for the seller is at most MIL.saleDanger, and they are not hostile. */

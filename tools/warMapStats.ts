@@ -13,12 +13,15 @@ import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type S
 import { PAIRS } from '../src/sim/society/diplomacy';
 import { EndType, WAR, WAR_PROFILE } from '../src/sim/society/war';
 import { TRIBE_TUNING } from '../src/sim/society/simulation';
+import { ALLY } from '../src/sim/society/pacts';
 
 const worlds = Number(process.argv[2] ?? 24);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const variants = process.argv.slice(4).length ? process.argv.slice(4) : ['nowar:enabled=0', 'war'];
 const defaults = { ...WAR };
 const tribeDefaults = { ...TRIBE_TUNING };
+const allyDefaults = { ...ALLY };
+// Phase 4 (alliance.ts, ALLY): on=1 for 4a, on=1,join=1 for 4b, e.g. "4a:on=1" "4ab:on=1,join=1".
 // Non-WAR keys of a variant: map size in hex columns/rows (default: the game's), maxCivs and chance of new tribes (TRIBE_TUNING).
 const WORLD_KEYS = ['width', 'height'];
 
@@ -65,6 +68,37 @@ function measure(sim: Simulation, ms: number, year: number): Row {
   const abroad = sim.trade.abroad;
   let soldiers = 0;
   for (let c = 0; c < w.cellCount * 3; c++) soldiers += sim.military.soldiers[c];
+  // Blocks: connected groups of peoples joined by alliances (alone) or by pacts and alliances.
+  const comp = (minKind: number) => {
+    const seen = new Set<number>();
+    let largest = 0;
+    let inBlocks = 0;
+    for (const a of living) {
+      if (seen.has(a)) continue;
+      const stack = [a];
+      seen.add(a);
+      let size = 0;
+      while (stack.length) {
+        const x = stack.pop()!;
+        size++;
+        for (const b of living) if (!seen.has(b) && sim.war.pact[x * PAIRS + b] >= minKind) {
+          seen.add(b);
+          stack.push(b);
+        }
+      }
+      if (size > 1) inBlocks += size;
+      largest = Math.max(largest, size);
+    }
+    return [largest, inBlocks];
+  };
+  let pacts = 0;
+  let alliances = 0;
+  for (const a of living) for (const b of living) if (a < b) {
+    if (sim.war.pact[a * PAIRS + b] === 1) pacts++;
+    else if (sim.war.pact[a * PAIRS + b] === 2) alliances++;
+  }
+  const [bigAll, inAll] = comp(2);
+  const [bigAny, inAny] = comp(1);
   const ended = st.ended.reduce((a, b) => a + b, 0);
   const dur = st.durationSum / Math.max(1, ended) / TICKS_PER_YEAR;
   const row: Row = {
@@ -83,6 +117,27 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'cut off (total)': text('cut off from'),
     'known pairs': knownPairs,
     'neighbor pairs (adjacent)': adjPairs.size,
+    'pacts now': pacts,
+    'alliances now': alliances,
+    'largest block (alliances)': bigAll,
+    'peoples in alliance blocks': inAll,
+    'largest block (pacts+alliances)': bigAny,
+    'peoples in pact/alliance blocks': inAny,
+    'pacts signed (total)': st.pactsSigned,
+    'alliances signed (total)': st.alliancesSigned,
+    'alliances downgraded': st.downgraded,
+    'pacts/alliances ended': st.pactsEnded,
+    'alliances broken by declaration': st.alliesBroken,
+    'allies joined (total)': st.joins,
+    'joins declined: side too weak': st.joinWeak,
+    'joins declined: ally of other side': st.joinOwnAlly,
+    'joins declined: no army room': st.joinNoRoom,
+    'wars with allies': st.allyWars,
+    'ally wars: battles': st.allyBattles,
+    'ally wars: sieges': st.allySieges,
+    'ally wars: occupations': st.allyOcc,
+    'ally wars: whole people annexed': st.allyAnnexed,
+    'peoples on one side (max)': st.maxSide + 1,
     'wars declared': st.declared,
     'wars vs established peoples': st.estDeclared,
     'wars vs own splinters': st.declared - st.estDeclared,
@@ -142,12 +197,14 @@ for (const spec of variants) {
   const [name, rest = ''] = spec.split(':');
   Object.assign(WAR, defaults);
   Object.assign(TRIBE_TUNING, tribeDefaults);
+  Object.assign(ALLY, allyDefaults);
   const worldOpt: Record<string, number> = {};
   WAR_PROFILE.clock = () => performance.now();
   for (const kv of rest.split(',').filter(Boolean)) {
     const [k, v] = kv.split('=');
     if (WORLD_KEYS.includes(k)) worldOpt[k] = Number(v);
     else if (k in TRIBE_TUNING) (TRIBE_TUNING as Record<string, number>)[k] = Number(v);
+    else if (k in ALLY) (ALLY as Record<string, number>)[k] = Number(v);
     else if (!(k in WAR)) throw new Error(`unknown key ${k}`);
     else (WAR as Record<string, number>)[k] = Number(v);
   }
