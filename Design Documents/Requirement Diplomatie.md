@@ -213,7 +213,7 @@ Wege und Verluste.
 Ausführlich in `Requirement Krieg.md`. Hier nur die Änderungen an der Diplomatie:
 - **Gefahr aus Stärke** (siehe Abschnitt 1).
 - **Kriegszustand:** Ein Krieg hebt alle Abkommen und offenen Grenzen zwischen den Kriegsparteien auf; Handel mit dem Gegner ruht. Nach dem Krieg: Vertrauen −30 (klingt in 10 Jahren ab), Grenzen zu, 20 Jahre Waffenstillstand.
-- **Verteidigungspakt** (Vertrauen ≥ 40, gemeinsame Bedrohung, Gefahr ≥ 50 durch dasselbe dritte Volk) und **Bündnis** (Vertrauen ≥ 70, hilft auch bei Angriffen). Auflösen mit Lücke zu den Schwellen. Sie sind eigene Zustände neben Grenzen und Abkommen und werden im Diplomatie-Panel gezeigt. Schließen der Grenze bricht sie ab.
+- **Verteidigungspakt** (Vertrauen ≥ 40, gemeinsame Bedrohung durch ein drittes Volk, Gefahr ≥ 50; endet bei Vertrauen < 30 oder wenn die Gefahr beim Partner unter 35 fällt) und **Bündnis** (Vertrauen ≥ 70; unter 55 wird es zum Pakt herabgestuft). Keine Obergrenze. Vertrauen: Pakt +5, Bündnis +10 dauerhaft; Abschluss einmalig +10 (klingt in 10 Jahren ab). Erklärt ein Volk einem Verbündeten eines Bündnispartners den Krieg, endet das Bündnis mit diesem Partner (−30). Verbündete greifen einander nie an. Durchmarsch für Armeen von Verbündeten; Handel unverändert. Einzelheiten: `Requirement Krieg.md`, Abschnitt 7.
 - **Verkauf strategischer Güter** (Handel und Handelsabkommen): nur an Völker, deren Gefahr für den Verkäufer ≤ X ist (40, in der Simulation von Phase 0 und 1 kalibriert), nie an Kriegsgegner und deren Verbündete.
 - **Beziehung nach einer Revolution:** Rebellen sind Kriegsgegner des Mutterlands.
 

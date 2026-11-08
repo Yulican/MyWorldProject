@@ -84,7 +84,7 @@ Entschieden (Nutzer), Phase 3b.
 
 Entschieden (Nutzer), Phase 3a.
 
-- **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Ist die Stärke des Angreifers 0, darf er nicht erklären (keine Kriege „0 ≥ 2 × 0“). Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt (ein Krieg je Volk).
+- **Erklärung:** Ein Volk darf nur gegen **Nachbarn** erklären (Völker, die eine gemeinsame Grenze haben), wenn seine Stärke ≥ 2× ist. Jährlich wird mit 10 % gewürfelt. Ist die Stärke des Angreifers 0, darf er nicht erklären (keine Kriege „0 ≥ 2 × 0“). Nicht während des Waffenstillstands und nicht, wenn das Volk schon Krieg führt; als Verbündeter darf es dagegen vielen Kriegen beitreten (Abschnitt 7).
 - **Zielsitz:** Unter den Sitzen, deren Bezirke Siedlungen an der Grenze des Angreifers enthalten, wählt er den mit dem größten Nutzen bei Eroberung. **Nutzen** (entschieden) = gewichtete Summe aus Einwohnern und Ressourcen des Bezirks (strategische Güter und Luxusvorkommen zählen doppelt), geteilt durch die Verteidiger im Bezirk. Es gibt ein Kriegsziel je Krieg.
 - **Aufgabe** (entschieden): Vor der Besetzung des Kriegsziels (Zielsitz) gibt der Verteidiger nie auf. Ist der Zielsitz besetzt, gibt er nur auf, wenn er weniger als 40 % der Stärke des Gegners hat; sonst geht der Krieg (mit besetztem Sitz) weiter bis zur Aufgabe, zur Erschöpfung (10 Jahre) oder bis zum Entsatz. Für den Angreifer gilt die einfache 40-%-Regel. Geprüft wird jährlich, ohne dass eine Schlacht nötig ist.
 - **Kriegsbeginn:** Abkommen und offene Grenzen enden, Handel mit dem Gegner ruht.
@@ -95,11 +95,29 @@ Entschieden (Nutzer), Phase 3a.
 
 ## 7. Bündnisse
 
-- **Verteidigungspakt:** Vertrauen ≥ 40 und gemeinsame Bedrohung (beide haben Gefahr ≥ 50 durch dasselbe dritte Volk). Hilft nur, wenn ein Partner angegriffen wird.
-- **Bündnis:** Vertrauen ≥ 70. Die Partner helfen auch bei Angriffen (sie ziehen in Angriffskriege mit).
-- **Auflösung:** mit Abstand zu den Schwellen (Lücke gegen Hin und Her, Startwerte Pakt < 30, Bündnis < 55; kalibrieren (Simulation)).
-- Verbündete zählen zur Stärke (Abschnitt 2).
+Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen und enden, zählen zu Gefahr und Stärke, Vertrauen, Anzeige, Chronik; **4b** Verbündete treten Kriegen bei. Zahlen sind Startwerte (kalibrieren (Simulation)).
+
+**Entstehen und enden**
+- **Verteidigungspakt:** Vertrauen ≥ 40 und gemeinsame Bedrohung (beide haben Gefahr ≥ 50 durch dasselbe dritte Volk). Endet bei Vertrauen < 30 oder wenn die Gefahr durch den Dritten bei einem Partner unter 35 fällt.
+- **Bündnis:** Vertrauen ≥ 70. Fällt das Vertrauen unter 55, wird es zum Pakt herabgestuft (nicht gleich aufgelöst).
+- **Keine Grenze** für die Zahl von Pakten und Bündnissen je Volk; große Blöcke sind erlaubt.
+- **Vertrauen:** Pakt +5, Bündnis +10 dauerhaft; beim Abschluss einmalig +10 (klingt in 10 Jahren ab).
+- **Bruch:** Erklärt ein Volk einem Verbündeten eines Bündnispartners den Krieg, endet das Bündnis mit diesem Partner sofort (−30 Vertrauen). Verbündete greifen einander nie an. Bei der Kriegserklärung (2×-Prüfung, Abschnitt 6) zählt der Angreifer keinen Partner mit, den er durch die Erklärung verlöre; dieser Partner kann auf der Gegenseite landen.
 - Ein Krieg bricht alle Abkommen zwischen den Kriegsparteien ab.
+
+**Stärke**
+- Gefahr und Stärke (Abschnitt 2): Verbündete zählen zur Stärke.
+- **2×-Prüfung der Erklärung und 40-%-Aufgabe** (Abschnitt 6): Die eigene Stärke zählt nur Bündnisse mit, die Stärke des Gegners dagegen seine Pakte und Bündnisse.
+
+**Kriegsbeitritt (4b)**
+- Ein Volk **beginnt** einen Krieg nur, wenn es nicht schon im Krieg ist; es kann aber vielen Kriegen als Verbündeter **beitreten**.
+- **Pakt-Partner** treten bei, wenn ein Partner angegriffen wird. **Bündnispartner treten immer bei** (Verteidigungs- und Angriffskriege), solange der Gegner nicht ihr eigener Verbündeter ist und sie stark genug sind (Interpretation, zu bestätigen: Stärke des Verbündeten ≥ 40 % der Stärke der Gegenseite, damit er nicht sofort aufgäbe).
+- **Armeen:** Jeder Verbündete schickt 1 Armee mit 50 % seiner Soldaten, Sammelpunkt ist sein Sitz, der dem Ziel am nächsten liegt. Obergrenzen: 4 Armeen je Volk, 32 auf der Karte. Verbündete versuchen auch, belagerte Sitze ihrer Verbündeten zu entsetzen oder zurückzuerobern.
+- **Ein Kriegsziel je Krieg;** der Frieden der Hauptparteien beendet den Krieg für alle.
+- **Beute:** Verbündete bekommen keine Beute, aber +10 Vertrauen beim Partner. Verbündete des Verlierers verlieren 10 Vertrauen beim Sieger.
+- **Durchmarsch:** Armeen von Verbündeten dürfen durch das Land des Partners ziehen. Der Handel bleibt unverändert.
+
+**Anzeige:** Auf der Karte nichts Neues. Das Diplomatie-Panel zeigt Pakt und Bündnis, die Chronik Abschluss, Auflösung und Kriegsbeitritt eines Verbündeten, das Kriegs-Panel die Seiten.
 
 ## 8. Aufstände als Krieg
 
@@ -126,7 +144,9 @@ Entschieden (Nutzer), Phase 3a.
 3. **Krieg auf der Karte** (aufgeteilt, vom Nutzer bestätigt):
    - **3a:** Kriegserklärung, Armeen, Marsch, Schlachten, Kriegsanzeige (Armee-Marker mit Flagge in Volksfarbe, rote gestrichelte Kriegsgrenzen, keine Marschlinie), Chronik, Kriegs-Panel, Ende durch Aufgabe oder Erschöpfung, Benchmark-Szenario `war`.
    - **3b:** Belagerung, Besetzung, Eroberung des Bezirks am Kriegsende; die Hauptstadt wechselt nur mit ihrem Bezirk (keine Annexion des ganzen Volks).
-4. **Bündnisse und Verteidigungspakte.**
+4. **Bündnisse und Verteidigungspakte** (aufgeteilt, vom Nutzer bestätigt):
+   - **4a:** Pakte und Bündnisse entstehen und enden, zählen zu Gefahr und Stärke, Vertrauen, Anzeige, Chronik.
+   - **4b:** Verbündete treten Kriegen bei (Armeen, Sammeln, Entsatz, Frieden).
 5. **Aufstände als Krieg** (Abschnitt 8).
 
 Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Kriege je Welt, Bevölkerung, Handel, Rechenzeit) und vor der Umsetzung mit dem Nutzer abgestimmt.
@@ -135,6 +155,7 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 - Stärke und Gefahr jährlich pro Volkspaar (Zähler); Schlachten pro Schlacht, nicht pro Soldat; Armeen als wenige Zähler.
 - Ziel: ein simuliertes Jahr höchstens 1,3-mal so teuer wie heute.
+- **Benchmark `war` (Phase 4):** Das Setup wird erweitert: alle Völker sind in zwei Blöcken verbündet; kein neues Szenario.
 - **Neues Benchmark-Szenario `war`:** 300 Jahre gealtert, danach Kriege überall: die Obergrenzen voll ausgeschöpft (4 Armeen je Volk, 32 auf der Karte), alle Völker im Krieg (ab 3b belagerte Sitze, ab Phase 5 Rebellenkriege). Marker und Rahmen erscheinen überall auf der Karte. Alle Szenarien müssen bestehen.
 
 ## 12. Abhängigkeiten
@@ -160,7 +181,12 @@ Später (bewusste Vereinfachungen für jetzt):
 - Die 30 %, die zu Hause bleiben, kämpfen nicht.
 - Armeen werden jedes Jahr neu aufgestellt.
 
+Phase 4, entschieden: siehe Abschnitt 7.
+
 Offen:
+- Phase 4b: „Stark genug“ für den Beitritt (≥ 40 % der Stärke der Gegenseite) bestätigen.
+- Welche Verbündeten zählen zur **Gefahr** (Abschnitt 2): nur Bündnisse oder auch Pakte? Die Entscheidung für die 2×-/40-%-Prüfung (eigene Stärke nur Bündnisse, Gegner Pakte und Bündnisse) ist klar; für die Gefahr nicht. Empfehlung: wie bei der Prüfung.
+- Rebellen: Die nach dem Sieg miteinander verbündeten Völker (Abschnitt 8) entstehen unabhängig vom Vertrauen ≥ 70; dürfen sie bei Vertrauen < 55 auf Pakt herabgestuft werden? Empfehlung: ja, die normalen Regeln gelten.
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
