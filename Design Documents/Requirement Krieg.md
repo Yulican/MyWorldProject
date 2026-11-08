@@ -99,9 +99,9 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 
 **Entstehen und enden**
 - **Verteidigungspakt:** Vertrauen ≥ 40 und gemeinsame Bedrohung (beide haben Gefahr ≥ 50 durch dasselbe dritte Volk). Endet bei Vertrauen < 30 oder wenn die Gefahr durch den Dritten bei einem Partner unter 35 fällt.
-- **Bündnis:** Vertrauen ≥ 70. Fällt das Vertrauen unter 55, wird es zum Pakt herabgestuft (nicht gleich aufgelöst).
+- **Bündnis:** Vertrauen ≥ 80 (in der Simulation von 70 angehoben, siehe Abschnitt 14). Fällt das Vertrauen unter 65, wird es zum Pakt herabgestuft (nicht gleich aufgelöst).
 - **Keine Grenze** für die Zahl von Pakten und Bündnissen je Volk; große Blöcke sind erlaubt.
-- **Vertrauen:** Pakt +5, Bündnis +10 dauerhaft; beim Abschluss einmalig +10 (klingt in 10 Jahren ab).
+- **Vertrauen:** Pakt +5, Bündnis +10 dauerhaft; beim Abschluss einmalig +10 (klingt in 10 Jahren ab). Diese Boni zählen weiter für das Öffnen von Grenzen und den Freihandel (bestätigt).
 - **Bruch:** Erklärt ein Volk einem Verbündeten eines Bündnispartners den Krieg, endet das Bündnis mit diesem Partner sofort (−30 Vertrauen). Verbündete greifen einander nie an. Bei der Kriegserklärung (2×-Prüfung, Abschnitt 6) zählt der Angreifer keinen Partner mit, den er durch die Erklärung verlöre; dieser Partner kann auf der Gegenseite landen.
 - Ein Krieg bricht alle Abkommen zwischen den Kriegsparteien ab.
 
@@ -111,6 +111,7 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 
 **Kriegsbeitritt (4b)**
 - Ein Volk **beginnt** einen Krieg nur, wenn es nicht schon im Krieg ist; es kann aber vielen Kriegen als Verbündeter **beitreten**.
+- **Beitritt nur bei Kriegsbeginn.** Ein Volk, das als Verbündeter kämpft, erklärt keinen eigenen Krieg, kann aber weiteren Kriegen als Verbündeter beitreten. Im Krieg zählen für die 40-%-Aufgabe und die Stärke der Seiten in Schlachten nur Verbündete, die wirklich beigetreten sind (Kriegserklärung abgegeben). Interpretation: Für die Kriegserklärung (2×-Prüfung) und die Gefahr, also vor jedem Beitritt, werden mögliche Verbündete wie oben geschätzt (Gegenseite mit Pakten und Bündnissen, eigene Seite mit Bündnissen).
 - **Pakt-Partner** treten bei, wenn ein Partner angegriffen wird. **Bündnispartner treten immer bei** (Verteidigungs- und Angriffskriege), solange der Gegner nicht ihr eigener Verbündeter ist und ihre Seite den Krieg gewinnen kann: Ein Verbündeter tritt bei, wenn die gemeinsame Stärke seiner Seite (Hauptpartei + alle beitretenden Verbündeten) größer ist als die der Gegenseite (Gegner + dessen Pakte und Bündnisse). „Größer“ = eigene Seite > Gegenseite; kalibrieren (Simulation).
 - **Armeen:** Jeder Verbündete schickt 1 Armee mit 50 % seiner Soldaten, Sammelpunkt ist sein Sitz, der dem Ziel am nächsten liegt. Obergrenzen: 4 Armeen je Volk, 32 auf der Karte. Verbündete versuchen auch, belagerte Sitze ihrer Verbündeten zu entsetzen oder zurückzuerobern.
 - **Ein Kriegsziel je Krieg;** der Frieden der Hauptparteien beendet den Krieg für alle.
@@ -181,7 +182,7 @@ Später (bewusste Vereinfachungen für jetzt):
 - Die 30 %, die zu Hause bleiben, kämpfen nicht.
 - Armeen werden jedes Jahr neu aufgestellt.
 
-Phase 4, entschieden: siehe Abschnitt 7 (auch: Beitritt, wenn die Seite gewinnen kann; Gefahr zählt Verbündete wie die 2×-Prüfung; nach einem Rebellensieg verbündete Völker werden bei Vertrauen < 55 wie jedes Bündnis auf Pakt herabgestuft).
+Phase 4, entschieden: siehe Abschnitt 7 (auch: Beitritt, wenn die Seite gewinnen kann; Gefahr zählt Verbündete wie die 2×-Prüfung; nach einem Rebellensieg verbündete Völker werden bei Vertrauen < 65 wie jedes Bündnis auf Pakt herabgestuft).
 
 Offen:
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
@@ -278,3 +279,14 @@ Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`
 
 - Verteidiger gewinnen praktisch keine Schlachten: Die meisten haben nur einen Sitz und damit keine Entsatzarmee. Der Nutzer akzeptiert das so.
 - Benchmark `war`: An den Obergrenzen entstehen 11 bis 13 echte Armeen je Welt; bis zu den 32 Armeen auf der Karte füllen reine Karten-Marker (Attrappen), die weitermarschieren.
+
+### Bündnisse (Phase 4)
+
+24 Welten, Jahr 500:
+
+| Variante | Ergebnis |
+|---|---|
+| Bündnis ab Vertrauen 70 | ca. 13 Bündnisse je Welt, Pakte selten, größter Block ca. 4,4 Völker; Kriege 9,8 → 4,8 |
+| Bündnis ab Vertrauen 80, Herabstufung unter 65 (gewählt) | Kriege ca. 9,0, davon ca. 3,4 mit Verbündeten |
+
+Außenhandel ×3, Abkommen deutlich mehr, Aufstände etwa halbiert, Rechenzeit +3 % pro Jahr.
