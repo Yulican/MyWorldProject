@@ -106,12 +106,12 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 - Ein Krieg bricht alle Abkommen zwischen den Kriegsparteien ab.
 
 **Stärke**
-- Gefahr und Stärke (Abschnitt 2): Verbündete zählen zur Stärke.
+- Gefahr und Stärke (Abschnitt 2): Verbündete zählen zur Stärke, wie bei der 2×-Prüfung: Die Seite des Gegners mit Pakten und Bündnissen, die eigene Seite nur mit Bündnissen (entschieden).
 - **2×-Prüfung der Erklärung und 40-%-Aufgabe** (Abschnitt 6): Die eigene Stärke zählt nur Bündnisse mit, die Stärke des Gegners dagegen seine Pakte und Bündnisse.
 
 **Kriegsbeitritt (4b)**
 - Ein Volk **beginnt** einen Krieg nur, wenn es nicht schon im Krieg ist; es kann aber vielen Kriegen als Verbündeter **beitreten**.
-- **Pakt-Partner** treten bei, wenn ein Partner angegriffen wird. **Bündnispartner treten immer bei** (Verteidigungs- und Angriffskriege), solange der Gegner nicht ihr eigener Verbündeter ist und sie stark genug sind (Interpretation, zu bestätigen: Stärke des Verbündeten ≥ 40 % der Stärke der Gegenseite, damit er nicht sofort aufgäbe).
+- **Pakt-Partner** treten bei, wenn ein Partner angegriffen wird. **Bündnispartner treten immer bei** (Verteidigungs- und Angriffskriege), solange der Gegner nicht ihr eigener Verbündeter ist und ihre Seite den Krieg gewinnen kann: Ein Verbündeter tritt bei, wenn die gemeinsame Stärke seiner Seite (Hauptpartei + alle beitretenden Verbündeten) größer ist als die der Gegenseite (Gegner + dessen Pakte und Bündnisse). „Größer“ = eigene Seite > Gegenseite; kalibrieren (Simulation).
 - **Armeen:** Jeder Verbündete schickt 1 Armee mit 50 % seiner Soldaten, Sammelpunkt ist sein Sitz, der dem Ziel am nächsten liegt. Obergrenzen: 4 Armeen je Volk, 32 auf der Karte. Verbündete versuchen auch, belagerte Sitze ihrer Verbündeten zu entsetzen oder zurückzuerobern.
 - **Ein Kriegsziel je Krieg;** der Frieden der Hauptparteien beendet den Krieg für alle.
 - **Beute:** Verbündete bekommen keine Beute, aber +10 Vertrauen beim Partner. Verbündete des Verlierers verlieren 10 Vertrauen beim Sieger.
@@ -181,12 +181,9 @@ Später (bewusste Vereinfachungen für jetzt):
 - Die 30 %, die zu Hause bleiben, kämpfen nicht.
 - Armeen werden jedes Jahr neu aufgestellt.
 
-Phase 4, entschieden: siehe Abschnitt 7.
+Phase 4, entschieden: siehe Abschnitt 7 (auch: Beitritt, wenn die Seite gewinnen kann; Gefahr zählt Verbündete wie die 2×-Prüfung; nach einem Rebellensieg verbündete Völker werden bei Vertrauen < 55 wie jedes Bündnis auf Pakt herabgestuft).
 
 Offen:
-- Phase 4b: „Stark genug“ für den Beitritt (≥ 40 % der Stärke der Gegenseite) bestätigen.
-- Welche Verbündeten zählen zur **Gefahr** (Abschnitt 2): nur Bündnisse oder auch Pakte? Die Entscheidung für die 2×-/40-%-Prüfung (eigene Stärke nur Bündnisse, Gegner Pakte und Bündnisse) ist klar; für die Gefahr nicht. Empfehlung: wie bei der Prüfung.
-- Rebellen: Die nach dem Sieg miteinander verbündeten Völker (Abschnitt 8) entstehen unabhängig vom Vertrauen ≥ 70; dürfen sie bei Vertrauen < 55 auf Pakt herabgestuft werden? Empfehlung: ja, die normalen Regeln gelten.
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
 - Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
