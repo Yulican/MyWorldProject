@@ -115,6 +115,7 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 - **Verbündete auf beiden Seiten:** Es kann Verbündete auf beiden Seiten eines Krieges geben.
   - **Verteidiger-Seite:** Pakt-Partner (wenn ein Partner angegriffen wird) und Bündnispartner des Angegriffenen treten immer bei, außer der Angreifer ist ihr eigener Verbündeter (dann gilt die Bruchregel oben).
   - **Angreifer-Seite:** Bündnispartner des Angreifers treten nur bei, wenn die gemeinsame Stärke ihrer Seite (Angreifer + alle beitretenden Verbündeten) größer ist als die der Gegenseite (Verteidiger + dessen Pakte und Bündnisse). „Größer“ = eigene Seite > Gegenseite; kalibrieren (Simulation).
+  - **Sonderfälle** (bestätigt): Ein Volk, das mit dem Angreifer verbündet ist (Bündnis) und mit dem Verteidiger nur einen Verteidigungspakt hat, tritt keiner Seite bei. Ein Volk, das mit dem Verteidiger verbündet ist, verliert mit der Erklärung sein Bündnis mit dem Angreifer (Bruchregel) und tritt dem Verteidiger bei.
   - Rote gestrichelte Kriegsgrenzen gelten auch zwischen Verbündeten und der Seite, gegen die sie kämpfen (akzeptiert).
 - **Armeen:** Jeder Verbündete schickt 1 Armee mit 50 % seiner Soldaten, Sammelpunkt ist sein Sitz, der dem Ziel am nächsten liegt. Obergrenzen: 4 Armeen je Volk, 32 auf der Karte. Verbündete versuchen auch, belagerte Sitze ihrer Verbündeten zu entsetzen oder zurückzuerobern.
 - **Ein Kriegsziel je Krieg;** der Frieden der Hauptparteien beendet den Krieg für alle.
@@ -295,3 +296,7 @@ Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`
 Außenhandel ×3, Abkommen deutlich mehr, Aufstände etwa halbiert, Rechenzeit +3 % pro Jahr.
 
 Die höhere Zahl von Aufständen mit Bündnissen (12 Welten: 4,6 gegen 2,8) ist vom Nutzer akzeptiert; keine weitere Prüfung.
+
+### Verbündete auf beiden Seiten (Phase 4b)
+
+12 Welten, Jahr 500, Verbündete des Verteidigers treten immer bei: Kriege 6,3, davon mit Verbündeten 2,2 (auf beiden Seiten 0,4), Beitritte 3,8, Schlachten 7,3, Besetzungen 5,8, annektierte Völker 4,7, Aufstände 3,5, Rechenzeit ca. 11 ms pro Jahr.
