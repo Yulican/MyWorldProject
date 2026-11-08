@@ -112,7 +112,10 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 **Kriegsbeitritt (4b)**
 - Ein Volk **beginnt** einen Krieg nur, wenn es nicht schon im Krieg ist; es kann aber vielen Kriegen als Verbündeter **beitreten**.
 - **Beitritt nur bei Kriegsbeginn.** Ein Volk, das als Verbündeter kämpft, erklärt keinen eigenen Krieg, kann aber weiteren Kriegen als Verbündeter beitreten. Im Krieg zählen für die 40-%-Aufgabe und die Stärke der Seiten in Schlachten nur Verbündete, die wirklich beigetreten sind (Kriegserklärung abgegeben). Bestätigt: Für die Kriegserklärung (2×-Prüfung) und die Gefahr, also vor jedem Beitritt, werden mögliche Verbündete wie oben geschätzt (Gegenseite mit Pakten und Bündnissen, eigene Seite mit Bündnissen).
-- **Pakt-Partner** treten bei, wenn ein Partner angegriffen wird. **Bündnispartner treten immer bei** (Verteidigungs- und Angriffskriege), solange der Gegner nicht ihr eigener Verbündeter ist und ihre Seite den Krieg gewinnen kann: Ein Verbündeter tritt bei, wenn die gemeinsame Stärke seiner Seite (Hauptpartei + alle beitretenden Verbündeten) größer ist als die der Gegenseite (Gegner + dessen Pakte und Bündnisse). „Größer“ = eigene Seite > Gegenseite; kalibrieren (Simulation).
+- **Verbündete auf beiden Seiten:** Es kann Verbündete auf beiden Seiten eines Krieges geben.
+  - **Verteidiger-Seite:** Pakt-Partner (wenn ein Partner angegriffen wird) und Bündnispartner des Angegriffenen treten immer bei, außer der Angreifer ist ihr eigener Verbündeter (dann gilt die Bruchregel oben).
+  - **Angreifer-Seite:** Bündnispartner des Angreifers treten nur bei, wenn die gemeinsame Stärke ihrer Seite (Angreifer + alle beitretenden Verbündeten) größer ist als die der Gegenseite (Verteidiger + dessen Pakte und Bündnisse). „Größer“ = eigene Seite > Gegenseite; kalibrieren (Simulation).
+  - Rote gestrichelte Kriegsgrenzen gelten auch zwischen Verbündeten und der Seite, gegen die sie kämpfen (akzeptiert).
 - **Armeen:** Jeder Verbündete schickt 1 Armee mit 50 % seiner Soldaten, Sammelpunkt ist sein Sitz, der dem Ziel am nächsten liegt. Obergrenzen: 4 Armeen je Volk, 32 auf der Karte. Verbündete versuchen auch, belagerte Sitze ihrer Verbündeten zu entsetzen oder zurückzuerobern.
 - **Ein Kriegsziel je Krieg;** der Frieden der Hauptparteien beendet den Krieg für alle.
 - **Beute:** Verbündete bekommen keine Beute, aber +10 Vertrauen beim Partner. Verbündete des Verlierers verlieren 10 Vertrauen beim Sieger.
@@ -290,3 +293,5 @@ Die Regeln für Kartengröße und neue Stämme stehen im Game-Design-Dokument (`
 | Bündnis ab Vertrauen 80, Herabstufung unter 65 (gewählt) | Kriege ca. 9,0, davon ca. 3,4 mit Verbündeten |
 
 Außenhandel ×3, Abkommen deutlich mehr, Aufstände etwa halbiert, Rechenzeit +3 % pro Jahr.
+
+Die höhere Zahl von Aufständen mit Bündnissen (12 Welten: 4,6 gegen 2,8) ist vom Nutzer akzeptiert; keine weitere Prüfung.
