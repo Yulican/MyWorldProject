@@ -1072,7 +1072,7 @@ test('danger and the 2× declaration check count the other side with pacts and a
   m.strength[c] = 30;
   m.strength[d] = 10;
   m.strength[f.ally] = 0;
-  assert.deepEqual(warTargets(sim, att), []);
+  assert.ok(!warTargets(sim, att).includes(target));
   // An ally of the attacker counts, a defense pact of the attacker does not.
   setPact(sim, att, c, Pact.Pact);
   assert.equal(mayOutweigh(sim, att, target, WAR.ratio), false);
@@ -1128,7 +1128,7 @@ test('a declaration on an ally of a partner ends that alliance (−30 trust at t
   assert.equal(hostile(sim, c, att), true);
 });
 
-test('pact partners join only a defensive war, alliance partners both, unless the opponent is their own ally', () => {
+test('pact partners join only a defensive war, alliance partners both, if their side can win and unless the opponent is their own ally', () => {
   const f = blocFixture();
   const { sim, att } = f;
   const target = f.def;
@@ -1136,50 +1136,69 @@ test('pact partners join only a defensive war, alliance partners both, unless th
   const m = sim.military;
   m.strength[att] = 100;
   m.strength[target] = 40;
-  m.strength[c] = 70;
+  m.strength[c] = 90;
   m.strength[d] = 20;
   m.strength[e] = 5;
   setPact(sim, target, c, Pact.Pact); // defends the target
-  setPact(sim, att, d, Pact.Pact); // a pact of the attacker: stays out
-  setPact(sim, att, e, Pact.Alliance); // an ally of the attacker: joins
-  // The attacker's side with its joining ally: 105 against 40 + 70: it does not join (cannot win) …
+  setPact(sim, att, d, Pact.Pact); // a pact of the attacker: never joins its attack
+  setPact(sim, att, e, Pact.Alliance); // an ally of the attacker
+  // The defender's side 40 + 90 > the attacker with its pacts and alliances 100 + 20 + 5: c joins; e's side 105 < 130 does not.
   let s = startWar(sim, att, f.seats[0]);
   const side = (p: number) => sim.war.side[s * PAIRS + p];
   assert.equal(side(c), 1);
   assert.equal(side(d), -1);
   assert.equal(side(e), -1, 'the attacker’s side cannot win');
   assert.equal(sim.war.wAllies[s], 1);
-  endWar(sim, s, EndType.Exhausted);
-  sim.war.truce.fill(0);
-  // … with more strength it joins (the side: 100 + 30 > 40 + 70).
-  m.strength[e] = 30;
-  setPact(sim, target, c, Pact.Pact);
-  s = startWar(sim, att, f.seats[0]);
-  assert.equal(side(e), 0);
-  assert.equal(side(c), 1);
   assert.ok(sim.chronicle.some((x) => x.text.includes('joined the')));
   // Agreements and open borders between the opposing sides end.
-  assert.equal(sim.diplomacy.open[e * PAIRS + c], 0);
-  assert.equal(sim.diplomacy.freeTrade[e * PAIRS + c], 0);
-  assert.equal(hostile(sim, e, c), true);
-  assert.equal(hostile(sim, e, target), true);
+  assert.equal(sim.diplomacy.open[c * PAIRS + att], 0);
+  assert.equal(sim.diplomacy.freeTrade[c * PAIRS + att], 0);
+  assert.equal(hostile(sim, c, att), true);
   assert.equal(hostile(sim, d, target), false);
   endWar(sim, s, EndType.Exhausted);
   sim.war.truce.fill(0);
-  // An ally of both main parties stays out (here: e allied to the attacker and to the defender's ally c).
-  setPact(sim, target, c, Pact.Alliance);
+  // Just not stronger is not enough: 40 + 85 against 125.
+  m.strength[c] = 85;
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(side(c), -1);
+  assert.equal(sim.war.wAllies[s], 0);
+  endWar(sim, s, EndType.Exhausted);
+  sim.war.truce.fill(0);
+  // With more strength the attacker's ally joins its attack (100 + 50 > 40 + 85), the defender's pact then cannot win.
+  m.strength[e] = 50;
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(side(e), 0);
+  assert.equal(side(c), -1);
+  assert.equal(hostile(sim, e, target), true);
+  endWar(sim, s, EndType.Exhausted);
+  sim.war.truce.fill(0);
+  // Allied to the attacker and to the defender: the declaration breaks its alliance with the attacker, and it defends its ally.
+  setPact(sim, e, target, Pact.Alliance);
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(kindOf(sim, att, e), Pact.None);
+  assert.equal(side(e), 1);
+  endWar(sim, s, EndType.Exhausted);
+  sim.war.truce.fill(0);
+  setPact(sim, e, target, Pact.None);
+  setPact(sim, att, e, Pact.Alliance);
+  // An ally of the attacker never joins against an ally of its own on the other side.
   setPact(sim, e, c, Pact.Alliance);
+  setPact(sim, target, c, Pact.Alliance);
+  m.strength[c] = 200;
   s = startWar(sim, att, f.seats[0]);
   assert.equal(side(c), 1);
-  assert.equal(side(e), -1, 'never against its own ally');
+  assert.equal(side(e), -1);
   endWar(sim, s, EndType.Exhausted);
-  // The defender's ally joins when the defender attacks (an offensive war of the alliance).
   sim.war.truce.fill(0);
+  // The defender's ally joins its partner's attack too (alliances join offensive wars, pacts don't).
+  setPact(sim, e, c, Pact.None);
+  setPact(sim, att, e, Pact.None);
+  setPact(sim, target, d, Pact.Pact);
   m.strength[target] = 200;
-  const goal = sim.civs[att]!.capital;
-  s = startWar(sim, target, goal);
+  s = startWar(sim, target, sim.civs[att]!.capital);
   assert.ok(s >= 0);
   assert.equal(side(c), 0);
+  assert.equal(side(d), -1);
 });
 
 test('a people starts a war only when it is in none (as a main party or an ally), but joins many wars as an ally; allies join only at the start', () => {
@@ -1208,6 +1227,7 @@ test('a people starts a war only when it is in none (as a main party or an ally)
   // Fighting as an ally, it starts no war of its own, however strong.
   m.strength[c] = 1e6;
   assert.deepEqual(warTargets(sim, c), []);
+  m.strength[c] = 70;
   // An alliance formed during the war does not join it, nor count for its sides.
   const before = sideStrength(sim, s1, 0);
   formAlliance(sim, att, y);
@@ -1257,7 +1277,7 @@ test('an ally sends one army with 50 % of its soldiers from its seat nearest the
   const m = sim.military;
   m.strength[att] = 100;
   m.strength[target] = 40;
-  m.strength[c] = 20 * settledOf(sim, c).length;
+  m.strength[c] = 100;
   setPact(sim, target, c, Pact.Alliance);
   const s = startWar(sim, att, f.seats[0]);
   assert.equal(sim.war.side[s * PAIRS + c], 1);
@@ -1287,39 +1307,58 @@ test('an ally sends one army with 50 % of its soldiers from its seat nearest the
   assert.ok(sim.war.stats.battles > 0);
 });
 
-test('the main parties’ peace ends the war for all: allies go home without loot, the winner trusts its allies +10 and the loser’s allies −10', () => {
+test('the main parties’ peace ends the war for all: allies go home without land or loot, the winner trusts its allies +10 and the loser’s allies −10', () => {
   const f = blocFixture();
   const { sim, att } = f;
   const target = f.def;
   const c = f.ally;
   const e = f.far[0];
   const m = sim.military;
+  const all = [att, target, c, e];
+  const peace = (s: number) => {
+    assert.equal(sim.war.wLive[s], 0);
+    assert.equal(sim.war.wars, 0);
+    assert.equal(sim.war.armies, 0);
+    for (const p of all) {
+      assert.equal(sim.war.side[s * PAIRS + p], -1);
+      assert.equal(sim.war.allyWarsOf[p], 0);
+      for (const q of all) assert.equal(sim.war.foe[p * PAIRS + q], 0);
+    }
+  };
+  // The defender's ally wins with it: the attacker gives up.
   m.strength[att] = 100;
-  m.strength[e] = 30;
   m.strength[target] = 40;
-  m.strength[c] = 60;
-  setPact(sim, att, e, Pact.Alliance);
+  m.strength[c] = 70;
   setPact(sim, target, c, Pact.Pact);
-  const s = startWar(sim, att, f.seats[0]);
-  assert.equal(sim.war.side[s * PAIRS + e], 0);
+  let s = startWar(sim, att, f.seats[0]);
   assert.equal(sim.war.side[s * PAIRS + c], 1);
-  const cOwned = settledOf(sim, c).length;
+  assert.ok(armiesOf(sim, c).length > 0);
+  const cLand = settledOf(sim, c).length;
+  endWar(sim, s, EndType.AttackerGaveUp);
+  peace(s);
+  assert.equal(moodOf(sim, target, c, 'Fought at our side'), ALLY.winBonus);
+  assert.equal(settledOf(sim, c).length, cLand);
+  assert.equal(hostile(sim, c, att), false);
+  // The attacker's ally loses with it: the winning defender trusts it 10 less.
+  sim.war.truce.fill(0);
+  setPact(sim, target, c, Pact.None);
+  setPact(sim, att, e, Pact.Alliance);
+  m.strength[e] = 30;
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(sim.war.side[s * PAIRS + e], 0);
+  endWar(sim, s, EndType.AttackerGaveUp);
+  peace(s);
+  assert.equal(moodOf(sim, target, e, 'Fought against us'), -ALLY.loseLoss);
+  // Winning with the attacker: +10 at the attacker; the goal district goes to the attacker alone.
+  sim.war.truce.fill(0);
   const eLand = settledOf(sim, e).length;
+  s = startWar(sim, att, f.seats[0]);
+  assert.equal(sim.war.side[s * PAIRS + e], 0);
   endWar(sim, s, EndType.GaveUp);
-  assert.equal(sim.war.wLive[s], 0);
-  for (const p of [att, target, c, e]) {
-    assert.equal(sim.war.side[s * PAIRS + p], -1);
-    assert.equal(sim.war.allyWarsOf[p], 0);
-    assert.equal(armiesOf(sim, p).length, 0);
-    for (const q of [att, target, c, e]) assert.equal(sim.war.foe[p * PAIRS + q], 0);
-  }
-  assert.equal(sim.war.armies, 0);
-  assert.equal(settledOf(sim, c).length, cOwned, 'allies lose no land');
-  assert.equal(settledOf(sim, e).length, eLand, 'allies get no land');
-  assert.equal(sim.world.owner[f.seats[0]], att, 'the goal goes to the attacker');
+  peace(s);
   assert.equal(moodOf(sim, att, e, 'Fought at our side'), ALLY.winBonus);
-  assert.equal(moodOf(sim, att, c, 'Fought against us'), -ALLY.loseLoss);
-  assert.equal(hostile(sim, e, c), false);
+  assert.equal(sim.world.owner[f.seats[0]], att);
+  assert.equal(settledOf(sim, e).length, eLand, 'allies get no land');
 });
 
 test('wars with allies run the same for the same seed', () => {
