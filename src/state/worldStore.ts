@@ -117,6 +117,8 @@ function syncMapWar(sim: Simulation) {
   if (mapWar.siege.length !== sim.world.cellCount) mapWar.siege = new Uint8Array(sim.world.cellCount);
   mapWar.foe.set(w.foe.subarray(0, mapWar.foe.length));
   mapWar.siege.set(w.siege);
+  // Benchmark only: siege-frame decoys on real seats of peoples at war (bench/armyDecoys.ts).
+  extraArmies?.sieges(sim, mapWar.siege);
 }
 
 /** Takes the armies' places and peoples; tells the map's army layer only if a marker changed. */

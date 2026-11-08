@@ -7,12 +7,25 @@ import { ArmyState, DIRECTION_COUNT, MAX_ARMIES, hexDistance, isWaterBiome, livi
 // (worldStore.mapArmies), never in the simulation, so no game rule changes.
 // A mix of what real armies do: marching between a people's seat and its
 // enemy's (one hex a week, back and forth, retreating on the way home),
-// besieging an enemy seat and gathering at home.
+// besieging an enemy seat and gathering at home. Likewise siege frames: the
+// alliance blocks break most real sieges, so real seats of peoples at war get
+// map-only frames up to SIEGE_FRAMES (they follow the wars with every map
+// snapshot and are part of the territory tiles' fingerprint like real ones).
 
-/** Fills the map's markers from index `from` up to MAX_ARMIES; returns the new count. */
+/**
+ * `fill`: the map's army markers from index `from` up to MAX_ARMIES; returns the new count.
+ * `sieges`: marks siege-frame decoys in the map's siege copy (worldStore.mapWar.siege) up to SIEGE_FRAMES frames.
+ */
 export type ExtraArmies = {
   fill: (sim: Simulation, markers: { cell: Int32Array; civ: Uint8Array; state: Uint8Array }, from: number) => number;
+  sieges: (sim: Simulation, siege: Uint8Array) => number;
 };
+
+/**
+ * Siege frames the map shows at least (real ones first): as many as the war
+ * scenario had before allies broke most sieges (about 4 to 7 per world).
+ */
+export const SIEGE_FRAMES = 6;
 
 type Decoy = { civ: number; cell: number; home: number; away: number; kind: number; state: number };
 
@@ -24,6 +37,22 @@ export function armyDecoys(): ExtraArmies {
   let decoys: Decoy[] = [];
   let tick = 0;
   return {
+    sieges(sim, siege) {
+      const { world } = sim;
+      const w = sim.war;
+      let frames = 0;
+      for (let c = 0; c < siege.length; c++) frames += siege[c];
+      // Real seats (capitals first, then the lower cell) of peoples at war that are not besieged yet.
+      for (let pass = 2; pass >= 1 && frames < SIEGE_FRAMES; pass--) {
+        for (let c = 0; c < world.cellCount && frames < SIEGE_FRAMES; c++) {
+          const o = world.owner[c];
+          if (world.seats[c] !== pass || siege[c] || o === 0 || (w.enemy[o] === 0 && w.allyWarsOf[o] === 0)) continue;
+          siege[c] = 1;
+          frames++;
+        }
+      }
+      return frames;
+    },
     fill(sim, markers, from) {
       if (forSim !== sim) {
         forSim = sim;

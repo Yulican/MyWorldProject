@@ -218,4 +218,13 @@ test('the war scenario draws 32 armies: real ones plus map-only decoys that keep
   for (let i = 0; i < before.length; i++) if (markers.cell[real + i] !== before[i]) moved++;
   assert.ok(moved > 0, 'decoys march');
   assert.equal(sim.war.armies, real, 'decoys never enter the simulation');
+  // Siege frames: real ones plus map-only decoys on seats of peoples at war, at least 3 (SIEGE_FRAMES when there are enough seats).
+  const siege = Uint8Array.from(sim.war.siege);
+  const frames = decoys.sieges(sim, siege);
+  assert.ok(frames >= 3, `${frames} siege frames`);
+  for (let c = 0; c < siege.length; c++) {
+    if (!siege[c] || sim.war.siege[c]) continue;
+    const o = sim.world.owner[c];
+    assert.ok(sim.world.seats[c] > 0 && (sim.war.enemy[o] !== 0 || sim.war.allyWarsOf[o] > 0), 'decoy frame on a seat at war');
+  }
 });
