@@ -229,6 +229,13 @@ export type WarState = {
   foe: Uint8Array;
   /** Per people: wars it fights in as an ally. */
   allyWarsOf: Uint8Array;
+  /**
+   * The war whose sides still raise their armies in the next steps of the
+   * war's year (runWarYearStep: one member per step), -1 if none; `raiseNext`
+   * is the next member: 0 the attacker, 1 the defender, 2 + p the ally p.
+   */
+  raiseWar: number;
+  raiseNext: number;
   /** Pacts and alliances (alliance.ts): per pair 0 none, 1 pact, 2 alliance (symmetric), a pact's common threat, and the number of pairs with one. */
   pact: Uint8Array;
   pactX: Uint8Array;
@@ -302,6 +309,8 @@ export function createWar(seed: number, cellCount: number): WarState {
     side: new Int8Array(MAX_WARS * PAIRS).fill(-1),
     foe: new Uint8Array(PAIRS * PAIRS),
     allyWarsOf: new Uint8Array(PAIRS),
+    raiseWar: -1,
+    raiseNext: 0,
     pact: new Uint8Array(PAIRS * PAIRS),
     pactX: new Uint8Array(PAIRS * PAIRS),
     pactCount: 0,
@@ -478,29 +487,74 @@ export function runWarYearStep(sim: Simulation, step: number): number {
   if (!WAR.enabled) return -1;
   const t0 = clockStart();
   const w = sim.war;
+  // Armies of the war reviewed or declared in the step before: one side member per step.
+  if (w.raiseWar >= 0) {
+    raiseNextMember(sim);
+    profileYear(w, t0, step);
+    return step;
+  }
   if (step === 0) updateAlliances(sim);
   let next = -1;
   let s = step;
   while (s < MAX_WARS && !w.wLive[s]) s++;
   if (s < MAX_WARS) {
-    reviewWar(sim, s);
+    reviewWar(sim, s, true);
     next = s + 1;
   } else {
     // Declarations: step MAX_WARS + i goes on from people i + 1.
     const a = declareWars(sim, Math.max(step, MAX_WARS) - MAX_WARS + 1);
     if (a >= 0) next = MAX_WARS + a - 1;
   }
-  if (WAR_PROFILE.clock) {
-    const dt = WAR_PROFILE.clock() - t0;
-    w.stats.yearMs += dt;
-    if (next < 0) w.stats.yearCalls++;
-    if (dt > w.stats.yearMax) w.stats.yearMax = dt;
-  }
+  profileYear(w, t0, next);
   return next;
 }
 
-/** The yearly check of running war `s`: a side gives up or is exhausted, else both raise what they may still have. */
-function reviewWar(sim: Simulation, s: number): void {
+function profileYear(w: WarState, t0: number, next: number): void {
+  if (!WAR_PROFILE.clock) return;
+  const dt = WAR_PROFILE.clock() - t0;
+  w.stats.yearMs += dt;
+  if (next < 0) w.stats.yearCalls++;
+  if (dt > w.stats.yearMax) w.stats.yearMax = dt;
+}
+
+/** Raises the armies of the next member of war `raiseWar` (attacker, defender, allies in people order); ends the round after the last. */
+function raiseNextMember(sim: Simulation): void {
+  const w = sim.war;
+  const s = w.raiseWar;
+  const att = w.wAtt[s];
+  const def = w.wDef[s];
+  if (w.raiseNext === 0) {
+    w.raiseNext = 1;
+    reraise(sim, s, att);
+    return;
+  }
+  const p = w.raiseNext === 1 ? def : w.raiseNext - 2;
+  reraise(sim, s, p);
+  // The next ally after p (people order), or the round ends.
+  const next = w.wAllies[s] > 0 ? nextAlly(sim, s, w.raiseNext === 1 ? 1 : p + 1) : -1;
+  if (next < 0) w.raiseWar = -1;
+  else w.raiseNext = next + 2;
+}
+
+/** The first ally of war `s` (a member other than its main parties) from people `from` on, -1 if none. */
+function nextAlly(sim: Simulation, s: number, from: number): number {
+  const w = sim.war;
+  const max = sim.diplomacy.maxId;
+  for (let p = from; p <= max; p++) if (p !== w.wAtt[s] && p !== w.wDef[s] && sideOf(w, s, p) >= 0) return p;
+  return -1;
+}
+
+/** Leaves the armies of war `s` to raiseNextMember, from the attacker on. */
+function raiseLater(w: WarState, s: number): void {
+  w.raiseWar = s;
+  w.raiseNext = 0;
+}
+
+/**
+ * The yearly check of running war `s`: a side gives up or is exhausted, else
+ * both raise what they may still have (with `later`, in the next steps).
+ */
+function reviewWar(sim: Simulation, s: number, later = false): void {
   const w = sim.war;
   if (endIfGone(sim, s)) return;
   const att = w.wAtt[s];
@@ -514,6 +568,7 @@ function reviewWar(sim: Simulation, s: number): void {
   if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
   else if (givesUp(sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
   else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
+  else if (later) raiseLater(w, s);
   else {
     reraise(sim, s, att);
     reraise(sim, s, def);
@@ -653,7 +708,7 @@ function declareWars(sim: Simulation, from: number): number {
       continue;
     }
     const goal = chooseGoal(sim, a, candidate);
-    if (goal >= 0 && startWar(sim, a, goal) >= 0) return a + 1;
+    if (goal >= 0 && startWar(sim, a, goal, true) >= 0) return a + 1;
   }
   return -1;
 }
@@ -723,10 +778,10 @@ export function chooseGoal(sim: Simulation, att: number, candidates: Uint8Array)
 
 /**
  * `att` declares war on the owner of seat `goal` (no checks: declareWars and
- * tests). Borders and agreements end, both sides raise their armies. Returns
+ * tests). Borders and agreements end, both sides raise their armies (with `later`: in the next steps of the war's year, see raiseNextMember). Returns
  * the war's slot, -1 if there is no room.
  */
-export function startWar(sim: Simulation, att: number, goal: number): number {
+export function startWar(sim: Simulation, att: number, goal: number, later = false): number {
   const w = sim.war;
   const def = sim.world.owner[goal];
   let s = 0;
@@ -770,6 +825,12 @@ export function startWar(sim: Simulation, att: number, goal: number): number {
     if (w.pactCount > 0) joinAllies(sim, s);
   }
   planMarch(sim, s);
+  if (later) {
+    // The armies in the next steps of the war's year (declareWars).
+    if (w.wAllies[s] > 0) st.allyWars++;
+    raiseLater(w, s);
+    return s;
+  }
   reraise(sim, s, att);
   reraise(sim, s, def);
   if (w.wAllies[s] > 0) {

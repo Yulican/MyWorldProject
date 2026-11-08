@@ -19,6 +19,7 @@ import {
   ArmyState,
   EndType,
   MAX_ARMIES,
+  MAX_WARS,
   WAR,
   advanceWar,
   armySoldiers,
@@ -31,6 +32,7 @@ import {
   planMarch,
   rallyPoint,
   runWarYear,
+  runWarYearStep,
   sideStrength,
   startWar,
   travelCost,
@@ -1235,6 +1237,34 @@ test('a people starts a war only when it is in none (as a main party or an ally)
   assert.equal(sim.war.side[s1 * PAIRS + y], -1);
   assert.equal(sideStrength(sim, s1, 0), before);
   assert.equal(sideStrength(sim, s1, 1), m.strength[target] + m.strength[c]);
+});
+
+test('a war declared in the war\'s year raises its armies one side member per step, exactly as all at once', () => {
+  const setUp = () => {
+    const f = blocFixture();
+    const m = f.sim.military;
+    m.strength[f.att] = 100;
+    m.strength[f.def] = 40;
+    m.strength[f.ally] = 70;
+    setPact(f.sim, f.def, f.ally, Pact.Alliance);
+    return f;
+  };
+  const now = setUp();
+  const later = setUp();
+  const s = startWar(now.sim, now.att, now.seats[0]);
+  assert.equal(startWar(later.sim, later.att, later.seats[0], true), s);
+  assert.equal(later.sim.war.raiseWar, s);
+  let steps = 0;
+  // A pending raise is done before the step itself, which comes back unchanged.
+  while (later.sim.war.raiseWar >= 0) {
+    assert.equal(runWarYearStep(later.sim, MAX_WARS + 5), MAX_WARS + 5);
+    steps++;
+  }
+  assert.equal(steps, 3, 'attacker, defender, the ally');
+  const a = now.sim.war;
+  const b = later.sim.war;
+  assert.ok(a.armies >= 2);
+  assert.deepEqual([b.armies, b.live, b.aCiv, b.aN, b.aCell, b.cArmy, b.pend, b.away], [a.armies, a.live, a.aCiv, a.aN, a.aCell, a.cArmy, a.pend, a.away]);
 });
 
 /** The war checks of a year alone (no declarations). */
