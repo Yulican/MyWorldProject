@@ -367,13 +367,15 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     for (let t = 0; t < TROOP_TYPES; t++) {
       const have = m.soldiers[base + t];
       if (have === 0) continue;
-      const keep = sim.cellPop[c] > 0 && d >= 0 ? Math.min(have, m.cap[base + t]) : 0;
+      // War phase 5: the militia of a rebellion (melee) needs no building and gets no pay.
+      const militia = t === Troop.Melee ? sim.war.militia[c] : 0;
+      const keep = sim.cellPop[c] > 0 && d >= 0 ? Math.min(have, m.cap[base + t] + militia) : 0;
       if (keep < have) {
         m.disbanded += have - keep;
         m.soldiers[base + t] = keep;
         m.release[c] += have - keep;
       }
-      if (d >= 0) m.sums[d] += keep;
+      if (d >= 0) m.sums[d] += keep - Math.min(keep, militia);
     }
   }
 

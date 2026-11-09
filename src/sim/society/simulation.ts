@@ -1,4 +1,4 @@
-import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
+import { WAR, advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
 import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
@@ -371,7 +371,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
       sim.refreshOwner = null;
       sumCivWants(sim, owner);
       emigrate(sim, owner);
-      breakAway(sim, owner);
+      // War phase 5: with uprisings as war (WAR.rebel) the yearly check in war.ts replaces the direct breakaway.
+      if (!WAR.rebel) breakAway(sim, owner);
       sim.part = TickPart.Snapshot;
       return false;
     }
@@ -529,7 +530,7 @@ function returnSoldiers(sim: Simulation, owner: Uint8Array): void {
  * out of the population; their faith goes with them (military.faith).
  * Soldiers not found among the adults are dropped.
  */
-function drawSoldiers(sim: Simulation): void {
+export function drawSoldiers(sim: Simulation): void {
   const { pop, military } = sim;
   let open = 0;
   for (let c = 0; c < sim.world.cellCount; c++) open += military.train[c];
@@ -558,6 +559,24 @@ function drawSoldiers(sim: Simulation): void {
       military.train[c] = 0;
     }
   }
+}
+
+/**
+ * War phase 5: `n` soldiers of the cell (melee, militia) go back to its
+ * people as adults, with the soldiers' mean faith (like returnSoldiers).
+ */
+export function dischargeSoldiers(sim: Simulation, cell: number, n: number): void {
+  const m = sim.military;
+  const have = Math.min(n, m.soldiers[cell * TROOP_TYPES]);
+  if (have <= 0) return;
+  const before = soldiersAt(sim, cell);
+  m.soldiers[cell * TROOP_TYPES] -= have;
+  const stay = before - have;
+  const faith = before > 0 ? m.faith[cell] / before : 0.5;
+  m.faith[cell] = stay > 0 ? faith * stay : 0;
+  const civ = sim.world.owner[cell];
+  if (civ === 0 || sim.cellPop[cell] === 0) return;
+  for (let k = 0; k < have; k++) addInhabitant(sim, cell, civ, SOLDIER_RETURN_AGE, faith);
 }
 
 function removeInhabitant(sim: Simulation, i: number): void {
@@ -1149,7 +1168,7 @@ function refreshSnapshot(sim: Simulation): void {
   sim.snapshotVersion++;
 }
 
-function mostPopulousCell(sim: Simulation, civId: number, allowed: Uint8Array | null): number {
+export function mostPopulousCell(sim: Simulation, civId: number, allowed: Uint8Array | null): number {
   let best = -1;
   let most = 0;
   for (let c = 0; c < sim.world.cellCount; c++) {

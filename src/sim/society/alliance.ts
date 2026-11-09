@@ -15,7 +15,7 @@ if (PAIRS !== 256) throw new Error('pacts.ts assumes 256 people pairs');
 // over the known pairs of the living peoples only and allocates nothing but
 // the chronicle's strings.
 
-function setPact(sim: Simulation, a: number, b: number, kind: number, x: number): void {
+export function setPact(sim: Simulation, a: number, b: number, kind: number, x: number): void {
   const w = sim.war;
   const k = a * PAIRS + b;
   const k2 = b * PAIRS + a;

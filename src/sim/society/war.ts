@@ -7,13 +7,14 @@ import { addRoad, stepCost } from '../world/roads';
 import { BUILDINGS } from './buildings';
 import { BO, BI, Defense, fightBattle, givesUp, remainingSoldiers } from './battle';
 import { ALLY, Pact, foeStrength, mayOutweigh } from './pacts';
-import { breakAlliances, endPact, updateAlliances } from './alliance';
+import { checkRebellions } from './rebellion';
+import { breakAlliances, endPact, setPact, updateAlliances } from './alliance';
 import { PAIRS, addMood, rebuildPartners } from './diplomacy';
 import { updateCellSupply } from './economy';
 import { MIL, TROOP_TYPES } from './military';
 import { SupplyKind, type SupplyModifier } from './supply';
-import { hasSeat, satisfactionTarget } from './satisfaction';
-import { changeCiv, record, type Simulation } from './simulation';
+import { MOOD_REVOLUTION_LOST, MOOD_REVOLUTION_WON, addMood as addCivMood, hasSeat, satisfactionTarget } from './satisfaction';
+import { changeCiv, dischargeSoldiers, record, type Simulation } from './simulation';
 
 // War on the map, phase 3a + 3b ("Design Documents/Requirement Krieg.md",
 // sections 4 to 6): declaration, armies, march, battles, siege, occupation,
@@ -101,6 +102,21 @@ export const WAR = {
   exhaustYears: 10,
   truceYears: 20,
   trustLoss: 30,
+  /**
+   * Phase 5 (uprisings as war, prototype): 1 = the yearly rebellion check (rebellion.ts) replaces the direct
+   * breakaway; rebelHelp = 1 (5b): the mother's pact and alliance partners join her, and third peoples that
+   * fear her (danger at least helpDanger, trust below helpTrust, no pact with her) join the rebels when that
+   * makes the rebel side the stronger; militia = share of the rebel settlements' people that fight as melee.
+   */
+  rebel: 0,
+  rebelHelp: 0,
+  militia: 0.1,
+  helpDanger: 50,
+  helpTrust: 50,
+  /** Years within which a second rebellion in the same realm counts as a chain (statistics). */
+  chainYears: 30,
+  /** The mother gives up a rebellion below this share of the rebel side's strength (BATTLE.giveUp = 0.4; 0 = never). */
+  rebelGiveUp: 0.4,
 };
 
 /** Army slots (WAR.worldArmies is at most this). */
@@ -114,8 +130,10 @@ export const MAX_WARS = 24;
 const TICKS_PER_YEAR = 52;
 
 /** How a war ended. */
-export const EndType = { GaveUp: 0, AttackerGaveUp: 1, Exhausted: 2, GoalLost: 3, Vanished: 4 } as const;
-export const END_NAMES = ['defender gave up', 'attacker gave up', 'exhaustion', 'goal lost', 'a people vanished'] as const;
+export const EndType = { GaveUp: 0, AttackerGaveUp: 1, Exhausted: 2, GoalLost: 3, Vanished: 4, Crushed: 5 } as const;
+export const END_NAMES = ['defender gave up', 'attacker gave up', 'exhaustion', 'goal lost', 'a people vanished', 'rebellion crushed'] as const;
+/** Rebel seats a rebellion can have (one per rebel group). */
+export const MAX_GOALS = 8;
 
 /** Tools only: a clock to measure the war parts (e.g. performance.now); the simulation never reads the time itself. */
 export const WAR_PROFILE: { clock: (() => number) | null } = { clock: null };
@@ -191,6 +209,35 @@ export type WarStats = {
   allyAnnexed: number;
   /** Largest number of peoples on one side of a war. */
   maxSide: number;
+  /** Phase 5: rebellions declared, rebel groups and settlements and people in them, ended: crushed / mother gave up / exhaustion / other. */
+  rebDeclared: number;
+  rebGroups: number;
+  rebSettlements: number;
+  rebPeople: number;
+  rebCrushed: number;
+  rebGaveUp: number;
+  rebExhausted: number;
+  rebOther: number;
+  rebDurationSum: number;
+  rebAnnexedGroups: number;
+  /** Rebellions with outside helpers / the mother's partners that joined, and the helpers / partners joined. */
+  rebHelpWars: number;
+  rebHelpers: number;
+  rebMotherAllies: number;
+  /** Battles, sieges and occupations in rebel wars. */
+  rebBattles: number;
+  rebSieges: number;
+  rebOcc: number;
+  /** Chains: rebellions in a realm that had one within WAR.chainYears, settlements that rose a second time, most rebellions in one realm. */
+  rebRepeat: number;
+  rebCellRepeat: number;
+  rebMaxRealm: number;
+  /** Rebellions that found no room for a people (no free id) and the militia raised. */
+  rebNoRoom: number;
+  /** Rebellions at which the mother's strength was below 40 % of the rebels' (she would give up), and the sum of the ratios. */
+  rebWeakMother: number;
+  rebRatioSum: number;
+  militia: number;
   /** WAR_PROFILE: ms of the weekly and yearly parts (sum, calls, worst). */
   weekMs: number;
   weekCalls: number;
@@ -223,6 +270,19 @@ export type WarState = {
   /** 1 if the defender arose from the attacker (secession, revolution). Statistics only. */
   wSplinter: Uint8Array;
   wBattles: Uint16Array;
+  /** Phase 5: 1 for a rebellion (the attacker is the mother, the defender side the rebel groups), its goals (one seat per rebel group), how many, which are occupied. */
+  wRebel: Uint8Array;
+  wGoals: Int32Array;
+  wGoalN: Uint8Array;
+  wGoalDone: Uint8Array;
+  /** Per people: the mother of a rebel group (0 = none), the rebel wars a people is the mother of, tick and count of its rebellions. */
+  rebelMother: Uint8Array;
+  motherBusy: Uint8Array;
+  rebLast: Int32Array;
+  rebTimes: Uint8Array;
+  /** Per cell: rebel militia (melee soldiers among the cell's soldiers that need no building and get no pay), times the settlement rose. */
+  militia: Uint16Array;
+  rebCount: Uint8Array;
   /** Phase 4: allies that joined the war. */
   wAllies: Uint8Array;
   /** Per war and people (war * PAIRS + people): 0 attacker's side, 1 defender's side, -1 not in the war. */
@@ -307,6 +367,16 @@ export function createWar(seed: number, cellCount: number): WarState {
     wOccupied: new Uint8Array(MAX_WARS),
     wSplinter: new Uint8Array(MAX_WARS),
     wBattles: new Uint16Array(MAX_WARS),
+    wRebel: new Uint8Array(MAX_WARS),
+    wGoals: new Int32Array(MAX_WARS * MAX_GOALS).fill(-1),
+    wGoalN: new Uint8Array(MAX_WARS),
+    wGoalDone: new Uint8Array(MAX_WARS * MAX_GOALS),
+    rebelMother: new Uint8Array(PAIRS),
+    motherBusy: new Uint8Array(PAIRS),
+    rebLast: new Int32Array(PAIRS),
+    rebTimes: new Uint8Array(PAIRS),
+    militia: new Uint16Array(cellCount),
+    rebCount: new Uint8Array(cellCount),
     wAllies: new Uint8Array(MAX_WARS),
     side: new Int8Array(MAX_WARS * PAIRS).fill(-1),
     foe: new Uint8Array(PAIRS * PAIRS),
@@ -403,6 +473,29 @@ export function createWar(seed: number, cellCount: number): WarState {
       allyOcc: 0,
       allyAnnexed: 0,
       maxSide: 0,
+      rebDeclared: 0,
+      rebGroups: 0,
+      rebSettlements: 0,
+      rebPeople: 0,
+      rebCrushed: 0,
+      rebGaveUp: 0,
+      rebExhausted: 0,
+      rebOther: 0,
+      rebDurationSum: 0,
+      rebAnnexedGroups: 0,
+      rebHelpWars: 0,
+      rebHelpers: 0,
+      rebMotherAllies: 0,
+      rebBattles: 0,
+      rebSieges: 0,
+      rebOcc: 0,
+      rebRepeat: 0,
+      rebCellRepeat: 0,
+      rebMaxRealm: 0,
+      rebNoRoom: 0,
+      rebWeakMother: 0,
+      rebRatioSum: 0,
+      militia: 0,
       weekMs: 0,
       weekCalls: 0,
       weekMax: 0,
@@ -442,6 +535,12 @@ export function resetWarCiv(sim: Simulation, id: number): void {
   if (s >= 0 && w.wLive[s]) endWar(sim, s, EndType.Vanished);
   // Wars the old people fought as an ally: it leaves them (their foes count down).
   for (let q = 0; q < MAX_WARS; q++) if (w.wLive[q] && w.side[q * PAIRS + id] >= 0) dropMember(sim, q, id);
+  // Rebel wars the old people was the mother of end (its rebels stay independent).
+  for (let q = 0; q < MAX_WARS; q++) if (w.wLive[q] && w.wRebel[q] && w.wAtt[q] === id) endWar(sim, q, EndType.Vanished);
+  w.rebelMother[id] = 0;
+  w.motherBusy[id] = 0;
+  w.rebLast[id] = 0;
+  w.rebTimes[id] = 0;
   w.enemy[id] = 0;
   w.civWar[id] = -1;
   for (let b = 0; b < PAIRS; b++) endPact(sim, id, b);
@@ -496,7 +595,10 @@ export function runWarYearStep(sim: Simulation, step: number): number {
     profileYear(w, t0, step);
     return step;
   }
-  if (step === 0) updateAlliances(sim);
+  if (step === 0) {
+    updateAlliances(sim);
+    checkRebellions(sim);
+  }
   let next = -1;
   let s = step;
   while (s < MAX_WARS && !w.wLive[s]) s++;
@@ -569,7 +671,7 @@ function reviewWar(sim: Simulation, s: number, later = false): void {
   const sa = sideStrength(sim, s, 0);
   const sd = sideStrength(sim, s, 1);
   if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
-  else if (givesUp(sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
+  else if (attackerGivesUp(w, s, sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
   else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
   else if (later) raiseLater(w, s);
   else {
@@ -596,13 +698,21 @@ export function sideStrength(sim: Simulation, s: number, side: number): number {
 }
 
 /** The defender gives up only once the goal seat is occupied, and then below BATTLE.giveUp of the attacker's strength. */
+/** Whether the attacker gives up: below BATTLE.giveUp of the other side, in a rebellion below WAR.rebelGiveUp. */
+function attackerGivesUp(w: WarState, s: number, sa: number, sd: number): boolean {
+  return w.wRebel[s] === 1 ? sa < WAR.rebelGiveUp * sd : givesUp(sa, sd);
+}
+
 function defenderGivesUp(w: WarState, s: number, sd: number, sa: number): boolean {
+  // Rebels never give up: a rebellion ends by the mother's occupation of all rebel seats, her giving up or exhaustion.
+  if (w.wRebel[s] === 1) return false;
   return w.wOccupied[s] === 1 && givesUp(sd, sa);
 }
 
 /** Ends war `s` if a side vanished or the goal seat is no longer the defender's; true if it ended. */
 function endIfGone(sim: Simulation, s: number): boolean {
   const w = sim.war;
+  if (w.wRebel[s] === 1) return rebelGone(sim, s);
   if (!sim.civs[w.wAtt[s]] || !sim.civs[w.wDef[s]]) {
     endWar(sim, s, EndType.Vanished);
     return true;
@@ -637,7 +747,9 @@ function reraise(sim: Simulation, s: number, civ: number): void {
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === civ && w.aState[a] !== ArmyState.Retreating) active++;
   }
-  const main = civ === w.wAtt[s] || civ === w.wDef[s];
+  // A rebel group fights like a main party (its own armies, the relief armies' number).
+  const group = w.rebelMother[civ] !== 0 && w.rebelMother[civ] === w.wAtt[s];
+  const main = civ === w.wAtt[s] || civ === w.wDef[s] || group;
   const cap = !main ? ALLY.armies : civ === w.wAtt[s] ? WAR.mainArmies : WAR.reliefArmies;
   const room = Math.min(cap - active, WAR.maxArmies - countArmies(w, civ), worldRoom(w));
   if (room > 0) raiseArmies(sim, s, civ, room, main ? WAR.sendShare : ALLY.send);
@@ -801,6 +913,8 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
   w.wOccupied[s] = 0;
   w.wSplinter[s] = sim.civs[def]!.parentName === sim.civs[att]!.name ? 1 : 0;
   w.wBattles[s] = 0;
+  w.wRebel[s] = 0;
+  w.wGoalN[s] = 0;
   w.wAllies[s] = 0;
   w.wEnd[s] = -1;
   w.side.fill(-1, s * PAIRS, s * PAIRS + PAIRS);
@@ -894,6 +1008,28 @@ function joinAllies(sim: Simulation, s: number): void {
   }
 }
 
+/** People `p` becomes a member of war `s` on `side`: foes of every member of the other side, agreements with them end. */
+function addMember(sim: Simulation, s: number, p: number, side: number): void {
+  const w = sim.war;
+  const max = sim.diplomacy.maxId;
+  w.side[s * PAIRS + p] = side;
+  if (p !== w.wAtt[s] && p !== w.wDef[s]) {
+    w.wAllies[s]++;
+    w.allyWarsOf[p]++;
+  }
+  let count = 0;
+  for (let q = 1; q <= max; q++) {
+    const sq = sideOf(w, s, q);
+    if (sq === side) count++;
+    if (sq !== 1 - side) continue;
+    w.foe[p * PAIRS + q]++;
+    w.foe[q * PAIRS + p]++;
+    endPact(sim, p, q);
+    sever(sim, p, q);
+  }
+  if (count > w.stats.maxSide) w.stats.maxSide = count;
+}
+
 /** People `p` joins war `s` on `side` (unless it is allied to a member of the other side). */
 function joinMember(sim: Simulation, s: number, p: number, side: number): void {
   const w = sim.war;
@@ -906,21 +1042,8 @@ function joinMember(sim: Simulation, s: number, p: number, side: number): void {
   }
   // It joins even without room for its army on the map (it raises one yearly once there is room).
   if (worldRoom(w) < 1 || countArmies(w, p) >= WAR.maxArmies) w.stats.joinNoRoom++;
-  w.side[s * PAIRS + p] = side;
-  w.wAllies[s]++;
-  w.allyWarsOf[p]++;
+  addMember(sim, s, p, side);
   w.stats.joins++;
-  let count = 0;
-  for (let q = 1; q <= max; q++) {
-    const sq = sideOf(w, s, q);
-    if (sq === side) count++;
-    if (sq !== 1 - side) continue;
-    w.foe[p * PAIRS + q]++;
-    w.foe[q * PAIRS + p]++;
-    endPact(sim, p, q);
-    sever(sim, p, q);
-  }
-  if (count > w.stats.maxSide) w.stats.maxSide = count;
   const main = side === 0 ? w.wAtt[s] : w.wDef[s];
   record(sim, `The ${sim.civs[p]!.name} joined the ${sim.civs[main]!.name} in the war against the ${sim.civs[side === 0 ? w.wDef[s] : w.wAtt[s]]!.name}.`, w.wGoal[s]);
 }
@@ -1642,7 +1765,8 @@ function fight(sim: Simulation, s: number, cell: number, na: number, nb: number)
     w.wLastGain[s] = sim.tick;
   } else if (result < 0) st.battleWinsDef++;
   else st.battleDraws++;
-  if (w.wAllies[s] > 0) st.allyBattles++;
+  if (w.wAllies[s] > 0 && w.wRebel[s] === 0) st.allyBattles++;
+  if (w.wRebel[s] === 1) st.rebBattles++;
   applyLosses(sim, groupA, na, 0, out[BO.strLostA]);
   applyLosses(sim, groupB, nb, 1, out[BO.strLostB]);
   // The loser retreats with what is left; a draw sends both back.
@@ -1652,7 +1776,7 @@ function fight(sim: Simulation, s: number, cell: number, na: number, nb: number)
   const sa = sideStrength(sim, s, 0);
   const sd = sideStrength(sim, s, 1);
   if (defenderGivesUp(w, s, sd, sa)) w.wEnd[s] = EndType.GaveUp;
-  else if (givesUp(sa, sd)) w.wEnd[s] = EndType.AttackerGaveUp;
+  else if (attackerGivesUp(w, s, sa, sd)) w.wEnd[s] = EndType.AttackerGaveUp;
 }
 
 /** Scales the group's armies to what is left of `side` after the battle and kills the difference in the cells. */
@@ -1709,7 +1833,8 @@ function startSiege(sim: Simulation, s: number): void {
   w.wSiegeStart[s] = sim.tick;
   w.stats.sieges++;
   if (!w.wSplinter[s]) w.stats.estSieges++;
-  if (w.wAllies[s] > 0) w.stats.allySieges++;
+  if (w.wAllies[s] > 0 && w.wRebel[s] === 0) w.stats.allySieges++;
+  if (w.wRebel[s] === 1) w.stats.rebSieges++;
   w.siege[goal] = 1;
   w.siegeValue[goal] = -WAR.siegeMalus;
   w.stats.startSat += sim.satisfaction[goal];
@@ -1793,12 +1918,313 @@ function updateSiege(sim: Simulation, s: number): void {
   if (sat < 0) {
     w.stats.occupations++;
     if (!w.wSplinter[s]) w.stats.estOcc++;
-    if (w.wAllies[s] > 0) w.stats.allyOcc++;
+    if (w.wAllies[s] > 0 && w.wRebel[s] === 0) w.stats.allyOcc++;
     w.wLastGain[s] = sim.tick;
     w.wOccupied[s] = 1;
     w.version++;
     record(sim, `The ${sim.civs[w.wAtt[s]]!.name} occupied a seat of government of the ${sim.civs[w.wDef[s]]!.name}.`, cell);
+    if (w.wRebel[s] === 1) {
+      // The occupied seat stays occupied to the war's end; the next rebel seat is next.
+      w.stats.rebOcc++;
+      if (!advanceGoal(sim, s)) queueRebelEnd(w, s);
+    }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: uprisings as war (rebellion.ts declares them)
+
+const rebGroups = new Int32Array(MAX_GOALS);
+
+function queueRebelEnd(w: WarState, s: number): void {
+  if (w.wEnd[s] < 0) w.wEnd[s] = EndType.Crushed;
+}
+
+/**
+ * A rebellion's goal `cell` is done (occupied): the next goal is the nearest
+ * rebel seat not yet occupied (from the one just taken), the siege starts
+ * afresh and the armies get their way to it. False if all are occupied.
+ */
+function advanceGoal(sim: Simulation, s: number): boolean {
+  const w = sim.war;
+  const cur = w.wGoal[s];
+  const base = s * MAX_GOALS;
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < w.wGoalN[s]; i++) {
+    const g = w.wGoals[base + i];
+    if (g === cur) w.wGoalDone[base + i] = 1;
+    if (w.wGoalDone[base + i]) continue;
+    const d = hexDistance(sim.world, cur, g);
+    if (d < bestD || (d === bestD && g < best)) {
+      bestD = d;
+      best = g;
+    }
+  }
+  if (best < 0) return false;
+  w.wGoal[s] = best;
+  w.wSiegeStart[s] = -1;
+  w.wSiegeStrength[s] = 0;
+  w.wOccupied[s] = 0;
+  w.version++;
+  planMarch(sim, s);
+  return true;
+}
+
+/** Marks goal `cell` done and moves on if it was the current one; true if the rebellion has a goal left. */
+function rebelGone(sim: Simulation, s: number): boolean {
+  const w = sim.war;
+  const att = w.wAtt[s];
+  if (!sim.civs[att]) {
+    endWar(sim, s, EndType.Vanished);
+    return true;
+  }
+  // The main rebel group is the first still alive.
+  if (!sim.civs[w.wDef[s]]) {
+    let alt = -1;
+    for (let p = 1; p <= sim.diplomacy.maxId && alt < 0; p++) if (sideOf(w, s, p) === 1 && sim.civs[p] && w.rebelMother[p] === att) alt = p;
+    if (alt < 0) {
+      endWar(sim, s, EndType.Crushed);
+      return true;
+    }
+    w.wDef[s] = alt;
+  }
+  // A goal seat that is no longer a rebel group's (it vanished, was cut off) counts as taken.
+  const goal = w.wGoal[s];
+  const o = sim.world.owner[goal];
+  if (sim.cellPop[goal] === 0 || sideOf(w, s, o) !== 1) {
+    if (!advanceGoal(sim, s)) {
+      endWar(sim, s, EndType.Crushed);
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Removes the siege of cell `goal` (the seat's part and supply modifier). */
+function clearSiegeAt(sim: Simulation, goal: number): void {
+  const w = sim.war;
+  if (w.siege[goal] === 0 && w.siegeValue[goal] === 0) return;
+  w.siege[goal] = 0;
+  w.siegeValue[goal] = 0;
+  const old = sim.supplyModifiers.get(goal);
+  if (old) {
+    const rest = old.filter((x) => x.label !== SUPPLY_LABEL);
+    if (rest.length > 0) sim.supplyModifiers.set(goal, rest);
+    else sim.supplyModifiers.delete(goal);
+    updateCellSupply(sim, goal);
+  }
+}
+
+/**
+ * Starts the rebellion of `groups` (new peoples, the largest first; rebellion.ts founded them and gave
+ * them their settlements and militia) against `mother`: a war whose attacker side is the mother, whose other
+ * side is all rebel groups (allied with each other), with one goal seat per group (`goals`, the groups'
+ * capitals). The mother must occupy them all, nearest first. With WAR.rebelHelp the mother's partners join her
+ * and outside helpers may join the rebels. Returns the war's slot, -1 if none is free.
+ */
+export function startRebelWar(sim: Simulation, mother: number, groups: number[], goals: number[]): number {
+  const w = sim.war;
+  let s = 0;
+  while (s < MAX_WARS && w.wLive[s]) s++;
+  if (s === MAX_WARS) return -1;
+  const first = groups[0];
+  // The goal nearest to the mother's capital first.
+  const cap = sim.civs[mother]!.capital;
+  let g0 = 0;
+  for (let i = 1; i < goals.length; i++) if (hexDistance(sim.world, cap, goals[i]) < hexDistance(sim.world, cap, goals[g0])) g0 = i;
+  w.wLive[s] = 1;
+  w.wAtt[s] = mother;
+  w.wDef[s] = first;
+  w.wGoal[s] = goals[g0];
+  w.wStart[s] = sim.tick;
+  w.wLastGain[s] = sim.tick;
+  w.wSiegeStart[s] = -1;
+  w.wSiegeStrength[s] = 0;
+  w.wOccupied[s] = 0;
+  w.wSplinter[s] = 1;
+  w.wBattles[s] = 0;
+  w.wRebel[s] = 1;
+  w.wAllies[s] = 0;
+  w.wEnd[s] = -1;
+  w.wGoalN[s] = goals.length;
+  for (let i = 0; i < MAX_GOALS; i++) {
+    w.wGoals[s * MAX_GOALS + i] = i < goals.length ? goals[i] : -1;
+    w.wGoalDone[s * MAX_GOALS + i] = 0;
+  }
+  w.side.fill(-1, s * PAIRS, s * PAIRS + PAIRS);
+  w.side[s * PAIRS + mother] = 0;
+  w.side[s * PAIRS + first] = 1;
+  w.foe[mother * PAIRS + first]++;
+  w.foe[first * PAIRS + mother]++;
+  w.wars++;
+  w.version++;
+  const st = w.stats;
+  if (w.wars > st.maxWars) st.maxWars = w.wars;
+  // The rebel groups are allied with each other (normal alliance rules afterwards).
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) setPact(sim, groups[i], groups[j], Pact.Alliance, 0);
+  }
+  for (let i = 0; i < groups.length; i++) {
+    w.rebelMother[groups[i]] = mother;
+    w.enemy[groups[i]] = mother;
+    w.civWar[groups[i]] = s;
+    if (i > 0) addMember(sim, s, groups[i], 1);
+    sever(sim, mother, groups[i]);
+  }
+  w.motherBusy[mother]++;
+  // The mother may be at war elsewhere (two fronts); only a free mother is "at war" with the rebels.
+  if (w.enemy[mother] === 0) {
+    w.enemy[mother] = first;
+    w.civWar[mother] = s;
+  }
+  if (WAR.rebelHelp) joinRebelSides(sim, s, groups);
+  planMarch(sim, s);
+  reraise(sim, s, mother);
+  for (let i = 0; i < groups.length; i++) reraise(sim, s, groups[i]);
+  for (let p = 1; p <= sim.diplomacy.maxId; p++) {
+    if (p !== mother && p !== first && sideOf(w, s, p) >= 0 && w.rebelMother[p] === 0) reraise(sim, s, p);
+  }
+  return s;
+}
+
+/**
+ * 5b: the mother's pact and alliance partners join her (unless allied with a rebel group); third peoples
+ * join the rebels if the mother's danger for them is at least WAR.helpDanger, their trust in her is below
+ * WAR.helpTrust, they have no pact with her and the rebel side with them is then stronger than the mother's.
+ */
+function joinRebelSides(sim: Simulation, s: number, groups: number[]): void {
+  const w = sim.war;
+  const m = sim.military;
+  const dip = sim.diplomacy;
+  const mother = w.wAtt[s];
+  const max = dip.maxId;
+  const st = w.stats;
+  const strength = (p: number) => (p < m.strength.length ? m.strength[p] : 0);
+  let sumM = strength(mother);
+  for (let p = 1; p <= max; p++) {
+    if (p === mother || !sim.civs[p] || sideOf(w, s, p) >= 0 || w.pact[mother * PAIRS + p] === Pact.None) continue;
+    let rebelAlly = false;
+    for (const g of groups) if (w.pact[p * PAIRS + g] === Pact.Alliance) rebelAlly = true;
+    if (rebelAlly) continue;
+    const before = st.joins;
+    joinMember(sim, s, p, 0);
+    if (st.joins > before) {
+      st.rebMotherAllies++;
+      sumM += strength(p);
+    }
+  }
+  let sumR = 0;
+  for (const g of groups) sumR += strength(g);
+  let any = 0;
+  for (let p = 1; p <= max; p++) {
+    candD[p] = 0;
+    if (p === mother || !sim.civs[p] || sideOf(w, s, p) >= 0 || w.rebelMother[p] !== 0) continue;
+    if (w.pact[p * PAIRS + mother] !== Pact.None || !dip.known[p * PAIRS + mother]) continue;
+    if (dip.danger[p * PAIRS + mother] < WAR.helpDanger || dip.trust[p * PAIRS + mother] >= WAR.helpTrust) continue;
+    candD[p] = 1;
+    sumR += strength(p);
+    any++;
+  }
+  if (any === 0 || sumR <= sumM) return;
+  st.rebHelpWars++;
+  for (let p = 1; p <= max; p++) {
+    if (!candD[p]) continue;
+    const before = st.joins;
+    joinMember(sim, s, p, 1);
+    if (st.joins > before) st.rebHelpers++;
+  }
+}
+
+/** The rebellion ends: the mother crushed it (all rebel land back, "Conquered") or the rebels stay independent. */
+function endRebelWar(sim: Simulation, s: number, type: number): void {
+  const w = sim.war;
+  const mother = w.wAtt[s];
+  const st = w.stats;
+  const n = sim.world.cellCount;
+  const owner = sim.world.owner;
+  const max = sim.diplomacy.maxId;
+  const crushed = type === EndType.Crushed;
+  st.rebDurationSum += sim.tick - w.wStart[s];
+  if (crushed) st.rebCrushed++;
+  else if (type === EndType.AttackerGaveUp) st.rebGaveUp++;
+  else if (type === EndType.Exhausted) st.rebExhausted++;
+  else st.rebOther++;
+  // Sieges off, armies home, militia back to the people.
+  const base = s * MAX_GOALS;
+  for (let i = 0; i < w.wGoalN[s]; i++) clearSiegeAt(sim, w.wGoals[base + i]);
+  w.wSiegeStart[s] = -1;
+  w.wOccupied[s] = 0;
+  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s) disbandArmy(sim, a);
+  let ng = 0;
+  for (let p = 1; p <= max; p++) if (sideOf(w, s, p) === 1 && w.rebelMother[p] === mother && sim.civs[p] && ng < MAX_GOALS) rebGroups[ng++] = p;
+  const isGroup = candA;
+  isGroup.fill(0);
+  for (let i = 0; i < ng; i++) isGroup[rebGroups[i]] = 1;
+  for (let c = 0; c < n; c++) {
+    if (w.militia[c] > 0 && isGroup[owner[c]]) {
+      dischargeSoldiers(sim, c, w.militia[c]);
+      w.militia[c] = 0;
+    }
+    if (w.cArmy[c] >= 0 && w.aWar[w.cArmy[c]] === s) dropContingent(w, c);
+  }
+  if (crushed && ng > 0) {
+    // All rebels annexed: their land goes back to the mother, "Conquered".
+    st.rebAnnexedGroups += ng;
+    const pop = sim.pop;
+    for (let i = 0; i < pop.end; i++) {
+      if (pop.alive[i] && isGroup[pop.civ[i]]) changeCiv(sim, i, mother);
+    }
+    for (let c = 0; c < n; c++) {
+      if (!isGroup[owner[c]]) continue;
+      owner[c] = mother;
+      for (let t = 0; t < TROOP_TYPES; t++) w.away[c * TROOP_TYPES + t] = 0;
+      w.conqValue[c] = -WAR.conqMalus;
+      w.conqTick[c] = sim.tick;
+      w.conqUntil[c] = sim.tick + WAR.conqYears * TICKS_PER_YEAR;
+    }
+  }
+  // Helpers and the mother's partners: trust of the winner's partner, the loser's allies lose it at the winner.
+  const winner = crushed ? 0 : type === EndType.AttackerGaveUp ? 1 : -1;
+  for (let p = 1; p <= max; p++) {
+    const side = sideOf(w, s, p);
+    if (side < 0 || p === mother || w.rebelMother[p] === mother || !sim.civs[p]) continue;
+    if (winner < 0) continue;
+    const winMain = winner === 0 ? mother : ng > 0 ? rebGroups[0] : 0;
+    if (winMain === 0 || !sim.civs[winMain]) continue;
+    if (side === winner) addMood(sim.diplomacy, winMain, p, 'Fought at our side', ALLY.winBonus, sim.tick);
+    else addMood(sim.diplomacy, winMain, p, 'Fought against us', -ALLY.loseLoss, sim.tick);
+  }
+  // Every member leaves (foes count down).
+  for (let p = 1; p <= max; p++) if (sideOf(w, s, p) >= 0) dropMember(sim, s, p);
+  w.side.fill(-1, s * PAIRS, s * PAIRS + PAIRS);
+  // Peace: the rebels (if independent) and the mother, trust down, truce; "Won" and "Lost a revolution".
+  for (let i = 0; i < ng; i++) {
+    const g = rebGroups[i];
+    w.rebelMother[g] = 0;
+    if (w.enemy[g] === mother) w.enemy[g] = 0;
+    if (w.civWar[g] === s) w.civWar[g] = -1;
+    w.truce[pairKey(mother, g)] = sim.tick + WAR.truceYears * TICKS_PER_YEAR;
+    if (crushed || !sim.civs[g] || !sim.civs[mother]) continue;
+    addMood(sim.diplomacy, mother, g, 'War', -WAR.trustLoss, sim.tick);
+    addMood(sim.diplomacy, g, mother, 'War', -WAR.trustLoss, sim.tick);
+    sever(sim, mother, g);
+    addCivMood(sim.civs[g]!, 'Won its revolution', MOOD_REVOLUTION_WON, sim.tick);
+  }
+  if (!crushed && ng > 0 && sim.civs[mother]) addCivMood(sim.civs[mother]!, 'Lost a revolution', MOOD_REVOLUTION_LOST, sim.tick);
+  if (w.motherBusy[mother] > 0) w.motherBusy[mother]--;
+  if (w.enemy[mother] !== 0 && w.civWar[mother] === s) {
+    w.enemy[mother] = 0;
+    w.civWar[mother] = -1;
+  }
+  w.wLive[s] = 0;
+  w.wRebel[s] = 0;
+  w.wEnd[s] = -1;
+  w.wGoalN[s] = 0;
+  w.wars--;
+  w.version++;
+  const mName = sim.civs[mother]?.name ?? '?';
+  record(sim, crushed ? `The ${mName} crushed the rebellion and took the rebels' land back.` : `The ${mName} lost the war against the rebels, who stay independent (${END_NAMES[type]}).`, w.wGoal[s]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1813,6 +2239,10 @@ function updateSiege(sim: Simulation, s: number): void {
 export function endWar(sim: Simulation, s: number, type: number): void {
   const w = sim.war;
   if (!w.wLive[s]) return;
+  if (w.wRebel[s] === 1) {
+    endRebelWar(sim, s, type);
+    return;
+  }
   const att = w.wAtt[s];
   const def = w.wDef[s];
   const goal = w.wGoal[s];
@@ -1922,7 +2352,7 @@ function transferDistrict(sim: Simulation, s: number): boolean {
   if (whole) {
     st.annexed++;
     if (!w.wSplinter[s]) st.estAnnexed++;
-    if (w.wAllies[s] > 0) st.allyAnnexed++;
+    if (w.wAllies[s] > 0 && w.wRebel[s] === 0) st.allyAnnexed++;
   }
   st.cellsMoved += cells;
   st.peopleMoved += people;
@@ -1980,6 +2410,7 @@ export function reconcileWar(sim: Simulation): void {
   const m = sim.military;
   const owner = sim.world.owner;
   const n = sim.world.cellCount;
+  for (let c = 0; c < n; c++) if (w.militia[c] > m.soldiers[c * TROOP_TYPES]) w.militia[c] = m.soldiers[c * TROOP_TYPES];
   armySum.fill(0);
   awaySum.fill(0);
   for (let a = 0; a < MAX_ARMIES; a++) {
