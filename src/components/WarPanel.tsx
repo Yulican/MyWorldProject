@@ -161,12 +161,23 @@ function WarBlock({
   year: (tick: number) => number;
 }) {
   const list = (civs: number[]) => civs.map((c) => `the ${name(c)}`).join(', ');
+  // In a rebellion the attacker is the mother realm, the other side the rebel peoples (and their helpers).
   const title = war.ally
-    ? `Ally of the ${name(war.partner)} against the ${name(war.enemy)}`
+    ? `Ally of the ${name(war.partner)} against the ${name(war.enemy)}${war.rebellion ? ' (rebellion)' : ''}`
+    : war.rebellion
+      ? war.attacker
+        ? `Rebellion: ${list(war.rebels)} rose up against us`
+        : `Rebellion against the ${name(war.enemy)}`
+      : war.attacker
+        ? `At war against the ${name(war.enemy)}`
+        : `Attacked by the ${name(war.enemy)}`;
+  const goalOwner = war.rebellion
+    ? `the rebel ${name(sim.world.owner[war.goal])}`
     : war.attacker
-      ? `At war against the ${name(war.enemy)}`
-      : `Attacked by the ${name(war.enemy)}`;
-  const goalOwner = war.attacker ? `the ${name(war.enemy)}` : war.ally ? `the ${name(war.partner)}` : 'ours';
+      ? `the ${name(war.enemy)}`
+      : war.ally
+        ? `the ${name(war.partner)}`
+        : 'ours';
   return (
     <View style={styles.block}>
       <Text style={styles.name}>{title}</Text>
@@ -176,8 +187,16 @@ function WarBlock({
       {war.ownSide.length > 0 && <Text style={styles.line}>On our side: {list(war.ownSide)}</Text>}
       <Text style={styles.line}>Against: {list(war.otherSide)}</Text>
       <Text style={styles.line}>
-        Goal: a seat of government ({goalOwner}) at {place(sim.world, war.goal)}
+        {war.rebellion ? 'Current goal' : 'Goal'}: a seat of government ({goalOwner}) at {place(sim.world, war.goal)}
       </Text>
+      {war.rebellion && (
+        <Text style={styles.line}>
+          Rebel seats taken: {war.seatsTaken.length} of {war.rebelSeats.length}
+          <Text style={styles.muted}>
+            {'  '}the realm must take them all; after {WAR.exhaustYears} years without success the rebels stay independent
+          </Text>
+        </Text>
+      )}
       <Text style={styles.line}>
         {war.siegeStart < 0
           ? 'The goal is not besieged.'

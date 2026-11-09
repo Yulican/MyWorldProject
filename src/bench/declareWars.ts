@@ -1,4 +1,4 @@
-import { MAX_ARMIES, finishGathering, formAlliance, hexDistance, livingCivilizations, stepSimulation, type Simulation } from '../sim';
+import { MAX_ARMIES, finishGathering, formAlliance, hexDistance, startRebellion, livingCivilizations, stepSimulation, type Simulation } from '../sim';
 import { PAIRS } from '../sim/society/diplomacy';
 import { chooseGoal, startWar } from '../sim/society/war';
 import { empowerGovernment } from './empowerGovernment';
@@ -11,7 +11,9 @@ import { stirUnrest } from './stirUnrest';
 // seats as it can: first the unrest scenario's uprisings (stirUnrest: the most
 // peoples), then the government scenario's seats and military buildings with
 // a year of training (empowerGovernment: soldiers and seats everywhere). Then
-// two blocks of allies form (by strength, alternately; alliances within each
+// the three strongest realms face a rebellion of all their other settlements
+// (startRebellion; the mothers' armies besiege the first rebel seat). Then
+// the other peoples form two blocks of allies (by strength, alternately; alliances within each
 // block), the n-th of block A declares war on the n-th of block B, the allies
 // join (one army each), every army gathers at once (finishGathering) and the
 // attackers stand on their goal seats, so every war has a siege: army
@@ -31,7 +33,28 @@ const WEEKS = 2;
 export function declareWarsEverywhere(sim: Simulation): void {
   stirUnrest(sim);
   empowerGovernment(sim);
+  // Phase 5: the three strongest realms with settlements to lose face a rebellion of all their other settlements.
+  const strength = (a: number) => sim.military.strength[a] ?? 0;
+  const realms = livingCivilizations(sim)
+    .filter((c) => c.capital >= 0 && sim.world.owner.some((o, cell) => o === c.id && cell !== c.capital && sim.cellPop[cell] > 0))
+    .map((c) => c.id)
+    .sort((x, y) => strength(y) - strength(x) || x - y);
+  let rebellions = 0;
+  for (const id of realms) {
+    if (rebellions === REBELLIONS) break;
+    if (startRebellion(sim, id, true) >= 0) rebellions++;
+  }
   declarePairs(sim);
+}
+
+/** Rebellions the scenario starts (in the strongest realms). */
+export const REBELLIONS = 3;
+
+/** Whether `civ` fights in any war already (a main party, a rebel group or an ally). */
+function atWar(sim: Simulation, civ: number): boolean {
+  const w = sim.war;
+  for (let s = 0; s < w.wLive.length; s++) if (w.wLive[s] && w.side[s * PAIRS + civ] >= 0) return true;
+  return false;
 }
 
 /** Two blocks of allies at war in pairs; all armies gathered and the attackers on their goals. */
@@ -43,7 +66,7 @@ export function declarePairs(sim: Simulation): void {
   // stronger), so the allies of both join the wars as they start. Peoples already at war keep their war.
   const strength = (a: number) => sim.military.strength[a] ?? 0;
   const civs = livingCivilizations(sim)
-    .filter((c) => c.capital >= 0 && w.enemy[c.id] === 0)
+    .filter((c) => c.capital >= 0 && w.enemy[c.id] === 0 && !atWar(sim, c.id))
     .map((c) => c.id)
     .sort((x, y) => strength(y) - strength(x) || x - y);
   const blockA = civs.filter((_, i) => i % 2 === 0);

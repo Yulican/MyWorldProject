@@ -193,6 +193,14 @@ test('the war scenario puts peoples at war in pairs with as many armies as the c
   assert.ok(alliances >= 10, `${alliances} alliances`);
   assert.ok(allies >= w.wars, `${allies} allies in ${w.wars} wars`);
   assert.ok(allyArmies >= 2, `${allyArmies} ally armies`);
+  // Phase 5: three rebellions in the strongest realms, the mothers' armies in the field.
+  const { REBELLIONS } = await import('./declareWars');
+  let rebelWars = 0;
+  let rebelArmies = 0;
+  for (let s = 0; s < w.wLive.length; s++) if (w.wLive[s] && w.wRebel[s]) rebelWars++;
+  for (let a = 0; a < w.live.length; a++) if (w.live[a] && w.wRebel[w.aWar[a]]) rebelArmies++;
+  assert.equal(rebelWars, REBELLIONS);
+  assert.ok(rebelArmies >= REBELLIONS, `${rebelArmies} armies in rebel wars`);
   assert.equal(SCENARIOS.war.war, true);
 });
 
@@ -213,11 +221,12 @@ test('the war scenario draws 32 armies: real ones plus map-only decoys that keep
     assert.ok(sim.civs[markers.civ[i]], 'a living people');
   }
   for (let t = 0; t < 4; t++) stepSimulation(sim);
+  // Decoys never enter the simulation: the map's count is the real armies' plus theirs, filled to 32 again.
   assert.equal(decoys.fill(sim, markers, real), 32);
   let moved = 0;
   for (let i = 0; i < before.length; i++) if (markers.cell[real + i] !== before[i]) moved++;
   assert.ok(moved > 0, 'decoys march');
-  assert.equal(sim.war.armies, real, 'decoys never enter the simulation');
+  assert.equal(decoys.fill(sim, markers, sim.war.armies), 32);
   // Siege frames: real ones plus map-only decoys on seats of peoples at war, at least 3 (SIEGE_FRAMES when there are enough seats).
   const siege = Uint8Array.from(sim.war.siege);
   const frames = decoys.sieges(sim, siege);

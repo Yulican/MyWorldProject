@@ -160,10 +160,15 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
               {satisfaction.terms.map((t, i) => (
                 <TermRow key={i} term={t} digits={1} />
               ))}
-              {satisfaction.unhappyYears > 0 && (
+              {(satisfaction.unhappyYears > 0 || satisfaction.restless) && (
                 <Row
                   label="Unhappy"
-                  value={`for ${satisfaction.unhappyYears} year${satisfaction.unhappyYears > 1 ? 's' : ''}${satisfaction.restless ? ' · ready to break away' : ''}`}
+                  value={[
+                    satisfaction.unhappyYears > 0 && `for ${satisfaction.unhappyYears} year${satisfaction.unhappyYears > 1 ? 's' : ''}`,
+                    satisfaction.restless && 'may rebel',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 />
               )}
               {satisfaction.luxury.map((g) => (
@@ -171,8 +176,9 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
               ))}
               <Text style={styles.note}>
                 Satisfaction moves a quarter of the way to its target each year. Satisfied settlements have more
-                children and harvest more; unhappy ones send people away, and after {UNHAPPY_NOTE} below zero,
-                settlements joined by roads break away together.
+                children and harvest more; unhappy ones send people away. A realm's settlements below zero (not
+                the capital) rise together once their soldiers and militia outweigh the realm, and fight a war for
+                their independence.
               </Text>
             </>
           )}
@@ -391,7 +397,6 @@ const troopGood = (troop: string) => {
 const percent = (v: number) => `${Math.round(v * 100)} %`;
 const goodsList = (goods: readonly { good: string; amount: number }[]) =>
   goods.length === 0 ? 'Nothing' : goods.map((g) => `${Math.round(g.amount)} ${g.good.toLowerCase()}`).join(', ');
-const UNHAPPY_NOTE = '5 years';
 /** Settlement size by standing buildings, as the map icon shows it. */
 const settlementName = (buildings: number) => (buildings === 0 ? 'Tribe' : buildings <= 2 ? 'Small city' : 'Big city');
 const yearly = (harvest: number, upkeep: number) =>
