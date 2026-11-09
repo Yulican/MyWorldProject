@@ -1,4 +1,4 @@
-import { WAR, advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
+import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
 import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import { advanceGovernment, createGovernment, updateGovernment, updateGovernmentProjects, updateGovernmentUpkeep, type Government } from './government';
 import { DIRECTION_COUNT } from '../hex';
@@ -36,10 +36,7 @@ import {
 } from './economy';
 import {
   MOOD_NEW_PEOPLE,
-  MOOD_REVOLUTION_LOST,
-  MOOD_REVOLUTION_WON,
   SATISFACTION_MAX,
-  UNHAPPY_QUARTERS,
   addMood,
   birthFactor,
   cellOwners,
@@ -104,9 +101,6 @@ const ADULT_AGE = 16;
 /** Civilization slots per cell in `cellCivPop` at first (index 0 = nobody); doubles as needed. */
 const INITIAL_CIV_SLOTS = 8;
 export { EXPANSION_GROUP };
-/** A league of settlements ready to break away needs this many settlements or people. */
-export const LEAGUE_MIN_SETTLEMENTS = 3;
-export const LEAGUE_MIN_PEOPLE = 100;
 /** Unhappy people move to settlements reachable by road within this travel cost. */
 const MIGRATION_REACH = 8;
 /** ...that are at least this much more satisfied than their own. */
@@ -371,8 +365,6 @@ export function stepSimulationPart(sim: Simulation): boolean {
       sim.refreshOwner = null;
       sumCivWants(sim, owner);
       emigrate(sim, owner);
-      // War phase 5: with uprisings as war (WAR.rebel) the yearly check in war.ts replaces the direct breakaway.
-      if (!WAR.rebel) breakAway(sim, owner);
       sim.part = TickPart.Snapshot;
       return false;
     }
@@ -1309,80 +1301,7 @@ function neighborDirection(world: World, cell: number, other: number): number {
   return -1;
 }
 
-/**
- * Quarterly: settlements below zero for UNHAPPY_QUARTERS in a row (never a
- * capital) that are joined by roads form leagues; a league with at least
- * LEAGUE_MIN_SETTLEMENTS settlements or LEAGUE_MIN_PEOPLE people breaks away
- * as a new people. Its capital is its most populous seat of government, else
- * its most populous settlement. Faith stays as it is; the new people starts
- * proud of its revolution, the old one is shaken. Satisfied settlements stay
- * with their people, and a lone unhappy settlement only loses people.
- */
-function breakAway(sim: Simulation, owner: Uint8Array): void {
-  const { world, pop } = sim;
-  const n = world.cellCount;
-  const ready = UNHAPPY_QUARTERS;
-  // Settlements ready to break away (never a capital), by people.
-  const byCiv = new Map<number, number[]>();
-  for (let c = 0; c < n; c++) {
-    if (sim.unhappyQuarters[c] < ready || owner[c] === 0 || sim.civs[owner[c]]?.capital === c) continue;
-    const list = byCiv.get(owner[c]);
-    if (list) list.push(c);
-    else byCiv.set(owner[c], [c]);
-  }
-  if (byCiv.size === 0) return;
-  const league = new Int32Array(n).fill(-1);
-  for (const [parentId, restlessCells] of byCiv) {
-    const parent = sim.civs[parentId]!;
-    const restless = (c: number) => owner[c] === parentId && sim.unhappyQuarters[c] >= ready && c !== parent.capital;
-    const leagues: number[][] = [];
-    for (const start of restlessCells) {
-      if (league[start] >= 0) continue;
-      const cells = [start];
-      league[start] = leagues.length;
-      for (let k = 0; k < cells.length; k++) {
-        const c = cells[k];
-        for (let d = 0; d < DIRECTION_COUNT; d++) {
-          if (!hasRoad(world, c, d)) continue;
-          const nb = world.neighbors[c * DIRECTION_COUNT + d];
-          if (nb < 0 || league[nb] >= 0 || !restless(nb)) continue;
-          league[nb] = leagues.length;
-          cells.push(nb);
-        }
-      }
-      leagues.push(cells);
-    }
-    for (const cells of leagues) {
-      const people = cells.reduce((sum, c) => sum + sim.cellCivPop[c * sim.civSlots + parent.id], 0);
-      if (cells.length < LEAGUE_MIN_SETTLEMENTS && people < LEAGUE_MIN_PEOPLE) continue;
-      const inLeague = new Uint8Array(n);
-      for (const c of cells) inLeague[c] = 1;
-      let capital = -1;
-      for (const c of cells) {
-        if (hasSeat(sim.economy, c) && (capital < 0 || sim.cellPop[c] > sim.cellPop[capital])) capital = c;
-      }
-      if (capital < 0) capital = mostPopulousCell(sim, parent.id, inLeague);
-      UPRISING_HOOK.fn?.(sim, cells, parent.id);
-      const civ = foundCivilization(sim, 'revolution', capital, parent);
-      if (!civ) return; // all civilization ids in use; try again next quarter
-      for (let i = 0; i < pop.end; i++) {
-        if (!pop.alive[i] || pop.civ[i] !== parent.id || !inLeague[pop.cell[i]]) continue;
-        if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
-        changeCiv(sim, i, civ.id);
-      }
-      for (const c of cells) {
-        sim.unhappyQuarters[c] = 0;
-        owner[c] = civ.id;
-      }
-      addMood(civ, 'Won its revolution', MOOD_REVOLUTION_WON, sim.tick);
-      addMood(parent, 'Lost a revolution', MOOD_REVOLUTION_LOST, sim.tick);
-      const who = cells.length === 1 ? 'A settlement' : `${cells.length} settlements`;
-      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital);
-    }
-  }
-}
-
-/** Statistics only (tools/economyStats.ts: why settlements rise up): called with the settlements of every uprising before they become a people; unset in the game. */
+/** Statistics only (tools/economyStats.ts: why settlements rise up): called with the settlements of every rebel group (rebellion.ts) before they change sides; unset in the game. */
 export const UPRISING_HOOK: { fn: ((sim: Simulation, cells: readonly number[], parent: number) => void) | null } = { fn: null };
 
 /** Occasionally a new people appears in empty, livable land far from everyone. */

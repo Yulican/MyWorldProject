@@ -53,7 +53,7 @@ const MOOD_YEARS = 10;
 export const MOOD_NEW_PEOPLE = 10;
 export const MOOD_REVOLUTION_WON = 20;
 export const MOOD_REVOLUTION_LOST = -5;
-/** A settlement below zero this many years in a row is ready to break away. */
+/** Years below zero in a row from which a settlement counts as long-term dissatisfied (statistics; since war phase 5 no rule waits for them). */
 export const UNHAPPY_YEARS = 5;
 export const UNHAPPY_QUARTERS = UNHAPPY_YEARS * 4;
 /** Births and yields change by this share at ±100 satisfaction. */
@@ -331,7 +331,7 @@ export type HexSatisfaction = {
   terms: Term[];
   /** Years in a row below zero. */
   unhappyYears: number;
-  /** Ready to break away with a league of such settlements. */
+  /** Dissatisfied in the sense of a rebellion (below 0, not the capital): it rebels with the realm's other such settlements once they are stronger than the mother (war phase 5). */
   restless: boolean;
   luxury: { name: string; stock: number; covered: boolean }[];
 };
@@ -351,7 +351,7 @@ export function hexSatisfaction(sim: Simulation, cell: number): HexSatisfaction 
     target: clampSatisfaction(sumTerms(terms)),
     terms,
     unhappyYears: Math.floor(sim.unhappyQuarters[cell] / 4),
-    restless: sim.unhappyQuarters[cell] >= UNHAPPY_QUARTERS,
+    restless: sim.satisfaction[cell] < 0 && sim.civs[owner]?.capital !== cell,
     luxury,
   };
 }

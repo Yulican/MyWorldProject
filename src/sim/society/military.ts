@@ -419,8 +419,10 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       if (d < 0 || m.rest[d] <= 0) continue;
       for (let t = 0; t < TROOP_TYPES; t++) {
         const i = c * TROOP_TYPES + t;
-        if (m.soldiers[i] === 0) continue;
-        const leave = pass === 0 ? Math.min(m.soldiers[i], Math.floor(m.soldiers[i] * m.unpaidShare[d])) : m.rest[d] > 0 ? 1 : 0;
+        // The militia is not paid, so it is not dismissed either.
+        const paid = m.soldiers[i] - (t === Troop.Melee ? Math.min(m.soldiers[i], sim.war.militia[c]) : 0);
+        if (paid <= 0) continue;
+        const leave = pass === 0 ? Math.min(paid, Math.floor(paid * m.unpaidShare[d])) : m.rest[d] > 0 ? 1 : 0;
         if (leave <= 0) continue;
         m.rest[d] -= leave;
         m.soldiers[i] -= leave;
@@ -436,7 +438,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
   for (let c = 0; c < n; c++) {
     const civ = owner[c];
     const d = gov.district[c];
-    const here = soldiersAt(sim, c);
+    const here = soldiersAt(sim, c) - Math.min(sim.war.militia[c], m.soldiers[c * TROOP_TYPES + Troop.Melee]);
     if (d >= 0) gov.reserve[d] += here * MIL.sold;
     if (civ === 0) continue;
     m.civAfford[civ] -= here;
@@ -471,11 +473,18 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
   governmentBuys(sim, owner);
 
   // Strategic goods: soldiers use 1 / MIL.perN units each a year; a troop type without its good is not stronger.
+  // A rebellion's militia (war phase 5) needs no goods and has no strategic factor.
   for (let c = 0; c < n; c++) {
     const base = c * TROOP_TYPES;
     const civ = owner[c];
     for (let t = 0; t < TROOP_TYPES; t++) {
-      const count = m.soldiers[base + t];
+      const all = m.soldiers[base + t];
+      const militia = t === Troop.Melee ? Math.min(all, sim.war.militia[c]) : 0;
+      const count = all - militia;
+      if (civ > 0 && militia > 0) {
+        m.strength[civ] += militia;
+        m.soldiersOf[civ * TROOP_TYPES + t] += militia;
+      }
       if (count === 0) {
         m.covered[base + t] = 0;
         continue;
