@@ -9,7 +9,7 @@ Slots, Bau, Unterhalt, Ruinen). Die Komfortgebäude hier nutzen dieses System
 und kommen in dessen Katalog. Deshalb wird dieses Feature erst nach dem
 Gebäude-Feature umgesetzt.
 
-**Änderung durch den Krieg (`Requirement Krieg.md`, Abschnitt 8):** Ein Aufstand wird nicht mehr direkt ein neues Volk. Die unzufriedenen Siedlungen bleiben normaler Teil des Reichs, bis ihre Stärke zusammen größer ist als die des Mutterlands; dann werden sie ein unabhängiges Volk und erklären den Krieg. „Erfolgreiche Revolution“ gilt, wenn sie den Krieg gewinnen (und unabhängig bleiben). „Verlorene Revolution“ ist das Mutterland, das den Krieg verliert (Rebellen bleiben unabhängig), −5 wie bisher; verlieren die Rebellen, werden sie annektiert und bekommen „erobert“. Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; bei Sieg wird je zusammenhängender Gruppe ein Volk (miteinander verbündet), ohne Mindestgröße. Abgeschnittene Gebiete spalten sich weiter direkt ab, ohne Krieg. Neuer Teilwert „Besieged“ (belagerter Sitz, Phase 3b): −40. Neuer Teilwert „erobert“: −15, klingt über 10 Jahre ab, im eroberten Bezirk. Der Abschnitt „Abspaltung“ unten beschreibt bis zur Umsetzung den heutigen Stand. Entschieden: „unzufrieden“ = Zufriedenheit < 0 (die 5-Jahres-Regel entfällt für Aufstände), die Rebellen müssen nicht zusammenhängen und werden bei Sieg mehrere verbündete Völker (`Requirement Krieg.md`, Abschnitte 8 und 13).
+**Änderung durch den Krieg (`Requirement Krieg.md`, Abschnitt 8):** Ein Aufstand wird nicht mehr direkt ein neues Volk. Die unzufriedenen Siedlungen bleiben normaler Teil des Reichs, bis ihre Stärke zusammen größer ist als die des Mutterlands; dann werden sie ein unabhängiges Volk und erklären den Krieg. „Erfolgreiche Revolution“ gilt, wenn sie den Krieg gewinnen (und unabhängig bleiben). „Verlorene Revolution“ ist das Mutterland, das den Krieg verliert (Rebellen bleiben unabhängig), −5 wie bisher; verlieren die Rebellen, werden sie annektiert und bekommen „erobert“. Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; bei Sieg wird je zusammenhängender Gruppe ein Volk (miteinander verbündet), ohne Mindestgröße. Abgeschnittene Gebiete spalten sich weiter direkt ab, ohne Krieg. Neuer Teilwert „Besieged“ (belagerter Sitz, Phase 3b): −40. Neuer Teilwert „erobert“: −15, klingt über 10 Jahre ab, im eroberten Bezirk. Der Abschnitt „Abspaltung“ unten beschreibt ab Phase 5a die Rebellion und markiert den heutigen Stand. Entschieden: „unzufrieden“ = Zufriedenheit < 0 (die 5-Jahres-Regel entfällt für Aufstände), die Rebellen müssen nicht zusammenhängen und werden bei Sieg mehrere verbündete Völker (`Requirement Krieg.md`, Abschnitte 8 und 13).
 
 ## 1. Der Wert
 
@@ -148,22 +148,23 @@ dem Volk. Der Glaube bleibt unverändert. Fremde Völker nehmen Zuwanderer
 vorerst immer auf; später entscheidet die Außenpolitik.
 
 **Abspaltung**
-- Eine Siedlung wird **abtrünnig**, wenn sie 5 Jahre am Stück unter 0 liegt.
-  Es gibt keine zusätzlichen Abzüge vorher.
-- Abtrünnige Siedlungen desselben Volks, die über Straßen zusammenhängen,
-  bilden einen **Bund**. Ein Bund spaltet sich ab, wenn er mindestens 3
-  Siedlungen oder 100 Einwohner hat.
-- Zufriedene Siedlungen bleiben in ihrem Volk, auch wenn sie zwischen
-  abtrünnigen liegen.
-- Die Hauptstadt des neuen Volks ist der lokale Regierungssitz mit den
-  meisten Einwohnern im Bund, sonst die größte Siedlung (siehe 3b).
-- Der Glaube bleibt unverändert. Das neue Volk zählt nicht zum Limit von
-  6 Völkern (ab Krieg Phase 3: 9 Völker, `Requirement Krieg.md`, Abschnitt 15).
+
+*Ab Krieg Phase 5a (Entscheidung, bis dahin gilt der Code wie unten „Heutiger Stand“):*
+- Ein Aufstand ist eine **Rebellion** (`Requirement Krieg.md`, Abschnitt 8). Eine Siedlung ist **unzufrieden**, wenn ihre Zufriedenheit aktuell < 0 ist (keine 5-Jahres-Regel, kein Bund, keine Mindestgröße; die Hauptstadt nie).
+- Unzufriedene Siedlungen bleiben normaler Teil des Reichs, bis ihre Stärke zusammen (Soldaten + 10 % der Einwohner als Miliz) größer ist als die des Mutterlands (mit dessen Bündnissen und Pakten, ohne die Soldaten der Rebellen). Dann werden sie mit der Erklärung unabhängig (ein Volk je zusammenhängender Gruppe, miteinander verbündet) und führen Krieg.
+- Die Hauptstadt jeder Gruppe ist der Sitz mit den meisten Einwohnern, sonst die größte Siedlung (Sitz-Status ohne Gebäude).
+- Der Glaube bleibt unverändert. Das neue Volk zählt nicht zum Limit von 9 Völkern.
+- Teilwerte: Neuer Stamm +10 ab der Erklärung; Erfolgreiche Revolution +20 bei Sieg der Rebellen; Verlorene Revolution −5 für das Mutterland bei Rebellensieg; erobert −15 für annektierte Rebellen (Abschnitt 2).
+- **Abgeschnittene Gebiete** bleiben wie bisher: Sie werden nach der Schonfrist direkt ein eigenes Volk, ohne Krieg. Die alte Entfernungsregel ist entfernt.
+
+*Heutiger Stand (bis Krieg Phase 5a):*
+- Eine Siedlung wird **abtrünnig**, wenn sie 5 Jahre am Stück unter 0 liegt. Es gibt keine zusätzlichen Abzüge vorher.
+- Abtrünnige Siedlungen desselben Volks, die über Straßen zusammenhängen, bilden einen **Bund**. Ein Bund spaltet sich ab, wenn er mindestens 3 Siedlungen oder 100 Einwohner hat.
+- Zufriedene Siedlungen bleiben in ihrem Volk, auch wenn sie zwischen abtrünnigen liegen.
+- Die Hauptstadt des neuen Volks ist der lokale Regierungssitz mit den meisten Einwohnern im Bund, sonst die größte Siedlung (siehe 3b).
+- Der Glaube bleibt unverändert. Das neue Volk zählt nicht zum Limit von 6 Völkern (ab Krieg Phase 3: 9 Völker, `Requirement Krieg.md`, Abschnitt 15).
 - Teilwerte: siehe Neuer Stamm und Revolution in Abschnitt 2.
-- Einzelne abtrünnige Siedlungen ohne Bund spalten sich nicht ab. Sie
-  verlieren Leute durch Abwanderung.
-- Die Regel für abgeschnittene Gebiete bleibt. Die alte Entfernungsregel
-  wird entfernt.
+- Einzelne abtrünnige Siedlungen ohne Bund spalten sich nicht ab. Sie verlieren Leute durch Abwanderung.
 
 ## 5. Chronik-Dialog (zentrale Funktion)
 

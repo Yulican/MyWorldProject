@@ -126,15 +126,33 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 
 ## 8. Aufstände als Krieg
 
-- Gilt nur für **echte Aufstände** (Abspaltung durch Unzufriedenheit). Abgeschnittene Gebiete bleiben friedlich wie heute (sie werden direkt ein neues Volk). Es gibt keine Mindestgröße der Rebellen mehr (die heutige Bundgröße von 3 Siedlungen oder 100 Einwohnern entfällt für Aufstände).
-- **Unzufrieden** heißt: Zufriedenheit der Siedlung aktuell < 0. Die 5-Jahres-Regel entfällt für Aufstände (die Rebellen müssen ohnehin lange genug unter 0 bleiben, um die Stärke aufzubauen). Die Hauptstadt wird nie unzufrieden im Sinn der Abspaltung.
-- **Unzufriedene Siedlungen** müssen **nicht zusammenhängen**. Sie bleiben normaler Teil des Reichs, ohne Sonderzustand, bis die **Stärke aller unzufriedenen Siedlungen des Reichs zusammen größer ist als die Stärke des Mutterlandes** (nicht die ≥2-Schwelle der Kriegserklärung). Dann erklären sie den Krieg und werden dabei **sofort ein unabhängiges Volk** (Hauptstadt wie in `Requirement Zufriedenheit.md`).
-- **Ein Krieg, eine Seite:** Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und kämpfen im Krieg als eine Seite. Gewinnen sie, wird aus jeder zusammenhängenden Gruppe ein eigenes Volk; die neuen Völker sind miteinander verbündet.
-- **Krieg der Rebellen:** Das Mutterland muss alle Regierungssitze des neuen Volks erobern. Gelingt das, werden die Rebellen wieder annektiert. Endet der Krieg ohne das (Erschöpfung), bleiben die Rebellen unabhängig.
-- **Besitzerwechsel zur Erklärung:** Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; ihre spätere Zufriedenheit ist für den Krieg ohne Belang. Siedlungen, die an einem laufenden Rebellenkrieg beteiligt sind (auf beiden Seiten), können sich keiner weiteren Rebellion anschließen.
-- **Annektierte Rebellensiedlungen** bekommen den Teilwert „erobert“ (−15, klingt über 10 Jahre ab).
-- **Hilfe von außen:** Völker, die sich vom Mutterland bedroht fühlen und nicht mit ihm befreundet sind, können den Rebellen als Bündnispartner helfen.
-- Teilwerte: „Neuer Stamm“ und „Erfolgreiche Revolution“ gelten, wenn die Rebellen den Krieg gewinnen; „Verlorene Revolution“ gilt für das Mutterland, wenn die Rebellen unabhängig bleiben (Abschnitt 2, Tabelle der Teilwerte, in `Requirement Zufriedenheit.md`).
+Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **5b** Hilfe von außen und Verbündete des Mutterlands. Zahlen sind Startwerte (kalibrieren (Simulation)).
+
+**Auslöser**
+- Gilt nur für **echte Aufstände**. Abgeschnittene Gebiete bleiben unverändert (sie werden direkt ein neues Volk, ohne Krieg). Die direkte Abspaltung durch Unzufriedenheit entfällt (`Requirement Zufriedenheit.md`, Abschnitt „Abspaltung“).
+- **Unzufrieden** = Zufriedenheit der Siedlung aktuell < 0. Keine 5-Jahres-Regel, keine Mindestgröße. Die Hauptstadt wird nie unzufrieden im Sinn der Rebellion. Unzufriedene Siedlungen müssen nicht zusammenhängen und bleiben bis zur Erklärung normaler Teil des Reichs.
+- **Prüfung:** jährlich, ohne Zufallswurf. Die Rebellion beginnt, wenn die Stärke aller unzufriedenen Siedlungen des Reichs zusammen **größer ist als die Stärke des Mutterlands**.
+- **Rebellenstärke:** Soldaten in den Rebellensiedlungen plus Miliz von 10 % der Einwohner jeder rebellierenden Siedlung (Nahkampf, ohne Güterfaktor).
+- **Mutterland:** Seine Stärke zählt Bündnisse und Pakte (wie die 2×-Prüfung), ohne die Soldaten der Rebellensiedlungen. Die Rebellen zählen nur Bündnisse.
+
+**Erklärung**
+- Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und werden mit der Erklärung **sofort unabhängig**; aus jeder zusammenhängenden Gruppe wird ein eigenes Volk. Die Rebellenvölker sind miteinander verbündet (Phase 4: bei Vertrauen < 65 werden sie wie jedes Bündnis auf Pakt herabgestuft). Sie kämpfen als eine Seite, jedes stellt eigene Armeen (je höchstens 4, 32 auf der Karte gesamt).
+- Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; ihre spätere Zufriedenheit ist für den Krieg ohne Belang. Siedlungen in einem laufenden Rebellenkrieg (auf beiden Seiten) können sich keiner weiteren Rebellion anschließen.
+- **Hauptstadt und Sitze:** Die Hauptstadt jeder Gruppe ist der Sitz mit den meisten Einwohnern, sonst die größte Siedlung (sie bekommt Sitz-Status ohne Gebäude und kann wie ein Sitz belagert werden).
+- Das Mutterland kann gleichzeitig anderswo im Krieg sein (zwei Fronten); die Obergrenze von 4 Armeen gilt für das Mutterland insgesamt (3 + 1 für die Rebellen, kalibrieren (Simulation)). Soldaten zählen nicht doppelt. Die Rebellion ist keine Kriegserklärung des Mutterlands.
+- Teilwerte: „Neuer Stamm“ +10 ab der Erklärung; „Erfolgreiche Revolution“ +20 bei Sieg der Rebellen; „Verlorene Revolution“ −5 für das Mutterland bei Rebellensieg; „erobert“ −15 für annektierte Rebellensiedlungen (klingt über 10 Jahre ab) (`Requirement Zufriedenheit.md`, Abschnitt 2).
+
+**Krieg**
+- Es gelten die Regeln der Abschnitte 3 bis 6 mit einer Ausnahme vom einen Kriegsziel: Das Mutterland muss **alle Sitze der Rebellen** erobern, der Reihe nach, der nächste Sitz zuerst (ein aktuelles Ziel). Besetzte Sitze bleiben bis Kriegsende besetzt. Verliert eine Gruppe ihren Sitz, kämpft der Rest weiter; erst alle Sitze zusammen zählen.
+- **Mutterland gewinnt:** Alle Rebellensitze sind besetzt. Die Rebellensiedlungen werden annektiert (Bezirke wechseln) und bekommen „erobert“.
+- **Rebellen gewinnen:** Das Mutterland gibt auf (weniger als 40 % der Stärke der Rebellenseite, jährlich geprüft; die Rebellen geben vor der Besetzung eines Sitzes nie auf) oder der Krieg endet nach 10 Jahren Erschöpfung ohne Besetzung oder Sieg. Die Rebellen bleiben unabhängig.
+- Nach dem Krieg wie jeder Krieg: Vertrauen −30, Grenzen geschlossen, Abkommen aufgehoben, 20 Jahre Waffenstillstand (auch gegenüber unabhängigen Rebellen).
+- **Verbündete des Mutterlands** (Phase 4b: Verteidiger-Seite) treten immer bei, außer sie sind mit den Rebellen verbündet.
+
+**Hilfe von außen (5b)**
+- Ein Volk hilft den Rebellen als Verbündeter, wenn die Gefahr des Mutterlands für es ≥ 50 ist, sein Vertrauen zum Mutterland < 50 ist, es mit dem Mutterland keinen Pakt oder Bündnis hat und die Rebellenseite dadurch stärker ist als das Mutterland. Es tritt bei der Erklärung bei.
+
+**Anzeige und Chronik:** Eintrag „Rebellion“ (statt „Abspaltung“) mit Zahl der Siedlungen; weitere Einträge: Rebellensitz besetzt, Rebellion niedergeschlagen, Rebellen bleiben unabhängig, Hilfe von Dritten. Karte: Rebellenvölker mit eigener Farbe, rote Kriegsgrenzen wie bisher; das Kriegs-Panel zeigt die Rebellenseite.
 
 ## 9. Anzeige
 
@@ -152,7 +170,9 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 4. **Bündnisse und Verteidigungspakte** (aufgeteilt, vom Nutzer bestätigt):
    - **4a:** Pakte und Bündnisse entstehen und enden, zählen zu Gefahr und Stärke, Vertrauen, Anzeige, Chronik.
    - **4b:** Verbündete treten Kriegen bei (Armeen, Sammeln, Entsatz, Frieden).
-5. **Aufstände als Krieg** (Abschnitt 8).
+5. **Aufstände als Krieg** (Abschnitt 8, aufgeteilt, vom Nutzer bestätigt):
+   - **5a:** Rebellion statt Abspaltung (Stärkevergleich, Erklärung, neue Völker, Sitze, alle Sitze erobern, Aufgabe, Annexion, Erschöpfung).
+   - **5b:** Hilfe von außen und Verbündete des Mutterlands.
 
 Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Kriege je Welt, Bevölkerung, Handel, Rechenzeit) und vor der Umsetzung mit dem Nutzer abgestimmt.
 
@@ -160,6 +180,7 @@ Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Krieg
 
 - Stärke und Gefahr jährlich pro Volkspaar (Zähler); Schlachten pro Schlacht, nicht pro Soldat; Armeen als wenige Zähler.
 - Ziel: ein simuliertes Jahr höchstens 1,3-mal so teuer wie heute.
+- **Benchmark (Phase 5):** `war` wird erweitert: 3 Reiche, in denen alle Siedlungen rebellieren (Rebellenkriege). `unrest` bleibt, die Siedlungen starten dort aber Rebellionskriege statt der direkten Abspaltung. Alle Szenarien müssen bestehen.
 - **Benchmark `war` (Phase 4):** Das Setup wird erweitert: alle Völker sind in zwei Blöcken verbündet; kein neues Szenario.
 - **Neues Benchmark-Szenario `war`:** 300 Jahre gealtert, danach Kriege überall: die Obergrenzen voll ausgeschöpft (4 Armeen je Volk, 32 auf der Karte), alle Völker im Krieg (ab 3b belagerte Sitze, ab Phase 5 Rebellenkriege). Marker und Rahmen erscheinen überall auf der Karte. Alle Szenarien müssen bestehen.
 
@@ -188,9 +209,10 @@ Später (bewusste Vereinfachungen für jetzt):
 
 Phase 4, entschieden: siehe Abschnitt 7 (auch: Beitritt, wenn die Seite gewinnen kann; Gefahr zählt Verbündete wie die 2×-Prüfung; nach einem Rebellensieg verbündete Völker werden bei Vertrauen < 65 wie jedes Bündnis auf Pakt herabgestuft).
 
+Phase 5, entschieden: siehe Abschnitt 8.
+
 Offen:
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
-- Anzeige: Wie zeigt das Kriegs-Panel Rebellen und ihre Verbündeten?
 
 ## 14. Simulation Phase 0 und 1
 
