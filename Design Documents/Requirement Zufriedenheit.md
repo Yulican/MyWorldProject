@@ -151,7 +151,7 @@ vorerst immer auf; später entscheidet die Außenpolitik.
 
 *Ab Krieg Phase 5a (Entscheidung, bis dahin gilt der Code wie unten „Heutiger Stand“):*
 - Ein Aufstand ist eine **Rebellion** (`Requirement Krieg.md`, Abschnitt 8). Eine Siedlung ist **unzufrieden**, wenn ihre Zufriedenheit aktuell < 0 ist (keine 5-Jahres-Regel, kein Bund, keine Mindestgröße; die Hauptstadt nie).
-- Unzufriedene Siedlungen bleiben normaler Teil des Reichs, bis ihre Stärke zusammen (nur Soldaten, keine Miliz) größer ist als die des Mutterlands (mit dessen Bündnissen und Pakten, ohne die Soldaten der Rebellen). Dann werden sie mit der Erklärung unabhängig (ein Volk je zusammenhängender Gruppe, miteinander verbündet) und führen Krieg.
+- Unzufriedene Siedlungen bleiben normaler Teil des Reichs, bis ihre Stärke zusammen (Soldaten + Miliz von 2,5 % der Einwohner) größer ist als die des Mutterlands (mit dessen Bündnissen und Pakten, ohne die Soldaten der Rebellen). Dann werden sie mit der Erklärung unabhängig (ein Volk je zusammenhängender Gruppe, miteinander verbündet) und führen Krieg.
 - Die Hauptstadt jeder Gruppe ist der Sitz mit den meisten Einwohnern, sonst die größte Siedlung (Sitz-Status ohne Gebäude).
 - Der Glaube bleibt unverändert. Das neue Volk zählt nicht zum Limit von 9 Völkern.
 - Teilwerte: Neuer Stamm +10 ab der Erklärung; Erfolgreiche Revolution +20 bei Sieg der Rebellen; Verlorene Revolution −5 für das Mutterland bei Rebellensieg; erobert −15 für annektierte Rebellen (Abschnitt 2).
