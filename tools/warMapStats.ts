@@ -32,12 +32,14 @@ function measure(sim: Simulation, ms: number, year: number): Row {
   const st = sim.war.stats;
   let settlements = 0;
   let satNeg = 0;
+  let satLong = 0;
   let satSum = 0;
   for (let c = 0; c < w.cellCount; c++) {
     if (sim.cellPop[c] > 0) {
       settlements++;
       satSum += sim.satisfaction[c];
       if (sim.satisfaction[c] < 0) satNeg++;
+      if (sim.unhappyQuarters[c] >= 20) satLong++;
     }
   }
   const dip = sim.diplomacy;
@@ -113,6 +115,8 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'free trade pairs': dip.freeTrade.reduce((s, v) => s + v, 0) / 2,
     'satisfaction mean': satSum / Math.max(1, settlements),
     'unhappy (<0) %': (100 * satNeg) / Math.max(1, settlements),
+    'settlements < 0 for 5+ years': satLong,
+    'unhappy (<0) settlements': satNeg,
     'uprisings (total)': text('rose up'),
     'cut off (total)': text('cut off from'),
     'known pairs': knownPairs,

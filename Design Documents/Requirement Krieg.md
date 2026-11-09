@@ -132,7 +132,7 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 - Gilt nur für **echte Aufstände**. Abgeschnittene Gebiete bleiben unverändert (sie werden direkt ein neues Volk, ohne Krieg). Die direkte Abspaltung durch Unzufriedenheit entfällt (`Requirement Zufriedenheit.md`, Abschnitt „Abspaltung“).
 - **Unzufrieden** = Zufriedenheit der Siedlung aktuell < 0. Keine 5-Jahres-Regel, keine Mindestgröße. Die Hauptstadt wird nie unzufrieden im Sinn der Rebellion. Unzufriedene Siedlungen müssen nicht zusammenhängen und bleiben bis zur Erklärung normaler Teil des Reichs.
 - **Prüfung:** jährlich, ohne Zufallswurf. Die Rebellion beginnt, wenn die Stärke aller unzufriedenen Siedlungen des Reichs zusammen **größer ist als die Stärke des Mutterlands**.
-- **Rebellenstärke:** Soldaten in den Rebellensiedlungen plus Miliz von 10 % der Einwohner jeder rebellierenden Siedlung (Nahkampf, ohne Güterfaktor).
+- **Rebellenstärke:** nur die Soldaten in den Rebellensiedlungen. Es gibt keine Miliz (entschieden nach der ersten Simulation; die Miliz von 10 % der Einwohner ist verworfen).
 - **Mutterland:** Seine Stärke zählt Bündnisse und Pakte (wie die 2×-Prüfung), ohne die Soldaten der Rebellensiedlungen. Die Rebellen zählen nur Bündnisse.
 
 **Erklärung**
@@ -145,7 +145,7 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 **Krieg**
 - Es gelten die Regeln der Abschnitte 3 bis 6 mit einer Ausnahme vom einen Kriegsziel: Das Mutterland muss **alle Sitze der Rebellen** erobern, der Reihe nach, der nächste Sitz zuerst (ein aktuelles Ziel). Besetzte Sitze bleiben bis Kriegsende besetzt. Verliert eine Gruppe ihren Sitz, kämpft der Rest weiter; erst alle Sitze zusammen zählen.
 - **Mutterland gewinnt:** Alle Rebellensitze sind besetzt. Die Rebellensiedlungen werden annektiert (Bezirke wechseln) und bekommen „erobert“.
-- **Rebellen gewinnen:** Das Mutterland gibt auf (weniger als 40 % der Stärke der Rebellenseite, jährlich geprüft; die Rebellen geben vor der Besetzung eines Sitzes nie auf) oder der Krieg endet nach 10 Jahren Erschöpfung ohne Besetzung oder Sieg. Die Rebellen bleiben unabhängig.
+- **Rebellen gewinnen:** nur durch Erschöpfung: Der Krieg endet nach 10 Jahren ohne Besetzung oder Sieg, die Rebellen bleiben unabhängig. **Das Mutterland gibt in einem Rebellenkrieg nie auf** (entschieden). Die Rebellen geben vor der Besetzung eines ihrer Sitze nie auf (bestätigt).
 - Nach dem Krieg wie jeder Krieg: Vertrauen −30, Grenzen geschlossen, Abkommen aufgehoben, 20 Jahre Waffenstillstand (auch gegenüber unabhängigen Rebellen).
 - **Verbündete des Mutterlands** (Phase 4b: Verteidiger-Seite) treten immer bei, außer sie sind mit den Rebellen verbündet.
 
@@ -209,7 +209,7 @@ Später (bewusste Vereinfachungen für jetzt):
 
 Phase 4, entschieden: siehe Abschnitt 7 (auch: Beitritt, wenn die Seite gewinnen kann; Gefahr zählt Verbündete wie die 2×-Prüfung; nach einem Rebellensieg verbündete Völker werden bei Vertrauen < 65 wie jedes Bündnis auf Pakt herabgestuft).
 
-Phase 5, entschieden: siehe Abschnitt 8.
+Phase 5, entschieden: siehe Abschnitt 8 (Mutterland gibt nie auf, keine Miliz, Rebellen geben vor Besetzung nie auf). Offen: Ein neuer Simulationslauf ohne Miliz steht aus.
 
 Offen:
 - Zahlen mit „kalibrieren (Simulation)“ für die späteren Phasen: Erschöpfungsjahre, Auflösungsschwellen der Bündnisse, Kosten und Unterhalt der Militärgebäude.
@@ -322,3 +322,10 @@ Die höhere Zahl von Aufständen mit Bündnissen (12 Welten: 4,6 gegen 2,8) ist 
 ### Verbündete auf beiden Seiten (Phase 4b)
 
 12 Welten, Jahr 500, Verbündete des Verteidigers treten immer bei: Kriege 6,3, davon mit Verbündeten 2,2 (auf beiden Seiten 0,4), Beitritte 3,8, Schlachten 7,3, Besetzungen 5,8, annektierte Völker 4,7, Aufstände 3,5, Rechenzeit ca. 11 ms pro Jahr.
+
+### Aufstände als Krieg (Phase 5, erste Simulation)
+
+24 Welten, Jahr 500, mit 10 % Miliz:
+- **Mutterland gibt bei 40 % auf:** ca. 4,8 Rebellionen je Welt; das Mutterland gab in ca. 90 % sofort auf (es hatte nur ca. 12 % der Rebellenstärke), echte Kriege nur in 10 bis 15 %.
+- **Mutterland gibt nie auf (gewählt):** 6,3 Rebellionen, 3,9 niedergeschlagen, 2,3 unabhängig durch Erschöpfung, 7,2 Jahre Dauer, 3,1 Schlachten, 4,1 Besetzungen je Welt.
+- Ein erneuter Lauf ohne Miliz (Rebellenstärke nur Soldaten) steht noch aus.
