@@ -136,7 +136,7 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 - **Mutterland:** Seine Stärke zählt Bündnisse und Pakte (wie die 2×-Prüfung), ohne die Soldaten der Rebellensiedlungen. Die Rebellen zählen nur Bündnisse.
 
 **Erklärung**
-- Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und werden mit der Erklärung **sofort unabhängig**; aus jeder zusammenhängenden Gruppe wird ein eigenes Volk. Die Rebellenvölker sind miteinander verbündet (Phase 4: bei Vertrauen < 65 werden sie wie jedes Bündnis auf Pakt herabgestuft). Sie kämpfen als eine Seite, jedes stellt eigene Armeen (je höchstens 4, 32 auf der Karte gesamt).
+- Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und werden mit der Erklärung **sofort unabhängig**; aus jeder durch Straßen zusammenhängenden Gruppe wird ein eigenes Volk; höchstens die 8 größten Gruppen rebellieren. Die Rebellenvölker sind miteinander verbündet (Phase 4: bei Vertrauen < 65 werden sie wie jedes Bündnis auf Pakt herabgestuft). Sie kämpfen als eine Seite, jedes stellt eigene Armeen (je höchstens 4, 32 auf der Karte gesamt).
 - Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; ihre spätere Zufriedenheit ist für den Krieg ohne Belang. Siedlungen in einem laufenden Rebellenkrieg (auf beiden Seiten) können sich keiner weiteren Rebellion anschließen.
 - **Hauptstadt und Sitze:** Die Hauptstadt jeder Gruppe ist der Sitz mit den meisten Einwohnern, sonst die größte Siedlung (sie bekommt Sitz-Status ohne Gebäude und kann wie ein Sitz belagert werden).
 - Das Mutterland kann gleichzeitig anderswo im Krieg sein (zwei Fronten); die Obergrenze von 4 Armeen gilt für das Mutterland insgesamt (3 + 1 für die Rebellen, kalibrieren (Simulation)). Soldaten zählen nicht doppelt. Die Rebellion ist keine Kriegserklärung des Mutterlands.
@@ -145,8 +145,10 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 **Krieg**
 - Es gelten die Regeln der Abschnitte 3 bis 6 mit einer Ausnahme vom einen Kriegsziel: Das Mutterland muss **alle Sitze der Rebellen** erobern, der Reihe nach, der nächste Sitz zuerst (ein aktuelles Ziel). Besetzte Sitze bleiben bis Kriegsende besetzt. Verliert eine Gruppe ihren Sitz, kämpft der Rest weiter; erst alle Sitze zusammen zählen.
 - **Mutterland gewinnt:** Alle Rebellensitze sind besetzt. Die Rebellensiedlungen werden annektiert (Bezirke wechseln) und bekommen „erobert“.
-- **Rebellen gewinnen:** nur durch Erschöpfung: Der Krieg endet nach 10 Jahren ohne Besetzung oder Sieg, die Rebellen bleiben unabhängig. **Das Mutterland gibt in einem Rebellenkrieg nie auf** (entschieden). Die Rebellen geben vor der Besetzung eines ihrer Sitze nie auf (bestätigt).
+- **Rebellen gewinnen:** nur durch Erschöpfung: Der Krieg endet nach 10 Jahren ohne Besetzung oder Sieg, die Rebellen bleiben unabhängig. **Das Mutterland gibt in einem Rebellenkrieg nie auf** (entschieden). Die Rebellen geben vor der Besetzung eines ihrer Sitze nie auf (bestätigt). Geben sie nach der Besetzung eines Sitzes auf, zählt das als Sieg des Mutterlands: Alle Rebellen werden annektiert.
 - Nach dem Krieg wie jeder Krieg: Vertrauen −30, Grenzen geschlossen, Abkommen aufgehoben, 20 Jahre Waffenstillstand (auch gegenüber unabhängigen Rebellen).
+- **Ein Mutterland in einer Rebellion** kann von Dritten weiter angegriffen werden (es erklärt dabei selbst nichts) und kämpft dann an zwei Fronten innerhalb seiner 4 Armeen.
+- **Wer an einer Rebellion beteiligt ist** (Rebellen, Helfer, Verbündete des Mutterlands), beginnt keinen eigenen Krieg.
 - **Verbündete des Mutterlands** (Phase 4b: Verteidiger-Seite) treten immer bei, außer sie sind mit den Rebellen verbündet.
 
 **Hilfe von außen (5b)**
@@ -338,3 +340,5 @@ Gewählt 2,5 % (heute in Klammern):
 - langfristig unzufriedene Siedlungen 0,7 (0,6; bei 0 % Miliz 2,6)
 - Außenhandel 2333 (4055), Abkommen 3,1 (6,8)
 - Rechenzeit unverändert
+
+Produktionsstand (24 Welten, Jahr 500, Miliz 2,5 %): Rebellionen 1,83, niedergeschlagen 0,79 plus Aufgabe der Rebellen 0,13, Erschöpfung 0,83, Dauer 6,0 Jahre, Kriege 5,6, Völker 10,2, langfristig unzufriedene Siedlungen 0,71, Rechenzeit ca. 11,4 ms pro Jahr.
