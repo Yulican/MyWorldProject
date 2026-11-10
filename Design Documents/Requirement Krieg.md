@@ -148,6 +148,9 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 - **Rebellen gewinnen:** nur durch Erschöpfung: Der Krieg endet nach 10 Jahren ohne Besetzung oder Sieg, die Rebellen bleiben unabhängig. **Das Mutterland gibt in einem Rebellenkrieg nie auf** (entschieden). Die Rebellen geben vor der Besetzung eines ihrer Sitze nie auf (bestätigt). Geben sie nach der Besetzung eines Sitzes auf, zählt das als Sieg des Mutterlands: Alle Rebellen werden annektiert.
 - Nach dem Krieg wie jeder Krieg: Vertrauen −30, Grenzen geschlossen, Abkommen aufgehoben, 20 Jahre Waffenstillstand (auch gegenüber unabhängigen Rebellen).
 - **Ein Mutterland in einer Rebellion** kann von Dritten weiter angegriffen werden (es erklärt dabei selbst nichts) und kämpft dann an zwei Fronten innerhalb seiner 4 Armeen.
+  - 1 Armee kämpft gegen die Rebellen, mit einem Viertel des Marschanteils (17,5 % der Soldaten); bis zu 3 Entsatzarmeen verteidigen gegen den äußeren Angreifer. Beide Kriege enden unabhängig voneinander; endet der äußere Krieg, wird die Armee gegen die Rebellen wieder auf volle Größe gebracht.
+  - Rebellengruppen selbst können während des Rebellenkriegs nicht von Dritten angegriffen werden.
+  - Simulation (12 Welten, Jahr 500): ca. 0,1 Kriege gegen ein Mutterland in einer Rebellion je Welt.
 - **Wer an einer Rebellion beteiligt ist** (Rebellen, Helfer, Verbündete des Mutterlands), beginnt keinen eigenen Krieg.
 - **Verbündete des Mutterlands** (Phase 4b: Verteidiger-Seite) treten immer bei, außer sie sind mit den Rebellen verbündet.
 
