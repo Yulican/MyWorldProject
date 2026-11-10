@@ -581,6 +581,22 @@ test('a mother in a rebellion can be attacked: two fronts within her 4 armies (1
   assert.equal(w.wLive[s], 1);
   assert.equal(w.enemy[MOTHER], w.wDef[s]);
   assert.equal(w.civWar[MOTHER], s);
+  // One front again: her army against the rebels is back at full size (70 % of her soldiers), soldiers counted once.
+  const full = motherArmies(s);
+  assert.equal(full.n, 1);
+  assert.equal(motherArmies(s2).n, 0);
+  let share = 0;
+  let awayNow = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (sim.world.owner[c] !== MOTHER) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) {
+      share += Math.floor(WAR.sendShare * m.soldiers[c * TROOP_TYPES + t]);
+      awayNow += w.away[c * TROOP_TYPES + t];
+    }
+  }
+  assert.ok(full.soldiers > rebelFront.soldiers * 2, `${full.soldiers} after ${rebelFront.soldiers}`);
+  assert.ok(Math.abs(full.soldiers - share) <= 2 * TROOP_TYPES, `${full.soldiers} of ${share}`);
+  assert.ok(Math.abs(awayNow - full.soldiers) <= 2 * TROOP_TYPES);
   // Attacked again, then the rebellion ends first: the outside war goes on.
   const s3 = startWar(sim, att, cap);
   assert.ok(s3 >= 0);

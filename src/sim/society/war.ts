@@ -871,8 +871,37 @@ function reraise(sim: Simulation, s: number, civ: number): void {
   const main = civ === w.wAtt[s] || civ === w.wDef[s] || group;
   const cap = !main ? ALLY.armies : civ === w.wAtt[s] ? WAR.mainArmies : WAR.reliefArmies;
   const room = Math.min(cap - active, WAR.maxArmies - countArmies(w, civ), worldRoom(w));
-  const share = !main ? ALLY.send : onTwoFronts(w, s, civ) ? rebelFrontShare() : WAR.sendShare;
+  const two = onTwoFronts(w, s, civ);
+  const share = !main ? ALLY.send : two ? rebelFrontShare() : WAR.sendShare;
   if (room > 0) raiseArmies(sim, s, civ, room, share);
+  else if (w.wRebel[s] === 1 && civ === w.wAtt[s] && !two) refillRebelArmy(sim, s, civ);
+}
+
+/**
+ * The mother of rebellion `s` fights on one front again (her outside war
+ * ended): her army against the rebels gets back the full share
+ * (WAR.sendShare of each settlement's soldiers, less those away or on their
+ * way); they join it at once. Nothing to do for an army at full size.
+ */
+function refillRebelArmy(sim: Simulation, s: number, civ: number): void {
+  const w = sim.war;
+  const m = sim.military;
+  const owner = sim.world.owner;
+  let army = -1;
+  for (let a = 0; a < MAX_ARMIES && army < 0; a++) {
+    if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === civ && w.aState[a] !== ArmyState.Retreating) army = a;
+  }
+  if (army < 0) return;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (owner[c] !== civ || w.cArmy[c] >= 0) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) {
+      const i = c * TROOP_TYPES + t;
+      const take = Math.floor(WAR.sendShare * m.soldiers[i]) - w.away[i] - w.pend[i];
+      if (take <= 0) continue;
+      w.away[i] += take;
+      w.aN[army * TROOP_TYPES + t] += take;
+    }
+  }
 }
 
 /** Fills `adj` (civs x civs): 1 where two peoples have settlements on adjacent hexes (a common border). */
@@ -2487,6 +2516,8 @@ export function endWar(sim: Simulation, s: number, type: number): void {
   // A mother still fighting her rebels has them as her war again.
   rebelFront(w, att);
   rebelFront(w, def);
+  // One front again: her army against the rebels is brought back to full size.
+  if (w.motherBusy[def] > 0 && w.civWar[def] >= 0 && w.wRebel[w.civWar[def]] === 1) reraise(sim, w.civWar[def], def);
   w.truce[pairKey(att, def)] = sim.tick + WAR.truceYears * TICKS_PER_YEAR;
   if (sim.civs[att] && sim.civs[def]) {
     addMood(sim.diplomacy, att, def, 'War', -WAR.trustLoss, sim.tick);
