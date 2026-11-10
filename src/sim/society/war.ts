@@ -238,6 +238,8 @@ export type WarStats = {
   /** Militia raised, and gone back to the people at the wars' ends. */
   militia: number;
   militiaBack: number;
+  /** Wars declared on a mother in a rebellion (two fronts). */
+  vsRebelMother: number;
   /** WAR_PROFILE: ms of the slowest rebellion check step (a declaration included). */
   rebelMax: number;
   /** WAR_PROFILE: ms of the weekly and yearly parts (sum, calls, worst). */
@@ -527,6 +529,7 @@ export function createWar(seed: number, cellCount: number): WarState {
       rebRatioSum: 0,
       militia: 0,
       militiaBack: 0,
+      vsRebelMother: 0,
       rebelMax: 0,
       weekMs: 0,
       weekCalls: 0,
@@ -810,6 +813,49 @@ function worldRoom(w: WarState): number {
 }
 
 /**
+ * Whether people `b` may be attacked: it is at war with nobody, or only
+ * with its own rebels (a mother in a rebellion; she then fights on two fronts).
+ */
+function openToAttack(w: WarState, b: number): boolean {
+  if (w.enemy[b] === 0) return true;
+  const q = w.civWar[b];
+  return w.motherBusy[b] > 0 && q >= 0 && w.wLive[q] === 1 && w.wRebel[q] === 1 && w.wAtt[q] === b;
+}
+
+/** Whether `civ`, the mother of rebellion `s`, is also at war elsewhere (two fronts). */
+function onTwoFronts(w: WarState, s: number, civ: number): boolean {
+  if (w.wRebel[s] !== 1 || w.wAtt[s] !== civ) return false;
+  for (let q = 0; q < MAX_WARS; q++) if (q !== s && w.wLive[q] && w.side[q * PAIRS + civ] >= 0) return true;
+  return false;
+}
+
+/** Share of `civ`'s soldiers its armies in rebellion `s` may hold on two fronts: one army's (WAR.mainArmies of WAR.maxArmies) of WAR.sendShare. */
+function rebelFrontShare(): number {
+  return (WAR.sendShare * WAR.mainArmies) / WAR.maxArmies;
+}
+
+/**
+ * The mother of rebellion `s` is attacked: her armies against the rebels
+ * shrink to the two-front share (rebelFrontShare of WAR.sendShare), the rest
+ * goes home and can defend (up to WAR.reliefArmies armies, the 4-army cap).
+ */
+function splitFronts(sim: Simulation, s: number, civ: number): void {
+  const w = sim.war;
+  const keep = rebelFrontShare() / WAR.sendShare;
+  sold.fill(0);
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (!w.live[a] || w.aWar[a] !== s || w.aCiv[a] !== civ) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) {
+      const i = a * TROOP_TYPES + t;
+      const back = Math.floor(w.aN[i] * (1 - keep));
+      w.aN[i] -= back;
+      sold[t] += back;
+    }
+  }
+  for (let t = 0; t < TROOP_TYPES; t++) takeAway(sim, civ, t, sold[t], false);
+}
+
+/**
  * Raises what `civ` may still have in war `s`: the attacker up to
  * WAR.mainArmies, the defender up to WAR.reliefArmies (armies not
  * retreating), all its armies at most WAR.maxArmies, the world WAR.worldArmies.
@@ -825,7 +871,8 @@ function reraise(sim: Simulation, s: number, civ: number): void {
   const main = civ === w.wAtt[s] || civ === w.wDef[s] || group;
   const cap = !main ? ALLY.armies : civ === w.wAtt[s] ? WAR.mainArmies : WAR.reliefArmies;
   const room = Math.min(cap - active, WAR.maxArmies - countArmies(w, civ), worldRoom(w));
-  if (room > 0) raiseArmies(sim, s, civ, room, main ? WAR.sendShare : ALLY.send);
+  const share = !main ? ALLY.send : onTwoFronts(w, s, civ) ? rebelFrontShare() : WAR.sendShare;
+  if (room > 0) raiseArmies(sim, s, civ, room, share);
 }
 
 /** Fills `adj` (civs x civs): 1 where two peoples have settlements on adjacent hexes (a common border). */
@@ -860,7 +907,7 @@ function markCandidates(sim: Simulation, a: number, civs: number): boolean {
   if (sa <= 0) return false;
   let any = false;
   for (let b = 1; b < civs; b++) {
-    if (b === a || !sim.civs[b] || w.enemy[b] !== 0 || w.motherBusy[b] > 0 || adj[a * civs + b] === 0 || inTruce(sim, a, b)) continue;
+    if (b === a || !sim.civs[b] || !openToAttack(w, b) || adj[a * civs + b] === 0 || inTruce(sim, a, b)) continue;
     // Allies never attack each other.
     if (w.pact[a * PAIRS + b] === Pact.Alliance) continue;
     if (!mayOutweigh(sim, a, b, WAR.ratio)) continue;
@@ -974,7 +1021,9 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
   const def = sim.world.owner[goal];
   let s = 0;
   while (s < MAX_WARS && w.wLive[s]) s++;
-  if (s === MAX_WARS || def === 0 || def === att || w.enemy[att] !== 0 || w.enemy[def] !== 0) return -1;
+  if (s === MAX_WARS || def === 0 || def === att || w.enemy[att] !== 0 || !openToAttack(w, def)) return -1;
+  // A mother fighting her rebels is attacked on a second front: her rebel war keeps one army's share.
+  const rebelWar = w.enemy[def] !== 0 ? w.civWar[def] : -1;
   w.wLive[s] = 1;
   w.wAtt[s] = att;
   w.wDef[s] = def;
@@ -1003,6 +1052,10 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
   w.version++;
   const st = w.stats;
   st.declared++;
+  if (rebelWar >= 0) {
+    st.vsRebelMother++;
+    splitFronts(sim, rebelWar, def);
+  }
   if (!w.wSplinter[s]) st.estDeclared++;
   if ((sim.military.strength[def] ?? 0) <= 0) st.zeroDefender++;
   if (w.wars > st.maxWars) st.maxWars = w.wars;

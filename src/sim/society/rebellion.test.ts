@@ -10,7 +10,7 @@ import { MIL, TROOP_TYPES, Troop, updateMilitary } from './military';
 import { MOOD_NEW_PEOPLE, MOOD_REVOLUTION_LOST, MOOD_REVOLUTION_WON, addMood, cellOwners, hasSeat } from './satisfaction';
 import { TICKS_PER_YEAR, createSimulation, livingCivilizations, splitCutOffLand, stepSimulation, type Simulation } from './simulation';
 import { REBEL_CHECK, checkRebellion, continueRebellion, countRestless, inRebellion, isDissatisfied, measureRebellion, militiaOf, startRebellion } from './rebellion';
-import { EndType, MAX_ARMIES, MAX_GOALS, WAR, advanceWar, disbandArmy, endWar, finishGathering, runWarYear } from './war';
+import { EndType, MAX_ARMIES, MAX_GOALS, WAR, advanceWar, disbandArmy, endWar, finishGathering, runWarYear, startWar } from './war';
 
 // War phase 5 ("Design Documents/Requirement Krieg.md", section 8): uprisings as war.
 
@@ -410,7 +410,7 @@ test('a people in a running rebellion (either side) sees no other rebellion', ()
   assert.equal(checkRebellion(sim, MOTHER), false);
   assert.equal(checkRebellion(sim, rebel), false);
   assert.equal(startRebellion(sim, MOTHER, true), -1);
-  // A mother in a rebellion declares no other war and is no target.
+  // A mother in a rebellion declares no other war (she may be attacked: see the two-front test).
   assert.equal(sim.war.motherBusy[MOTHER], 1);
 });
 
@@ -525,4 +525,94 @@ test('land cut off from its capital still splits off at once as its own people, 
   assert.equal(sim.war.wars, 0);
   assert.equal(sim.war.rebelMother[civ.id], 0);
   assert.ok(sim.chronicle.some((e) => e.text.includes(`cut off from the ${sim.civs[MOTHER]!.name}`)));
+});
+
+test('a mother in a rebellion can be attacked: two fronts within her 4 armies (1 against the rebels with a quarter of the share, 3 to defend), each war ends on its own', () => {
+  const sim = grown();
+  const w = sim.war;
+  const m = sim.military;
+  const cap = sim.civs[MOTHER]!.capital;
+  const groups = roadGroups(sim, MOTHER, cap).sort((a, b) => b.length - a.length);
+  // Seats in two settlements that stay with the mother, for her relief armies.
+  const stay = groups.slice(1).flat();
+  for (const c of stay.slice(0, 2)) placeSeat(sim, c);
+  for (const c of settledOf(sim, MOTHER)) m.soldiers[c * TROOP_TYPES + Troop.Melee] += 40;
+  dissatisfy(sim, groups[0]);
+  const s = startRebellion(sim, MOTHER);
+  assert.ok(s >= 0);
+  const leader = w.wDef[s];
+  const motherArmies = (war: number) => {
+    let n = 0;
+    let soldiers = 0;
+    for (let a = 0; a < MAX_ARMIES; a++) {
+      if (!w.live[a] || w.aCiv[a] !== MOTHER || w.aWar[a] !== war) continue;
+      n++;
+      for (let t = 0; t < TROOP_TYPES; t++) soldiers += w.aN[a * TROOP_TYPES + t];
+    }
+    return { n, soldiers };
+  };
+  for (let a = 0; a < MAX_ARMIES; a++) finishGathering(sim, a);
+  const before = motherArmies(s);
+  assert.equal(before.n, 1);
+  assert.ok(before.soldiers > 0);
+  // A rebel group is still no target; the mother is.
+  const att = livingCivilizations(sim).map((c) => c.id).find((p) => p !== MOTHER && w.rebelMother[p] === 0)!;
+  assert.equal(startWar(sim, att, sim.civs[leader]!.capital), -1);
+  const s2 = startWar(sim, att, cap);
+  assert.ok(s2 >= 0);
+  assert.equal(w.stats.vsRebelMother, 1);
+  assert.equal(w.enemy[MOTHER], att);
+  assert.equal(w.civWar[MOTHER], s2);
+  for (let a = 0; a < MAX_ARMIES; a++) finishGathering(sim, a);
+  // The rebel front keeps a quarter of its army; the rest went home and defends in up to 3 relief armies.
+  const rebelFront = motherArmies(s);
+  const defense = motherArmies(s2);
+  assert.equal(rebelFront.n, 1);
+  assert.ok(Math.abs(rebelFront.soldiers - before.soldiers / 4) <= TROOP_TYPES, `${rebelFront.soldiers} of ${before.soldiers}`);
+  assert.ok(defense.n >= 1 && defense.n <= WAR.reliefArmies, `${defense.n} defending armies`);
+  assert.ok(rebelFront.n + defense.n <= WAR.maxArmies);
+  assert.ok(defense.soldiers > rebelFront.soldiers);
+  // Soldiers count once: away from their cells exactly as many as in the mother's armies.
+  let away = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === MOTHER) for (let t = 0; t < TROOP_TYPES; t++) away += w.away[c * TROOP_TYPES + t];
+  assert.ok(Math.abs(away - rebelFront.soldiers - defense.soldiers) <= 2 * TROOP_TYPES);
+  // The outside war ends: the rebellion goes on and is her war again.
+  endWar(sim, s2, EndType.AttackerGaveUp);
+  assert.equal(w.wLive[s], 1);
+  assert.equal(w.enemy[MOTHER], w.wDef[s]);
+  assert.equal(w.civWar[MOTHER], s);
+  // Attacked again, then the rebellion ends first: the outside war goes on.
+  const s3 = startWar(sim, att, cap);
+  assert.ok(s3 >= 0);
+  endWar(sim, s, EndType.Exhausted);
+  assert.equal(w.wLive[s3], 1);
+  assert.equal(w.enemy[MOTHER], att);
+  assert.equal(w.civWar[MOTHER], s3);
+  assert.equal(w.motherBusy[MOTHER], 0);
+});
+
+test('the mother never gives up her rebellion while she is beaten on the other front', () => {
+  const sim = grown();
+  const w = sim.war;
+  const chance = WAR.chance;
+  WAR.chance = 0;
+  try {
+    const cap = sim.civs[MOTHER]!.capital;
+    dissatisfy(sim, roadGroups(sim, MOTHER, cap)[0]);
+    const s = startRebellion(sim, MOTHER);
+    const att = livingCivilizations(sim).map((c) => c.id).find((p) => p !== MOTHER && w.rebelMother[p] === 0)!;
+    const s2 = startWar(sim, att, cap);
+    assert.ok(s >= 0 && s2 >= 0);
+    // The goal occupied and the mother far weaker: she gives up the outside war, not the rebellion.
+    w.wOccupied[s2] = 1;
+    sim.military.strength[MOTHER] = 0.01;
+    sim.military.strength[att] = 1000;
+    for (let p = 1; p < sim.civs.length; p++) if (sim.civs[p] && w.rebelMother[p] === MOTHER) sim.military.strength[p] = 1000;
+    runWarYear(sim);
+    assert.equal(w.wLive[s2], 0);
+    assert.equal(w.wLive[s], 1);
+    assert.equal(w.civWar[MOTHER], s);
+  } finally {
+    WAR.chance = chance;
+  }
 });

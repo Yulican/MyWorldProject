@@ -170,6 +170,7 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     'reb: no free people id': st.rebNoRoom,
     'wars total (normal + rebel)': st.declared + st.rebDeclared,
     'wars declared': st.declared,
+    'wars vs a mother in rebellion': (st as { vsRebelMother?: number }).vsRebelMother ?? 0,
     'wars vs established peoples': st.estDeclared,
     'wars vs own splinters': st.declared - st.estDeclared,
     'est.: battles': st.estBattles,
