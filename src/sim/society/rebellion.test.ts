@@ -10,7 +10,7 @@ import { MIL, TROOP_TYPES, Troop, updateMilitary } from './military';
 import { MOOD_NEW_PEOPLE, MOOD_REVOLUTION_LOST, MOOD_REVOLUTION_WON, addMood, cellOwners, hasSeat } from './satisfaction';
 import { TICKS_PER_YEAR, createSimulation, livingCivilizations, splitCutOffLand, stepSimulation, type Simulation } from './simulation';
 import { REBEL_CHECK, checkRebellion, continueRebellion, countRestless, inRebellion, isDissatisfied, measureRebellion, militiaOf, startRebellion } from './rebellion';
-import { EndType, MAX_ARMIES, MAX_GOALS, WAR, advanceWar, disbandArmy, endWar, finishGathering, runWarYear, startWar } from './war';
+import { ArmyState, EndType, MAX_ARMIES, MAX_GOALS, WAR, advanceWar, disbandArmy, endWar, finishGathering, rallyPoint, runWarYear, startWar } from './war';
 
 // War phase 5 ("Design Documents/Requirement Krieg.md", section 8): uprisings as war.
 
@@ -581,22 +581,52 @@ test('a mother in a rebellion can be attacked: two fronts within her 4 armies (1
   assert.equal(w.wLive[s], 1);
   assert.equal(w.enemy[MOTHER], w.wDef[s]);
   assert.equal(w.civWar[MOTHER], s);
-  // One front again: her army against the rebels is back at full size (70 % of her soldiers), soldiers counted once.
-  const full = motherArmies(s);
-  assert.equal(full.n, 1);
+  // One front again: no soldier joins her army at once. A reinforcement army gathers at her rally point (its
+  // contingents on their way) and then marches like any army; with it she is back at the full 70 % share.
+  let old = -1;
+  let fresh = -1;
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (!w.live[a] || w.aCiv[a] !== MOTHER || w.aWar[a] !== s) continue;
+    if (w.aState[a] === ArmyState.Gathering) fresh = a;
+    else old = a;
+  }
+  assert.ok(old >= 0 && fresh >= 0, 'her army and a gathering reinforcement');
+  assert.equal(motherArmies(s).n, 2);
   assert.equal(motherArmies(s2).n, 0);
+  const armyOf = (a: number) => w.aN[a * TROOP_TYPES] + w.aN[a * TROOP_TYPES + 1] + w.aN[a * TROOP_TYPES + 2];
+  assert.equal(armyOf(old), rebelFront.soldiers, 'nobody joined the old army');
+  assert.equal(w.aCell[fresh], rallyPoint(sim, s, MOTHER));
+  assert.ok(w.aWait[fresh] > 0, 'contingents still on their way');
+  const atStart = armyOf(fresh);
   let share = 0;
-  let awayNow = 0;
   for (let c = 0; c < sim.world.cellCount; c++) {
     if (sim.world.owner[c] !== MOTHER) continue;
-    for (let t = 0; t < TROOP_TYPES; t++) {
-      share += Math.floor(WAR.sendShare * m.soldiers[c * TROOP_TYPES + t]);
-      awayNow += w.away[c * TROOP_TYPES + t];
-    }
+    for (let t = 0; t < TROOP_TYPES; t++) share += Math.floor(WAR.sendShare * m.soldiers[c * TROOP_TYPES + t]);
   }
-  assert.ok(full.soldiers > rebelFront.soldiers * 2, `${full.soldiers} after ${rebelFront.soldiers}`);
-  assert.ok(Math.abs(full.soldiers - share) <= 2 * TROOP_TYPES, `${full.soldiers} of ${share}`);
-  assert.ok(Math.abs(awayNow - full.soldiers) <= 2 * TROOP_TYPES);
+  assert.ok(atStart + armyOf(old) < share - 2 * TROOP_TYPES, 'not at full size before the contingents arrive');
+  // Weeks pass: the contingents arrive, the army sets out and marches.
+  const rally = w.aCell[fresh];
+  disbandRebels(sim, s);
+  let weeks = 0;
+  while (w.live[fresh] && w.aState[fresh] === ArmyState.Gathering && weeks < WAR.gatherWeeks + 1) {
+    week(sim);
+    disbandRebels(sim, s);
+    weeks++;
+  }
+  assert.ok(weeks >= 1 && w.live[fresh] === 1 && w.aState[fresh] === ArmyState.Marching, `set out after ${weeks} weeks`);
+  assert.ok(armyOf(fresh) > atStart);
+  let awayNow = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === MOTHER) for (let t = 0; t < TROOP_TYPES; t++) awayNow += w.away[c * TROOP_TYPES + t];
+  const total = motherArmies(s).soldiers;
+  assert.ok(total > rebelFront.soldiers * 2, `${total} after ${rebelFront.soldiers}`);
+  assert.ok(Math.abs(awayNow - total) <= 2 * TROOP_TYPES, 'soldiers counted once');
+  assert.ok(total <= share + 2 * TROOP_TYPES);
+  for (let t = 0; t < 30 && w.live[fresh] && w.aCell[fresh] === rally; t++) {
+    week(sim);
+    disbandRebels(sim, s);
+  }
+  assert.ok(!w.live[fresh] || w.aCell[fresh] !== rally || rally === w.wGoal[s], 'it marches towards the rebel goal');
+  assert.equal(w.wLive[s], 1);
   // Attacked again, then the rebellion ends first: the outside war goes on.
   const s3 = startWar(sim, att, cap);
   assert.ok(s3 >= 0);
