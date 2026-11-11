@@ -57,6 +57,7 @@ Entschieden (Nutzer), Phase 3; Zahlen sind Startwerte (kalibrieren (Simulation))
   - **Angreifer:** Sammelpunkt ist der eigene Sitz, der dem Kriegsziel am nächsten liegt (eine Hauptarmee).
   - **Verteidiger:** Sammelpunkte sind seine nächsten anderen Sitze (nicht der belagerte Zielsitz), bis zu 3 Entsatzarmeen aus verschiedenen Sitzen. Sie marschieren zum Ziel und greifen an, sobald sie (mit der Besatzung) gewinnen können, sonst im Zwangsmonat (Abschnitt 5). Hat der Verteidiger keinen anderen Sitz, sammelt er sich als Besatzung im Zielsitz.
 - **Rückzug** (entschieden): Geschlagene Armeen und abziehende Belagerer ziehen mit den Soldaten, die nach der 50-%-Rückzugsregel (Abschnitt 3) übrig sind, zum nächsten eigenen Sitz, mit normaler Geschwindigkeit. Gibt es keinen innerhalb von 25 Reisekosten, gehen sie sofort heim. Auf dem Weg können sie angegriffen werden, greifen aber selbst nicht an. Am Kriegsende gehen alle Armeen heim.
+- **Soldaten sind nur dort verfügbar, wo sie wirklich sind** (entschieden): Sie zählen erst, wenn sie mit Armeegeschwindigkeit angekommen sind. (a) Wird ein Mutterland in einer Rebellion angegriffen, marschieren die Soldaten, die ihre Rebellenarmee verlassen, zu seiner Verteidigung und zählen dort erst bei der Ankunft. (b) Erreicht eine geschlagene Armee ihren Sitz, schickt sie ihre Soldaten zu Fuß heim; sie gelten bis zur Ankunft als abwesend. (c) Das Auffüllen der Rebellenarmee des Mutterlands nach seinem äußeren Krieg wird als normale Armee aufgestellt, die sich sammelt und marschiert; sie kämpft neben der alten, nicht mit ihr verschmolzen.
 - **Zahl der Armeen:** höchstens 4 je Volk (1 Hauptarmee, 3 Entsatzarmeen), höchstens 32 Armeen auf der Welt.
 - **Marsch:** 1 Reisekosteneinheit pro Woche (ein Straßenhex kostet meist 0,5). Der Weg geht über Straßen und freies Gelände, durch feindliches Land immer, durch befreundetes nur bei offener Grenze. Keine Schiffe. Der Weg wird nur bei Zielwechsel neu berechnet.
 - **Versorgung:** keine; der Sold läuft weiter aus der Heimatkasse (Entlassung bei leerer Kasse wie in Abschnitt 2). Hat eine Armee 2 Jahre lang kein Ziel, kehrt sie heim.
@@ -208,6 +209,7 @@ Phase 3, entschieden (nach der Simulation, Abschnitt 14): keine Mindeststärke f
 Phase 3, entschieden: siehe Abschnitte 4 bis 6 (Nutzen der Zielwahl, Besetzung, Hauptstadt ohne Annexion, ein Kriegsziel je Krieg, Zeitpunkt der Verteidigung).
 
 Später (bewusste Vereinfachungen für jetzt):
+- Heimkehr bei Kriegsende, verspätete Kontingente, Miliz und Verluste werden sofort verbucht (ohne Marsch).
 - Belagert wird nur das Kriegsziel (nicht andere Sitze auf dem Weg).
 - Die 30 %, die zu Hause bleiben, kämpfen nicht.
 - Armeen werden jedes Jahr neu aufgestellt.
