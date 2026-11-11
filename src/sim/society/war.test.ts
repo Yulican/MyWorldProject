@@ -579,6 +579,20 @@ test('a beaten army retreats with what is left to its nearest own seat and goes 
     assert.equal(w.live[a], 0, 'home at the seat');
     assert.ok(weeks >= path.length / 2, 'at army speed');
     assert.equal(w.stats.retreatsHome, 1);
+    // From the seat its soldiers walk on to their settlements: away (not available) until they arrive.
+    let walking = 0;
+    for (const c of settledOf(sim, att)) walking += w.homeN[c * TROOP_TYPES + Troop.Melee];
+    assert.ok(walking > 0, 'they walk home from the seat');
+    assert.ok(w.homeward > 0);
+    for (const c of settledOf(sim, att)) assert.ok(w.away[c * TROOP_TYPES + Troop.Melee] >= w.homeN[c * TROOP_TYPES + Troop.Melee]);
+    const far = settledOf(sim, att).find((c) => w.homeN[c * TROOP_TYPES + Troop.Melee] > 0 && w.homeAt[c] > sim.tick + 1);
+    for (let k = 0; k < 60 && w.homeward > 0; k++) {
+      if (far !== undefined && sim.tick + 1 < w.homeAt[far]) {
+        week(sim);
+        assert.ok(w.away[far * TROOP_TYPES + Troop.Melee] > 0 || w.homeAt[far] <= sim.tick, 'not home before arriving');
+      } else week(sim);
+    }
+    assert.equal(w.homeward, 0);
     for (const c of settledOf(sim, att)) assert.equal(w.away[c * TROOP_TYPES + Troop.Melee], 0, 'its soldiers count in their cells again');
   }
 });

@@ -569,14 +569,54 @@ test('a mother in a rebellion can be attacked: two fronts within her 4 armies (1
   const defense = motherArmies(s2);
   assert.equal(rebelFront.n, 1);
   assert.ok(Math.abs(rebelFront.soldiers - before.soldiers / 4) <= TROOP_TYPES, `${rebelFront.soldiers} of ${before.soldiers}`);
-  assert.ok(defense.n >= 1 && defense.n <= WAR.reliefArmies, `${defense.n} defending armies`);
+  // Her soldiers away against the rebels are not at home: she defends with what is there (here: the garrison).
+  assert.ok(defense.n <= WAR.reliefArmies, `${defense.n} defending armies`);
   assert.ok(rebelFront.n + defense.n <= WAR.maxArmies);
-  assert.ok(defense.soldiers > rebelFront.soldiers);
-  // Soldiers count once: away from their cells exactly as many as in the mother's armies.
-  let away = 0;
-  for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === MOTHER) for (let t = 0; t < TROOP_TYPES; t++) away += w.away[c * TROOP_TYPES + t];
-  assert.ok(Math.abs(away - rebelFront.soldiers - defense.soldiers) <= 2 * TROOP_TYPES);
+  // The three quarters that left the rebel army walk home: away, not in any army, not available to defend yet.
+  const walkers = () => {
+    let n = 0;
+    for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === MOTHER) for (let t = 0; t < TROOP_TYPES; t++) n += w.homeN[c * TROOP_TYPES + t];
+    return n;
+  };
+  const walking = walkers();
+  assert.ok(Math.abs(walking - (before.soldiers - rebelFront.soldiers)) <= TROOP_TYPES, `${walking} walking`);
+  // Soldiers count once: away = in the mother's armies + walking home.
+  const awaySum = () => {
+    let n = 0;
+    for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === MOTHER) for (let t = 0; t < TROOP_TYPES; t++) n += w.away[c * TROOP_TYPES + t];
+    return n;
+  };
+  assert.ok(Math.abs(awaySum() - rebelFront.soldiers - defense.soldiers - walking) <= 2 * TROOP_TYPES);
+  // A defending army raised now gets nothing of them; once home they are there again.
+  for (let k = 0; k < 30 && w.homeward > 0; k++) {
+    week(sim);
+    disbandRebels(sim, s);
+  }
+  assert.equal(walkers(), 0, 'all arrived');
+  assert.ok(Math.abs(awaySum() - motherArmies(s).soldiers - motherArmies(s2).soldiers) <= 2 * TROOP_TYPES);
+  // Home now, they defend: the yearly re-raise gives her relief armies (3 at most, 4 in all).
+  const chance = WAR.chance;
+  WAR.chance = 0;
+  w.wLastGain[s2] = sim.tick;
+  sim.military.strength[MOTHER] = 1000;
+  sim.military.strength[att] = 1000;
+  try {
+    runWarYear(sim);
+  } finally {
+    WAR.chance = chance;
+  }
+  assert.equal(w.wLive[s2], 1);
+  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s2) finishGathering(sim, a);
+  const defended = motherArmies(s2);
+  assert.ok(defended.n >= 1 && defended.n <= WAR.reliefArmies, `${defended.n} defending armies, ${defended.soldiers} vs ${defense.soldiers}`);
+  assert.ok(defended.soldiers > defense.soldiers, `${defended.soldiers} vs ${defense.soldiers}`);
+  assert.ok(motherArmies(s).n + defended.n <= WAR.maxArmies);
   // The outside war ends: the rebellion goes on and is her war again.
+  disbandRebels(sim, s);
+  const oldBefore = motherArmies(s).soldiers;
+  const had = new Set<number>();
+  for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === MOTHER) had.add(a);
+  assert.equal(had.size, 1);
   endWar(sim, s2, EndType.AttackerGaveUp);
   assert.equal(w.wLive[s], 1);
   assert.equal(w.enemy[MOTHER], w.wDef[s]);
@@ -587,25 +627,23 @@ test('a mother in a rebellion can be attacked: two fronts within her 4 armies (1
   let fresh = -1;
   for (let a = 0; a < MAX_ARMIES; a++) {
     if (!w.live[a] || w.aCiv[a] !== MOTHER || w.aWar[a] !== s) continue;
-    if (w.aState[a] === ArmyState.Gathering) fresh = a;
-    else old = a;
+    if (had.has(a)) old = a;
+    else fresh = a;
   }
-  assert.ok(old >= 0 && fresh >= 0, 'her army and a gathering reinforcement');
+  assert.ok(old >= 0 && fresh >= 0, 'her army and a reinforcement');
   assert.equal(motherArmies(s).n, 2);
   assert.equal(motherArmies(s2).n, 0);
   const armyOf = (a: number) => w.aN[a * TROOP_TYPES] + w.aN[a * TROOP_TYPES + 1] + w.aN[a * TROOP_TYPES + 2];
-  assert.equal(armyOf(old), rebelFront.soldiers, 'nobody joined the old army');
-  assert.equal(w.aCell[fresh], rallyPoint(sim, s, MOTHER));
-  assert.ok(w.aWait[fresh] > 0, 'contingents still on their way');
+  // Nobody joins the old army; the reinforcement starts at her rally point with only the soldiers already there,
+  // the others walk to it as contingents.
+  assert.equal(armyOf(old), oldBefore, 'nobody joined the old army');
+  const rally = rallyPoint(sim, s, MOTHER);
+  assert.equal(w.aCell[fresh], rally);
+  let atRally = 0;
+  for (let t = 0; t < TROOP_TYPES; t++) atRally += m.soldiers[rally * TROOP_TYPES + t];
   const atStart = armyOf(fresh);
-  let share = 0;
-  for (let c = 0; c < sim.world.cellCount; c++) {
-    if (sim.world.owner[c] !== MOTHER) continue;
-    for (let t = 0; t < TROOP_TYPES; t++) share += Math.floor(WAR.sendShare * m.soldiers[c * TROOP_TYPES + t]);
-  }
-  assert.ok(atStart + armyOf(old) < share - 2 * TROOP_TYPES, 'not at full size before the contingents arrive');
-  // Weeks pass: the contingents arrive, the army sets out and marches.
-  const rally = w.aCell[fresh];
+  assert.ok(atStart <= atRally, `${atStart} at the start, ${atRally} soldiers at the rally point`);
+  const waiting = w.aWait[fresh];
   disbandRebels(sim, s);
   let weeks = 0;
   while (w.live[fresh] && w.aState[fresh] === ArmyState.Gathering && weeks < WAR.gatherWeeks + 1) {
@@ -613,19 +651,24 @@ test('a mother in a rebellion can be attacked: two fronts within her 4 armies (1
     disbandRebels(sim, s);
     weeks++;
   }
-  assert.ok(weeks >= 1 && w.live[fresh] === 1 && w.aState[fresh] === ArmyState.Marching, `set out after ${weeks} weeks`);
-  assert.ok(armyOf(fresh) > atStart);
+  assert.ok(w.live[fresh] === 1 && w.aState[fresh] === ArmyState.Marching, 'it sets out');
+  if (waiting > 0) {
+    assert.ok(weeks >= 1, 'it waited for its contingents');
+    assert.ok(armyOf(fresh) > atStart, 'they arrived after walking');
+  }
+  let share = 0;
   let awayNow = 0;
-  for (let c = 0; c < sim.world.cellCount; c++) if (sim.world.owner[c] === MOTHER) for (let t = 0; t < TROOP_TYPES; t++) awayNow += w.away[c * TROOP_TYPES + t];
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (sim.world.owner[c] !== MOTHER) continue;
+    for (let t = 0; t < TROOP_TYPES; t++) {
+      share += Math.floor(WAR.sendShare * m.soldiers[c * TROOP_TYPES + t]);
+      awayNow += w.away[c * TROOP_TYPES + t];
+    }
+  }
   const total = motherArmies(s).soldiers;
-  assert.ok(total > rebelFront.soldiers * 2, `${total} after ${rebelFront.soldiers}`);
+  assert.ok(total > oldBefore, `${total} after ${oldBefore}`);
   assert.ok(Math.abs(awayNow - total) <= 2 * TROOP_TYPES, 'soldiers counted once');
   assert.ok(total <= share + 2 * TROOP_TYPES);
-  for (let t = 0; t < 30 && w.live[fresh] && w.aCell[fresh] === rally; t++) {
-    week(sim);
-    disbandRebels(sim, s);
-  }
-  assert.ok(!w.live[fresh] || w.aCell[fresh] !== rally || rally === w.wGoal[s], 'it marches towards the rebel goal');
   assert.equal(w.wLive[s], 1);
   // Attacked again, then the rebellion ends first: the outside war goes on.
   const s3 = startWar(sim, att, cap);

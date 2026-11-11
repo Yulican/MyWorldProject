@@ -44,7 +44,8 @@ import { changeCiv, dischargeSoldiers, record, type Simulation } from './simulat
 //   all have arrived, at the latest after WAR.gatherWeeks; the late ones go home.
 // - A beaten army (a draw: both) retreats with what is left along the
 //   cheapest way to its nearest own seat and goes home there (its soldiers
-//   count in their cells again); a defender's army that reaches the goal seat
+//   walk on to their settlements at army speed and count in their cells only
+//   once there: sendHome, walkHome); a defender's army that reaches the goal seat
 //   stays there as its garrison. Besiegers that withdraw retreat the same way.
 //   Retreating armies don't attack, but are attacked where an enemy meets them.
 // - At the war's end every army goes home at once.
@@ -276,6 +277,14 @@ export type WarState = {
   wBattles: Uint16Array;
   /** Phase 5: 1 for a rebellion (the attacker is the mother, the defender side the rebel groups), its goals (one seat per rebel group), how many, which are occupied. */
   wRebel: Uint8Array;
+  /**
+   * Soldiers walking home (per cell and troop type; part of `away`, they are not at home before they arrive),
+   * the tick the cell's walkers arrive, and the cells with walkers. A beaten army that reaches its seat and the
+   * soldiers a split rebel army sends home walk back this way (sendHome).
+   */
+  homeN: Uint16Array;
+  homeAt: Int32Array;
+  homeward: number;
   /** 1 while the mother's army of rebellion `s` is cut to the two-front share (splitFronts) and not yet reinforced. */
   wSplit: Uint8Array;
   wGoals: Int32Array;
@@ -394,6 +403,9 @@ export function createWar(seed: number, cellCount: number): WarState {
     wBattles: new Uint16Array(MAX_WARS),
     wRebel: new Uint8Array(MAX_WARS),
     wSplit: new Uint8Array(MAX_WARS),
+    homeN: new Uint16Array(cellCount * TROOP_TYPES),
+    homeAt: new Int32Array(cellCount),
+    homeward: 0,
     wGoals: new Int32Array(MAX_WARS * MAX_GOALS).fill(-1),
     wGoalN: new Uint8Array(MAX_WARS),
     wGoalDone: new Uint8Array(MAX_WARS * MAX_GOALS),
@@ -856,7 +868,12 @@ function splitFronts(sim: Simulation, s: number, civ: number): void {
       sold[t] += back;
     }
   }
-  for (let t = 0; t < TROOP_TYPES; t++) takeAway(sim, civ, t, sold[t], false);
+  // They walk home from where the army stands and defend only once there.
+  let from = -1;
+  for (let a = 0; a < MAX_ARMIES && from < 0; a++) if (w.live[a] && w.aWar[a] === s && w.aCiv[a] === civ) from = w.aCell[a];
+  if (from < 0) return;
+  homeField(sim, s, civ, from);
+  for (let t = 0; t < TROOP_TYPES; t++) sendHome(sim, civ, t, sold[t]);
 }
 
 /**
@@ -1548,8 +1565,9 @@ function takeAway(sim: Simulation, civ: number, t: number, k: number, kill: bool
   for (let c = 0; c < n && k > 0; c++) {
     if (owner[c] !== civ) continue;
     const i = c * TROOP_TYPES + t;
-    const have = w.away[i];
-    if (have === 0) continue;
+    // Soldiers walking home are no army's.
+    const have = w.away[i] - w.homeN[i];
+    if (have <= 0) continue;
     const x = Math.min(k, have);
     w.away[i] -= x;
     k -= x;
@@ -1621,6 +1639,7 @@ const groupB = new Int32Array(MAX_ARMIES);
 /** One week of war (simulation.ts, every tick; nothing to do without wars): gathering, march and retreat, battles, sieges. */
 export function advanceWar(sim: Simulation): void {
   const w = sim.war;
+  if (w.homeward > 0) walkHome(sim);
   if (w.wars === 0) return;
   const t0 = clockStart();
   for (let s = 0; s < MAX_WARS; s++) if (w.wLive[s]) endIfGone(sim, s);
@@ -1818,7 +1837,95 @@ function retreatStep(sim: Simulation, a: number): void {
     // Back in the goal seat: it stays as its garrison.
     w.aState[a] = ArmyState.Marching;
     w.version++;
-  } else disbandArmy(sim, a);
+  } else armyHome(sim, a);
+}
+
+let homeCost = new Float32Array(0);
+
+/**
+ * Army `a` stands at its seat and goes home: its soldiers walk to their
+ * settlements at army speed (the cheapest way over land it may enter) and
+ * count as away until they arrive (walkHome).
+ */
+export function armyHome(sim: Simulation, a: number): void {
+  const w = sim.war;
+  const civ = w.aCiv[a];
+  homeField(sim, w.aWar[a], civ, w.aCell[a]);
+  for (let t = 0; t < TROOP_TYPES; t++) sendHome(sim, civ, t, Math.round(w.aN[a * TROOP_TYPES + t]));
+  removeArmy(w, a);
+}
+
+/** Travel cost from `from` to every cell over land `civ` may enter in war `s` (homeCost), up to WAR.fieldMax. */
+function homeField(sim: Simulation, s: number, civ: number, from: number): void {
+  const world = sim.world;
+  const owner = world.owner;
+  if (homeCost.length !== world.cellCount) homeCost = new Float32Array(world.cellCount);
+  const dist = homeCost;
+  dist.fill(Infinity);
+  fieldHeap.size = 0;
+  dist[from] = 0;
+  fieldHeap.push(from, 0);
+  while (fieldHeap.size > 0) {
+    const c = fieldHeap.pop();
+    const here = dist[c];
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      if (nb < 0 || isWaterBiome(world.biome[nb]) || (s >= 0 && !mayEnter(sim, s, owner[nb], civ))) continue;
+      const next = here + stepCost(world, c, d);
+      if (next >= dist[nb] || next > WAR.fieldMax) continue;
+      dist[nb] = next;
+      fieldHeap.push(nb, next);
+    }
+  }
+}
+
+/**
+ * `k` soldiers of type `t` of `civ`'s armies walk home (homeField first): from
+ * its settlements' soldiers away (in cell order, as takeAway), each arriving
+ * after its travel time (the longest way, WAR.fieldMax, beyond the field).
+ */
+function sendHome(sim: Simulation, civ: number, t: number, k: number): void {
+  const w = sim.war;
+  const owner = sim.world.owner;
+  const n = sim.world.cellCount;
+  for (let c = 0; c < n && k > 0; c++) {
+    if (owner[c] !== civ) continue;
+    const i = c * TROOP_TYPES + t;
+    const have = w.away[i] - w.homeN[i];
+    if (have <= 0) continue;
+    const x = Math.min(k, have);
+    k -= x;
+    const cost = homeCost[c] === Infinity ? WAR.fieldMax : homeCost[c];
+    const at = sim.tick + Math.max(1, Math.ceil(cost / WAR.speed));
+    let walking = false;
+    for (let u = 0; u < TROOP_TYPES; u++) if (w.homeN[c * TROOP_TYPES + u] > 0) walking = true;
+    if (!walking) {
+      w.homeward++;
+      w.homeAt[c] = at;
+    } else if (at > w.homeAt[c]) w.homeAt[c] = at;
+    w.homeN[i] = Math.min(65535, w.homeN[i] + x);
+  }
+}
+
+/** Weekly: soldiers walking home that arrived count in their settlements again. */
+function walkHome(sim: Simulation): void {
+  const w = sim.war;
+  const n = sim.world.cellCount;
+  let left = 0;
+  for (let c = 0; c < n; c++) {
+    const base = c * TROOP_TYPES;
+    if (w.homeN[base] === 0 && w.homeN[base + 1] === 0 && w.homeN[base + 2] === 0) continue;
+    if (w.homeAt[c] > sim.tick) {
+      left++;
+      continue;
+    }
+    for (let t = 0; t < TROOP_TYPES; t++) {
+      const i = base + t;
+      w.away[i] -= Math.min(w.away[i], w.homeN[i]);
+      w.homeN[i] = 0;
+    }
+  }
+  w.homeward = left;
 }
 
 /** Armies of both sides of a war on one hex fight, each (war, hex) once. */
@@ -2400,7 +2507,7 @@ function endRebelWar(sim: Simulation, s: number, type: number): void {
     for (let c = 0; c < n; c++) {
       if (!isGroup[owner[c]]) continue;
       owner[c] = mother;
-      for (let t = 0; t < TROOP_TYPES; t++) w.away[c * TROOP_TYPES + t] = 0;
+      for (let t = 0; t < TROOP_TYPES; t++) { w.away[c * TROOP_TYPES + t] = 0; w.homeN[c * TROOP_TYPES + t] = 0; }
       w.conqValue[c] = -WAR.conqMalus;
       w.conqTick[c] = sim.tick;
       w.conqUntil[c] = sim.tick + WAR.conqYears * TICKS_PER_YEAR;
@@ -2594,7 +2701,7 @@ function transferDistrict(sim: Simulation, s: number): boolean {
   for (let c = 0; c < n; c++) {
     if (!mask[c]) continue;
     owner[c] = att;
-    for (let t = 0; t < TROOP_TYPES; t++) w.away[c * TROOP_TYPES + t] = 0;
+    for (let t = 0; t < TROOP_TYPES; t++) { w.away[c * TROOP_TYPES + t] = 0; w.homeN[c * TROOP_TYPES + t] = 0; }
     dropContingent(w, c);
     w.conqValue[c] = -WAR.conqMalus;
     w.conqTick[c] = sim.tick;
@@ -2653,12 +2760,14 @@ export function reconcileWar(sim: Simulation): void {
       const i = c * TROOP_TYPES + t;
       if (w.away[i] === 0) continue;
       const civ = owner[c];
+      // Soldiers walking home stay away until they arrive (walkHome); only the rest is in armies.
+      if (w.away[i] > m.soldiers[i]) w.away[i] = m.soldiers[i];
+      if (w.homeN[i] > w.away[i]) w.homeN[i] = w.away[i];
       if (civ === 0 || armySum[civ * TROOP_TYPES + t] === 0) {
-        w.away[i] = 0;
+        w.away[i] = w.homeN[i];
         continue;
       }
-      if (w.away[i] > m.soldiers[i]) w.away[i] = m.soldiers[i];
-      awaySum[civ * TROOP_TYPES + t] += w.away[i];
+      awaySum[civ * TROOP_TYPES + t] += w.away[i] - w.homeN[i];
     }
   }
   for (let a = 0; a < MAX_ARMIES; a++) {
