@@ -52,6 +52,7 @@ test('the cities scenario fills every settled hex with buildings and puts ruins 
   const { createSimulation, generateWorld, TICKS_PER_YEAR, stepSimulation } = await import('../sim');
   const { fillWithBuildings } = await import('./fillBuildings');
   const { usableSlots } = await import('../sim/society/economy');
+  const { CityTier } = await import('../sim/society/buildings');
   const sim = createSimulation(generateWorld({ seed: 5 }));
   for (let t = 0; t < 60 * TICKS_PER_YEAR; t++) stepSimulation(sim);
   fillWithBuildings(sim);
@@ -61,6 +62,7 @@ test('the cities scenario fills every settled hex with buildings and puts ruins 
   for (let c = 0; c < world.cellCount; c++) {
     if (sim.cellPop[c] > 0) {
       assert.equal(world.buildings[c], usableSlots(sim, c), 'every slot the hex has');
+      assert.equal(world.cityTier[c], CityTier.BigCity, 'every settlement a big city');
       cities++;
     }
     if (world.ruins[c] > 0) ruins++;

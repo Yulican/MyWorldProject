@@ -15,6 +15,8 @@ import { hexEconomy, hexMilitary, hexSatisfaction, hexSupplyTerms, isWaterBiome,
 import {
   acknowledgeChronicle,
   armyStore,
+  shownAfter,
+  shownInDialog,
   createNewWorld,
   mapArmies,
   mapWar,
@@ -85,8 +87,9 @@ export function WorldScreen() {
     [],
   );
   const closePanel = () => setPanel({ kind: 'none' });
-  // A new chronicle entry pauses the game and is shown until the player closes it.
-  const entry = sim && chronicleDialogs && !sim.gameOver ? sim.chronicle[chronicleSeen] : undefined;
+  // An important chronicle entry pauses the game and is shown until the player closes it.
+  const next = sim && chronicleDialogs && !sim.gameOver ? sim.chronicle[chronicleSeen] : undefined;
+  const entry = next && shownInDialog(next) ? next : undefined;
   const goTo = (cell: number) => {
     mapController.current?.centerOn(cell);
     setPanel({ kind: 'hex', cell });
@@ -166,7 +169,7 @@ export function WorldScreen() {
         {sim && entry && (
           <ChronicleDialog
             entry={entry}
-            more={sim.chronicle.length - chronicleSeen - 1}
+            more={shownAfter(sim, chronicleSeen)}
             onGoTo={goTo}
             onOk={acknowledgeChronicle}
           />

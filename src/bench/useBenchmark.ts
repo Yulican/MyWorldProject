@@ -24,7 +24,7 @@ import {
 
 /** Log prefix CI looks for in logcat (scripts/run-benchmark.sh). */
 const LOG = 'MYWORLD_BENCH';
-/** Time for a new world's map layers to be built and laid out. */
+/** Time for a new world's map layers to be built and laid out, and the previous world collected (worldStore OLD_WORLD_GC_DELAY_MS). */
 const WORLD_SETTLE_MS = 1500;
 const ZOOM_SETTLE_MS = 500;
 const PAUSE_MS = 250;

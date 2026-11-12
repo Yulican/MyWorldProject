@@ -1,6 +1,6 @@
 # Requirement: Zufriedenheit pro Siedlung
 
-Status: **Umgesetzt auf Branch `feature/settlement-satisfaction`, Zahlen kalibriert** (siehe „Kalibrierung“ am Ende; die Regeln mit allen Werten stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
+Status (Chronik-Dialog nur noch für wichtige Einträge, noch nicht umgesetzt): **Umgesetzt auf Branch `feature/settlement-satisfaction`, Zahlen kalibriert** (siehe „Kalibrierung“ am Ende; die Regeln mit allen Werten stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
 Umsetzung werden sie per Simulation kalibriert (siehe „Abnahme“) und dir
 noch einmal vorgelegt. Spieltexte sind Englisch („Satisfaction“).
 
@@ -168,7 +168,17 @@ vorerst immer auf; später entscheidet die Außenpolitik.
 
 ## 5. Chronik-Dialog (zentrale Funktion)
 
-- Jeder Chronik-Eintrag öffnet einen Dialog, und das Spiel pausiert.
+- Nur wichtige Chronik-Einträge öffnen einen Dialog, und das Spiel pausiert:
+  Gründung, neues Volk (neuer Stamm), Aufstand, Abspaltung (auch abgeschnittener
+  Gebiete), Volk verschwunden, Spielende (eigener Screen), erster Kontakt
+  und Grenze geschlossen. Die Liste ist fest, es gibt keine Einstellung.
+- Alle anderen Einträge stehen nur still in der Chronik-Liste: kein Dialog,
+  keine Pause, kein Banner, keine Ungelesen-Markierung. Das sind
+  Steueränderungen, alle Handelsabkommen (geschlossen, gebrochen, beendet,
+  ausgelaufen), Migrationsabkommen (geschlossen, beendet), Freihandel,
+  Grenze geöffnet und die erste Werkstatt eines Volks.
+- Jeder Eintrag bleibt in der Chronik; die Zählung der Einträge für die
+  Messwerte ändert sich nicht.
 - Der Dialog enthält die Zeitsteuerung (Pause und Geschwindigkeiten). Beim
   Schließen läuft das Spiel mit der Einstellung weiter, die dort gewählt
   ist: vorher gelaufen → läuft weiter; im Dialog Pause gewählt → bleibt
@@ -178,7 +188,7 @@ vorerst immer auf; später entscheidet die Außenpolitik.
   sie aus. Dazu bekommt jeder Eintrag eine Zelle. Das betrifft die 6
   heutigen Arten: Gründung, Abspaltung abgeschnittener Gebiete, Abspaltung,
   Volk verschwunden, neuer Stamm und Spielende.
-- Kommen mehrere Einträge gleichzeitig, werden sie nacheinander gezeigt.
+- Kommen mehrere wichtige Einträge gleichzeitig, werden sie nacheinander gezeigt.
 - Im Benchmark werden keine Dialoge geöffnet und das Spiel nicht pausiert.
 
 ## 6. Anzeige

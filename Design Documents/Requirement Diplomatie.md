@@ -178,10 +178,12 @@ Wege und Verluste.
 - Kartenmodi kommen später.
 
 **Chronik**
-- Jedes diplomatische Ereignis kommt mit Dialog in die Chronik: erster
-  Kontakt, Grenze geöffnet oder geschlossen, Migrationsabkommen geschlossen
-  oder gebrochen, Freihandels- und Handelsabkommen geschlossen,
-  ausgelaufen oder gebrochen, Schonfrist läuft ab.
+- Jedes diplomatische Ereignis kommt in die Chronik. Einen Dialog mit Pause
+  (Zufriedenheit, Abschnitt 5) gibt es nur für den ersten Kontakt und für
+  eine geschlossene Grenze. Still in der Liste stehen: Grenze geöffnet,
+  Migrationsabkommen geschlossen oder beendet, Freihandel, Handelsabkommen
+  geschlossen, gebrochen, beendet oder ausgelaufen, Schonfrist läuft ab.
+  Es gibt keine Banner und keine Ungelesen-Markierung.
 - Bei der Kalibrierung messe ich die Einträge pro Spieljahr. Sind es zu
   viele, melde ich mich, bevor ich etwas ändere.
 

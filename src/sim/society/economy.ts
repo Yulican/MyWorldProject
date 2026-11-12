@@ -267,76 +267,104 @@ function yearsUntil(stock: number, cost: number, income: number): number {
  * supply or buildings changed.
  */
 export function runEconomy(sim: Simulation, yearEnd: boolean, first = 0, step = 1): boolean {
-  const { world, economy } = sim;
   let changed = false;
-  for (let c = first; c < world.cellCount; c += step) {
-    const people = sim.cellPop[c];
-    if (people === 0 && !sim.hasBuildings[c]) continue;
-    const stock = c * MATERIAL_COUNT;
-    if (people > 0) {
-      economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
-      economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
-      harvestLuxury(sim, c, yearEnd);
-    }
-    let busy = false;
-    let supplyChanged = false;
-    for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
-      const st = economy.state[s];
-      if (st === SlotState.Construction || st === SlotState.Repair) {
-        // Only people build; an empty hex's construction site waits.
-        if (people > 0) economy.work[s] -= 1 / STEPS_PER_YEAR;
-        if (economy.work[s] > 1e-4) {
-          // Government construction doesn't hold up the settlement's own.
-          if (s < c * SLOTS + GOV_SLOT) busy = true;
-        } else {
-          economy.state[s] = SlotState.Standing;
-          economy.work[s] = 0;
-          economy.unpaid[s] = 0;
-          supplyChanged = true;
-        }
-      } else if (st === SlotState.Standing && yearEnd && s < c * SLOTS + GOV_SLOT) {
-        // The government keeps up its own buildings (government.ts).
-        const b = BUILDINGS[economy.type[s]];
-        // Nobody maintains an empty hex's buildings.
-        if (
-          people > 0 &&
-          economy.stock[stock + Material.Wood] >= b.upkeepWood &&
-          economy.stock[stock + Material.Stone] >= b.upkeepStone
-        ) {
-          economy.stock[stock + Material.Wood] -= b.upkeepWood;
-          economy.stock[stock + Material.Stone] -= b.upkeepStone;
-          economy.unpaid[s] = 0;
-        } else if (++economy.unpaid[s] > UPKEEP_GRACE_YEARS) {
-          economy.state[s] = SlotState.Ruin;
-          economy.unpaid[s] = 0;
-          supplyChanged = true;
-        }
-      }
-    }
-    if (supplyChanged) {
-      updateTradeBuildings(sim, c);
-      updateCellSupply(sim, c);
-    }
-    if (people > 0) {
-      if (updateTradeNeeds(sim, c, sim.cellAdults[c], yearEnd, STEPS_PER_YEAR)) {
-        updateCellSupply(sim, c);
-        supplyChanged = true;
-      }
-      economy.goal[stock + Material.Wood] = 0;
-      economy.goal[stock + Material.Stone] = 0;
-      // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
-      const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
-      // Seats of government are the government's (government.ts).
-      const started = !busy && (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
-      if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
-      if (sim.trade.merchants[c] > 0) {
-        sendMerchants(sim, c);
-        buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
-      }
-    }
-    if (supplyChanged) changed = true;
+  for (let c = first; c < sim.world.cellCount; c += step) {
+    if ((sim.cellPop[c] > 0 || sim.hasBuildings[c]) && runCellEconomy(sim, c, yearEnd)) changed = true;
   }
   return changed;
+}
+
+/**
+ * runEconomy in parts: continues at hex `from` (every `step`-th) and stops
+ * after `hexes` hexes with people or buildings, or after a hex whose
+ * merchants searched their way (the costliest work of a hex). Returns the
+ * hex to continue at, or one at or past the last hex when done. Parts run
+ * one after another give exactly the same result as one runEconomy call.
+ */
+export function continueEconomy(sim: Simulation, yearEnd: boolean, from: number, step: number, hexes: number): number {
+  const { trade } = sim;
+  let c = from;
+  for (let done = 0; c < sim.world.cellCount && done < hexes; c += step) {
+    if (sim.cellPop[c] === 0 && !sim.hasBuildings[c]) continue;
+    const searchTick = trade.searchTick;
+    const searchesLeft = trade.searchesLeft;
+    runCellEconomy(sim, c, yearEnd);
+    done++;
+    if (trade.searchTick !== searchTick || trade.searchesLeft !== searchesLeft) {
+      c += step;
+      break;
+    }
+  }
+  return c;
+}
+
+/** The quarter's economy of one hex with people or buildings; whether its supply or buildings changed. */
+function runCellEconomy(sim: Simulation, c: number, yearEnd: boolean): boolean {
+  const { economy } = sim;
+  const people = sim.cellPop[c];
+  const stock = c * MATERIAL_COUNT;
+  if (people > 0) {
+    economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
+    economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
+    harvestLuxury(sim, c, yearEnd);
+  }
+  let busy = false;
+  let supplyChanged = false;
+  for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+    const st = economy.state[s];
+    if (st === SlotState.Construction || st === SlotState.Repair) {
+      // Only people build; an empty hex's construction site waits.
+      if (people > 0) economy.work[s] -= 1 / STEPS_PER_YEAR;
+      if (economy.work[s] > 1e-4) {
+        // Government construction doesn't hold up the settlement's own.
+        if (s < c * SLOTS + GOV_SLOT) busy = true;
+      } else {
+        economy.state[s] = SlotState.Standing;
+        economy.work[s] = 0;
+        economy.unpaid[s] = 0;
+        supplyChanged = true;
+      }
+    } else if (st === SlotState.Standing && yearEnd && s < c * SLOTS + GOV_SLOT) {
+      // The government keeps up its own buildings (government.ts).
+      const b = BUILDINGS[economy.type[s]];
+      // Nobody maintains an empty hex's buildings.
+      if (
+        people > 0 &&
+        economy.stock[stock + Material.Wood] >= b.upkeepWood &&
+        economy.stock[stock + Material.Stone] >= b.upkeepStone
+      ) {
+        economy.stock[stock + Material.Wood] -= b.upkeepWood;
+        economy.stock[stock + Material.Stone] -= b.upkeepStone;
+        economy.unpaid[s] = 0;
+      } else if (++economy.unpaid[s] > UPKEEP_GRACE_YEARS) {
+        economy.state[s] = SlotState.Ruin;
+        economy.unpaid[s] = 0;
+        supplyChanged = true;
+      }
+    }
+  }
+  if (supplyChanged) {
+    updateTradeBuildings(sim, c);
+    updateCellSupply(sim, c);
+  }
+  if (people > 0) {
+    if (updateTradeNeeds(sim, c, sim.cellAdults[c], yearEnd, STEPS_PER_YEAR)) {
+      updateCellSupply(sim, c);
+      supplyChanged = true;
+    }
+    economy.goal[stock + Material.Wood] = 0;
+    economy.goal[stock + Material.Stone] = 0;
+    // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
+    const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
+    // Seats of government are the government's (government.ts).
+    const started = !busy && (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
+    if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
+    if (sim.trade.merchants[c] > 0) {
+      sendMerchants(sim, c);
+      buildTradeRoad(sim, c, Math.floor(sim.tick / (STEPS_PER_YEAR * 13)));
+    }
+  }
+  return supplyChanged;
 }
 
 /** Whether a free neighbor could take settlers, so growing outward beats building (design doc, section 5). */

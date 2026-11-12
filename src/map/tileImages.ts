@@ -13,6 +13,13 @@ const TILES_PER_SLICE = 3;
 /** While the map moves only one per slice: a swipe into fresh map spreads its tiles (and their memory) over more frames. */
 const TILES_PER_SLICE_MOVING = 1;
 const SLICE_PAUSE_MS = 16;
+/**
+ * Shared by all layers (terrain and territory), so the pause holds between
+ * their slices too: each layer pausing on its own let both hand over a slice
+ * of new images in the same frame, e.g. after a snapshot or in fresh map.
+ * A layer kept waiting gets the next turn.
+ */
+const gate: { lastSliceAt: number; waiting: TileImages | null } = { lastSliceAt: -Infinity, waiting: null };
 /** Default memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
@@ -139,6 +146,17 @@ export class TileImages {
   private work = () => {
     this.timer = null;
     if (this.disposed) return;
+    if (this.queue.length === 0) {
+      if (gate.waiting === this) gate.waiting = null;
+      return;
+    }
+    const gap = gate.lastSliceAt + SLICE_PAUSE_MS - performance.now();
+    if (gap > 0 || (gate.waiting !== null && gate.waiting !== this)) {
+      if (gate.waiting === null) gate.waiting = this;
+      this.timer = setTimeout(this.work, Math.max(gap, 1));
+      return;
+    }
+    if (gate.waiting === this) gate.waiting = null;
     const start = Date.now();
     let rendered = 0;
     /** Only outdated tiles are left and the map moves: go on once it rests (setResting). */
@@ -174,6 +192,7 @@ export class TileImages {
       rendered++;
     }
     this.evict();
+    if (rendered > 0) gate.lastSliceAt = performance.now();
     if (rendered > 0) this.onReady();
     if (this.queue.length > 0 && !held) this.timer = setTimeout(this.work, rendered > 0 ? SLICE_PAUSE_MS : 0);
   };
@@ -202,6 +221,7 @@ export class TileImages {
   /** Stops rendering and frees all tiles once they can no longer be on screen. */
   dispose() {
     this.disposed = true;
+    if (gate.waiting === this) gate.waiting = null;
     if (this.timer !== null) clearTimeout(this.timer);
     for (const e of this.entries.values()) this.free(e);
     this.entries.clear();

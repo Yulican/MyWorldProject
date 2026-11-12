@@ -58,6 +58,13 @@ const FLING_AFTER_PINCH_MS = 150;
 const NO_TILES: ViewTiles = { x0: 0, x1: -1, y0: 0, y1: -1, detail: false, tier: 0 };
 /** Rings of tiles around the screen rendered ahead, so panning finds them ready. */
 const PREFETCH_TILES = 1;
+/**
+ * Tile images first drawn ahead of time per frame (see TileLayer): each is
+ * uploaded to the GPU when first drawn, which otherwise happens all at once
+ * when the view crosses into the prefetched ring (a diagonal swipe reveals a
+ * row and a column of tiles, both layers, in one frame).
+ */
+const WARM_PER_FRAME = 2;
 
 /**
  * Where the territory layer gets the society snapshot from: an external
@@ -464,6 +471,10 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
   countEvent('tileLayerRenders');
   const tileSet = useSharedValue<TileSet>(EMPTY_TILE_SET);
   const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
+  /** Images handed over but not drawn yet (UI thread), drawn ahead a few per frame. */
+  const warm = useSharedValue<SkImage[]>([]);
+  /** The images drawn ahead in this frame, kept if the view redraws in it too. */
+  const ahead = useSharedValue<SkImage[]>([]);
   const current = useRef<ViewTiles>(NO_TILES);
   const publish = useRef<() => void>(() => {});
   const onReady = useCallback(() => publish.current(), []);
@@ -565,12 +576,26 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
 
   const grid = { width: layers.width, chunkCols: layers.chunkCols, chunkRows: layers.chunkRows };
   const overviewRect = layers.overviewRect;
-  /** Records the tile picture for a view and image set (UI thread). */
-  const draw = (v: ViewTiles, set: TileSet) => {
+  /**
+   * Records the tile picture for a view and image set (UI thread), plus
+   * `ahead`: images drawn as an invisible dot in the middle of the view, so
+   * the GPU uploads them now instead of when they come into view.
+   */
+  const draw = (v: ViewTiles, set: TileSet, ahead: SkImage[] = []) => {
     'worklet';
     uiTileDraws.value += 1;
     picture.value = createPicture((canvas) => {
       const paint = Skia.Paint();
+      if (ahead.length > 0) {
+        const faint = Skia.Paint();
+        faint.setAlphaf(1 / 255);
+        const x = ((v.x0 + v.x1 + 1) / 2) * CHUNK_W;
+        const y = ((v.y0 + v.y1 + 1) / 2) * CHUNK_H;
+        const dst = Skia.XYWHRect(x, y, 0.5, 0.5);
+        for (const image of ahead) {
+          canvas.drawImageRect(image, Skia.XYWHRect(0, 0, image.width(), image.height()), dst, faint, true);
+        }
+      }
       if (!v.detail) {
         const image = set.overview;
         if (!image) return;
@@ -614,17 +639,48 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
   // Redraw when the view crosses a tile border (gestures, UI thread)...
   useAnimatedReaction(
     () => view.value,
-    (v) => draw(v, tileSet.value),
+    (v) => draw(v, tileSet.value, ahead.value),
   );
   // ...and when JS hands over new images: applied and drawn on the UI thread
   // right away, without waiting for the next movement.
   function showTiles(set: TileSet) {
     scheduleOnUI((next: TileSet) => {
       'worklet';
+      // Images off screen not drawn yet: new ones, and those still waiting
+      // from before (the ones on screen are drawn right below).
+      const v = view.value;
+      const prev = tileSet.value;
+      const onScreen: Record<number, boolean> = {};
+      for (const t of visibleTiles(v, grid)) onScreen[t.chunk] = true;
+      const pending: SkImage[] = [];
+      const waiting = warm.value;
+      const add = (images: Record<number, SkImage>, before: Record<number, SkImage>) => {
+        for (const k in images) {
+          const image = images[k];
+          if (!onScreen[k] && (before[k] !== image || waiting.indexOf(image) >= 0)) pending.push(image);
+        }
+      };
+      add(next.terrain, prev.terrain);
+      add(next.territory, prev.territory);
+      warm.value = pending;
       tileSet.value = next;
-      draw(view.value, next);
+      draw(v, next, ahead.value);
     }, set);
   }
+  // Off-screen images not drawn yet, a few per frame, ahead of being seen.
+  useFrameCallback(() => {
+    'worklet';
+    const pending = warm.value;
+    if (pending.length === 0) {
+      // Only ever one frame old: a replaced image is freed a while later.
+      if (ahead.value.length > 0) ahead.value = [];
+      return;
+    }
+    const batch = pending.slice(0, WARM_PER_FRAME);
+    warm.value = pending.slice(WARM_PER_FRAME);
+    ahead.value = batch;
+    draw(view.value, tileSet.value, batch);
+  });
 
   return <Picture picture={picture} />;
 });

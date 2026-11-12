@@ -1,5 +1,5 @@
 import { DIRECTION_COUNT, isWaterBiome, type Simulation } from '../sim';
-import { BUILDINGS, SLOTS, SlotState } from '../sim/society/buildings';
+import { BUILDINGS, SLOTS, SlotState, cityTier } from '../sim/society/buildings';
 import { updateCellSupply, usableSlots } from '../sim/society/economy';
 
 // The "cities" benchmark scenario: the busiest map the building feature can
@@ -32,6 +32,7 @@ export function fillWithBuildings(sim: Simulation): void {
     }
     sim.hasBuildings[c] = 1;
     world.buildings[c] = ruin ? 0 : slots;
+    world.cityTier[c] = cityTier(world.buildings[c], slots);
     world.ruins[c] = ruin ? 1 : 0;
     updateCellSupply(sim, c);
   }

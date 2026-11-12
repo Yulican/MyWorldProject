@@ -42,14 +42,6 @@ function dotSize(people: number): number {
   return people < 10 ? 0 : people < 25 ? 1 : 2;
 }
 
-/**
- * A settlement's icon by its standing buildings: 0 = tribe (a dot),
- * 1 = small city (1–2 buildings), 2 = big city (3–4).
- */
-function cityLevel(buildings: number): number {
-  return buildings === 0 ? 0 : buildings <= 2 ? 1 : 2;
-}
-
 /** Corner pair (unit offsets) of the hex edge facing each direction. */
 const EDGE_CORNERS = DIRECTION_OFFSETS.map(([dx, dy]) => {
   const angle = Math.atan2(dy, dx);
@@ -123,7 +115,7 @@ export function territoryTileSignature(
         continue;
       }
       mix(dotSize(world.population[c]));
-      mix(cityLevel(world.buildings[c]));
+      mix(world.cityTier[c]);
       mix(openEdges(world, c, owner));
       mix(warEdges(world, c, owner, war));
       mix(war.siege[c]);
@@ -288,7 +280,8 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       addFlag(outlines, seatFlags, x, y, false);
       seats++;
     }
-    const level = cityLevel(world.buildings[c]);
+    // City tier from the core (share of used slots): 0 tribe dot, 1 small, 2 big city.
+    const level = world.cityTier[c];
     if (level > 0) {
       addCity(pathFor(dots, owner), x, y, level);
       addCity(outlines, x, y, level);

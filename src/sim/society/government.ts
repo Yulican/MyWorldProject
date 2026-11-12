@@ -159,6 +159,27 @@ let seatBuildUpkeep = new Float64Array(0);
 /** Per civilization id: its seats, and GOV_TUNING.incomeShare of their potential income together. */
 let civSeatList: number[][] = [];
 let civBudget = new Float64Array(0);
+/**
+ * The hexes of every district in ascending order, for updateGovernmentProjects:
+ * those of district (seat) s are districtCells[districtStart[s] .. districtStart[s + 1]).
+ */
+let districtStart = new Int32Array(0);
+let districtCells = new Int32Array(0);
+
+/** Fills districtStart and districtCells from gov.district. */
+function listDistricts(sim: Simulation): void {
+  const district = sim.government.district;
+  const n = sim.world.cellCount;
+  if (districtStart.length !== n + 1) {
+    districtStart = new Int32Array(n + 1);
+    districtCells = new Int32Array(n);
+  } else districtStart.fill(0);
+  for (let c = 0; c < n; c++) if (district[c] >= 0) districtStart[district[c] + 1]++;
+  for (let s = 0; s < n; s++) districtStart[s + 1] += districtStart[s];
+  // Counting sort: a running end per district, from its start.
+  const end = districtStart.slice(0, n);
+  for (let c = 0; c < n; c++) if (district[c] >= 0) districtCells[end[district[c]]++] = c;
+}
 
 /** Yearly upkeep in money of a seat's project (0 without one, or if `seatsOnly` and it is no seat). */
 function projectUpkeep(gov: Government, seat: number, seatsOnly: boolean): number {
@@ -178,16 +199,56 @@ function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_
   return sum * years;
 }
 
-/** A chronicle entry at a hex (simulation.ts: record). */
-export type Record = (text: string, cell: number) => void;
+/** A chronicle entry at a hex (simulation.ts: record); see diplomacy.ts: Record. */
+export type Record = (text: string, cell: number, important: boolean) => void;
 
 /**
  * Yearly: districts, tax rates and taxes (then updateGovernmentUpkeep and
  * updateGovernmentProjects in the following weeks).
  */
 export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Record): void {
+  const year = sim.governmentYear ?? startGovernmentYear(sim, owner);
+  sim.governmentYear = null;
+  if (!year.summed) sumDistricts(sim, year);
+  levyTaxes(sim, owner, year, record);
+}
+
+/**
+ * updateGovernment in parts: runs its next part before the taxes into
+ * sim.governmentYear and returns false, or true once only updateGovernment's
+ * taxes are left. Run one after another with nothing else changing the
+ * simulation between them, the parts give the same result as one call.
+ */
+export function prepareGovernment(sim: Simulation, owner: Uint8Array): boolean {
+  if (!sim.governmentYear) {
+    sim.governmentYear = startGovernmentYear(sim, owner);
+    return false;
+  }
+  if (!sim.governmentYear.summed) {
+    sumDistricts(sim, sim.governmentYear);
+    return false;
+  }
+  return true;
+}
+
+/** updateGovernment's work from one of its parts to the next (see prepareGovernment). */
+export type GovernmentYear = {
+  /** sumDistricts has run. */
+  summed: boolean;
+  isSeat: Uint8Array;
+  civFinancing: Uint8Array;
+  low: Float32Array;
+  count: Uint16Array;
+  moneyBase: Float32Array;
+  goodsFlow: Float32Array;
+  goodsSpare: Float32Array;
+  goodsNeed: Float32Array;
+};
+
+/** The first part of updateGovernment: districts, traders and starting money. */
+function startGovernmentYear(sim: Simulation, owner: Uint8Array): GovernmentYear {
   const gov = sim.government;
-  const { world, economy } = sim;
+  const { world } = sim;
   const n = world.cellCount;
   const seats = seatsOf(sim, owner);
   // Districts: the nearest seat of the settlement's people.
@@ -239,6 +300,25 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     low[s] = Math.min(low[s], base);
     count[s]++;
   }
+  return {
+    summed: false,
+    isSeat,
+    civFinancing,
+    low,
+    count,
+    moneyBase: new Float32Array(0),
+    goodsFlow: new Float32Array(0),
+    goodsSpare: new Float32Array(0),
+    goodsNeed: new Float32Array(0),
+  };
+}
+
+/** The second part of updateGovernment: what every district has and needs. */
+function sumDistricts(sim: Simulation, year: GovernmentYear): void {
+  const gov = sim.government;
+  const { world, economy } = sim;
+  const n = world.cellCount;
+  const { isSeat } = year;
   // Per district: the money tax base, the wood and stone its settlements spare (stock) and harvest beyond their own
   // upkeep (yearly), and what it needs: a year's upkeep of its buildings and its project's missing materials, less
   // what its seat holds.
@@ -272,6 +352,19 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     }
     for (let m = 0; m < MATERIAL_COUNT; m++) goodsNeed[s * MATERIAL_COUNT + m] = Math.max(0, goodsNeed[s * MATERIAL_COUNT + m] - gov.stock[s * MATERIAL_COUNT + m]);
   }
+  year.moneyBase = moneyBase;
+  year.goodsFlow = goodsFlow;
+  year.goodsSpare = goodsSpare;
+  year.goodsNeed = goodsNeed;
+  year.summed = true;
+}
+
+/** The last part of updateGovernment: tax rates and taxes. */
+function levyTaxes(sim: Simulation, owner: Uint8Array, year: GovernmentYear, record: Record): void {
+  const gov = sim.government;
+  const { economy } = sim;
+  const n = sim.world.cellCount;
+  const { isSeat, civFinancing, low, count, moneyBase, goodsFlow, goodsSpare, goodsNeed } = year;
   // Rates: the goods tax as the district needs, as far as its weakest settlement stays loyal without a money tax;
   // the money tax takes the rest of the room. And the potential income for the income check.
   for (let s = 0; s < n; s++) {
@@ -298,7 +391,7 @@ export function updateGovernment(sim: Simulation, owner: Uint8Array, record: Rec
     for (let m = 0; m < MATERIAL_COUNT; m++) goodsValue += goodsSpare[s * MATERIAL_COUNT + m] * PRICE[m];
     gov.potential[s] = Math.max(moneyOnly, Math.min(goodsFlow[s], goodsLimit * goodsValue));
     if (Math.abs(rate - gov.rate[s]) >= 0.1) {
-      record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s);
+      record(`The ${sim.civs[owner[s]]?.name ?? ''} ${rate > gov.rate[s] ? 'raised' : 'lowered'} the taxes around ${s === sim.civs[owner[s]]?.capital ? 'the capital' : 'a seat of government'} to ${Math.round(rate * 100)} %.`, s, false);
     }
     gov.rate[s] = rate;
     gov.goodsRate[s] = goodsRate;
@@ -412,6 +505,7 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
   }
   for (let s = 0; s < n; s++) gov.upkeep[s] = buildUpkeep[s];
   prepareArming(sim, owner, PAIRS);
+  listDistricts(sim);
   civSeatList = [];
   if (civBudget.length < sim.civSlots) civBudget = new Float64Array(sim.civSlots);
   civBudget.fill(0);
@@ -494,7 +588,6 @@ function freeGovSlot(sim: Simulation, cell: number): number {
  */
 function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolean {
   const gov = sim.government;
-  const n = sim.world.cellCount;
   const budget = GOV_TUNING.incomeShare * gov.potential[seat];
   const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false) + districtPay(sim, seat);
   const civ = sim.world.owner[seat];
@@ -507,8 +600,9 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   let bestType = -1;
   let bestScore = 0;
   const arm = !seatOnly && armingWanted(sim, seat);
-  for (let c = 0; c < n; c++) {
-    if (gov.district[c] !== seat || gov.projectSite[seat] === c) continue;
+  for (let i = districtStart[seat], last = districtStart[seat + 1]; i < last; i++) {
+    const c = districtCells[i];
+    if (gov.projectSite[seat] === c) continue;
     const slot = freeGovSlot(sim, c);
     if (slot < 0) continue;
     // 1. A planned seat of government.

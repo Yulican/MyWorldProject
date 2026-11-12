@@ -302,7 +302,7 @@ function foundNextRebels(sim: Simulation): boolean {
   }
   const n = w.rebelCells[k];
   const who = n === 1 ? 'a settlement' : `${n} settlements`;
-  record(sim, `Rebellion: ${who} in the ${BIOMES[world.biome[capital]].name.toLowerCase()} rose up against the ${parent.name} and became the ${civ.name}.`, capital);
+  record(sim, `Rebellion: ${who} in the ${BIOMES[world.biome[capital]].name.toLowerCase()} rose up against the ${parent.name} and became the ${civ.name}.`, capital, true);
   return true;
 }
 

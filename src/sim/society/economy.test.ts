@@ -7,6 +7,7 @@ import { generateWorld } from '../world/generate';
 import {
   BUILDINGS,
   FIRST_LUXURY,
+  CityTier,
   Good,
   LUXURY_COUNT,
   STORED_COUNT,
@@ -16,6 +17,7 @@ import {
   SLOTS,
   SlotState,
   UPKEEP_GRACE_YEARS,
+  cityTier,
   forageYield,
   harvestTerms,
   isLuxury,
@@ -186,6 +188,7 @@ test('settlements build once they are boxed in, and pay for it from their stock'
     for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) if (economy.state[s] === SlotState.Standing) standing++;
     assert.ok(economy.stock[c * MATERIAL_COUNT] > -1e-3 && economy.stock[c * MATERIAL_COUNT + 1] > -1e-3, `stock of ${c}`);
     assert.equal(world.buildings[c] <= SLOTS, true);
+    assert.equal(world.cityTier[c], cityTier(world.buildings[c], usableSlots(sim, c)), `city tier of ${c}`);
   }
   assert.ok(standing > 0, 'some hex built something');
   // Building lines appear in the supply of a hex that has them.
@@ -379,4 +382,19 @@ test('a seat of government whose harvest lacks its upkeep orders ten years of it
     assert.ok(sim.trade.want[cell * TRADE_GOODS + g] >= 10 * (m === Material.Wood ? seat.upkeepWood - 2 : seat.upkeepStone - 2) - 1e-3, `asks for ${m}`);
     assert.ok(sim.trade.hubFocus[cell * TRADE_GOODS + g] > 3, 'those trips come first');
   }
+});
+
+test('city tier follows the share of used slots: 50 % small, 80 % big, no rounding', () => {
+  // 6 slots (plains): 3 and 5 buildings are the thresholds.
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map((u) => cityTier(u, 6)), [0, 0, 0, 1, 1, 2, 2]);
+  // 4 slots: 2 and 4.
+  assert.deepEqual([0, 1, 2, 3, 4].map((u) => cityTier(u, 4)), [0, 0, 1, 1, 2]);
+  assert.equal(cityTier(2, 6), CityTier.Tribe, '33 % is still a tribe');
+  assert.equal(cityTier(3, 4), CityTier.SmallCity, '75 % is not yet a big city');
+  // Government buildings push the share over 100 %: just a big city.
+  assert.equal(cityTier(7, 4), CityTier.BigCity);
+  assert.equal(cityTier(12, 6), CityTier.BigCity);
+  // No buildings is always a tribe.
+  assert.equal(cityTier(0, 4), CityTier.Tribe);
+  assert.equal(cityTier(0, 0), CityTier.Tribe);
 });

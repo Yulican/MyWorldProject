@@ -1,6 +1,6 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
-Stand: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
+Stand: Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
 (Ablauf: Design → Simulation → Umsetzung), Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
@@ -307,3 +307,38 @@ Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Phase 0 und 1
 - **Gold ist kein Luxusgut mehr** (kein Komfort +5, kein Handel als Ware). Folge: Die Zahl der Luxusgüter sinkt von 6 auf 5 (`LUXURY_COUNT`); die Auswirkung auf die Zufriedenheit wird in der Simulation geprüft (`Requirement Zufriedenheit.md`, Komfort: Luxusgüter).
 
 **Offen:** nichts zu strategischen Gütern.
+
+## 11. Stadtstufen nach belegten Bauplätzen
+
+Die Stufe einer Siedlung (Stamm, kleine Stadt, große Stadt) richtet sich nach
+dem Anteil der belegten Bauplätze ihres Hex. Sie ersetzt die alte feste
+Regel (1–2 Gebäude = kleine, ab 3 = große Stadt), die auf 4 Plätze ausgelegt war.
+
+- **Belegt** ist jedes fertig stehende Gebäude. Siedlungsgebäude und
+  Regierungsgebäude zählen beide. Baustellen, Ruinen und Reparaturen zählen
+  nicht.
+- **Nenner** sind die nutzbaren Siedlungsplätze des Hex: 6 auf der Ebene,
+  4 sonst (Abschnitt 6). Die Regierungsplätze zählen nicht zum Nenner. Mit
+  Regierungsgebäuden kann der Anteil über 100 % liegen. Das ist dann einfach
+  eine große Stadt.
+- **Stufen:**
+  - unter 50 % belegt: Stamm (Punkt auf der Karte), auch bei 1–2 Gebäuden.
+    Das ist gewollt.
+  - ab 50 %: kleine Stadt.
+  - ab 80 %: große Stadt.
+- Ganzzahliger Vergleich: `belegt * 100 >= 50 * Plätze` bzw. `>= 80 * Plätze`.
+  Keine Rundung, keine Hysterese (verliert eine Stadt Gebäude, fällt sie
+  sofort zurück). Bei 6 Plätzen heißt das 3 bzw. 5 Gebäude, bei 4 Plätzen
+  2 bzw. 4.
+- **Nur Anzeige:** Die Stufe bestimmt das Karten-Icon und den Namen im
+  Hexfeld-Info. Sie wirkt nicht auf die Simulation (Wachstum, Handel,
+  Zufriedenheit). Die Hexfeld-Info zeigt die belegten Plätze schon, dort ändert
+  sich nichts.
+- **Umsetzung:** Die Stufe wird in der Simulation an einer Stelle berechnet
+  (dort, wo heute `world.buildings` gefüllt wird) und von Karte und Panel
+  nur gelesen. Die Schwellen stehen dann nirgends sonst. Das Szenario `cities`
+  (alle Plätze belegt) bleibt der schwerste Fall und damit gültig.
+- Abhängigkeiten: `Requirement Zentralregierung.md` (Regierungsgebäude zählen
+  mit).
+
+Stand der Zahlen: Startwerte (50 % und 80 %), vom Nutzer gewählt.
