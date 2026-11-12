@@ -118,7 +118,7 @@ export function updateAlliances(sim: Simulation): void {
           st.alliancesSigned++;
           addMood(dip, a, b, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
           addMood(dip, b, a, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
-          record(sim, `The ${nameA} and the ${nameB} formed an alliance.`, sim.civs[a]!.capital);
+          record(sim, `The ${nameA} and the ${nameB} formed an alliance.`, sim.civs[a]!.capital, true);
           continue;
         }
         const x = w.pactX[k];
@@ -133,7 +133,7 @@ export function updateAlliances(sim: Simulation): void {
         st.alliancesSigned++;
         addMood(dip, a, b, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
         addMood(dip, b, a, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
-        record(sim, `The ${nameA} and the ${nameB} formed an alliance.`, sim.civs[a]!.capital);
+        record(sim, `The ${nameA} and the ${nameB} formed an alliance.`, sim.civs[a]!.capital, true);
       } else if (trust >= ALLY.pactTrust) {
         const x = commonThreat(sim, a, b, ALLY.threatForm);
         if (x > 0) {

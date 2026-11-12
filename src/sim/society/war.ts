@@ -1089,7 +1089,7 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
   if ((sim.military.strength[def] ?? 0) <= 0) st.zeroDefender++;
   if (w.wars > st.maxWars) st.maxWars = w.wars;
   sever(sim, att, def);
-  record(sim, `The ${sim.civs[att]!.name} declared war on the ${sim.civs[def]!.name}.`, goal);
+  record(sim, `The ${sim.civs[att]!.name} declared war on the ${sim.civs[def]!.name}.`, goal, true);
   // A declaration ends the alliances with partners allied to the target; a war ends the pact between its parties.
   if (w.pactCount > 0) {
     breakAlliances(sim, att, def);
@@ -2554,10 +2554,10 @@ function endRebelWar(sim: Simulation, s: number, type: number): void {
   w.version++;
   const mName = sim.civs[mother]?.name ?? '?';
   const goal = w.wGoal[s];
-  if (type === EndType.Crushed) record(sim, `The ${mName} crushed the rebellion and took the rebels' land back.`, goal);
-  else if (type === EndType.GaveUp) record(sim, `The rebels gave up: the ${mName} took their land back.`, goal);
-  else if (type === EndType.Exhausted) record(sim, `The ${mName} could not crush the rebellion: the rebels stay independent.`, goal);
-  else record(sim, `The rebellion against the ${mName} ended.`, goal);
+  if (type === EndType.Crushed) record(sim, `The ${mName} crushed the rebellion and took the rebels' land back.`, goal, true);
+  else if (type === EndType.GaveUp) record(sim, `The rebels gave up: the ${mName} took their land back.`, goal, true);
+  else if (type === EndType.Exhausted) record(sim, `The ${mName} could not crush the rebellion: the rebels stay independent.`, goal, true);
+  else record(sim, `The rebellion against the ${mName} ended.`, goal, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -2617,13 +2617,13 @@ export function endWar(sim: Simulation, s: number, type: number): void {
   }
   if (type === EndType.GaveUp && sim.civs[att] && sim.civs[def] && sim.world.owner[goal] === def) {
     const whole = transferDistrict(sim, s);
-    record(sim, whole ? `The ${defName} gave up: the ${attName} conquered all their land.` : `The ${defName} gave up: the ${attName} conquered their seat of government.`, goal);
+    record(sim, whole ? `The ${defName} gave up: the ${attName} conquered all their land.` : `The ${defName} gave up: the ${attName} conquered their seat of government.`, goal, true);
   } else if (type === EndType.AttackerGaveUp) {
-    record(sim, `The ${attName} gave up their war against the ${defName}.`, goal);
+    record(sim, `The ${attName} gave up their war against the ${defName}.`, goal, true);
   } else if (type === EndType.Exhausted) {
-    record(sim, `The ${attName} and the ${defName} made peace, exhausted by war.`, goal);
+    record(sim, `The ${attName} and the ${defName} made peace, exhausted by war.`, goal, true);
   } else {
-    record(sim, `The war between the ${attName} and the ${defName} ended.`, goal);
+    record(sim, `The war between the ${attName} and the ${defName} ended.`, goal, true);
   }
 }
 

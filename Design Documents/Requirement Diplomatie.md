@@ -180,7 +180,8 @@ Wege und Verluste.
 **Chronik**
 - Jedes diplomatische Ereignis kommt in die Chronik. Einen Dialog mit Pause
   (Zufriedenheit, Abschnitt 5) gibt es nur für den ersten Kontakt und für
-  eine geschlossene Grenze. Still in der Liste stehen: Grenze geöffnet,
+  eine geschlossene Grenze, dazu (`Requirement Krieg.md`) für
+  Kriegserklärung, Frieden und ein neues Bündnis. Still in der Liste stehen: Grenze geöffnet,
   Migrationsabkommen geschlossen oder beendet, Freihandel, Handelsabkommen
   geschlossen, gebrochen, beendet oder ausgelaufen, Schonfrist läuft ab.
   Es gibt keine Banner und keine Ungelesen-Markierung.

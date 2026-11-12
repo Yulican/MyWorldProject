@@ -170,13 +170,17 @@ vorerst immer auf; später entscheidet die Außenpolitik.
 
 - Nur wichtige Chronik-Einträge öffnen einen Dialog, und das Spiel pausiert:
   Gründung, neues Volk (neuer Stamm), Aufstand, Abspaltung (auch abgeschnittener
-  Gebiete), Volk verschwunden, Spielende (eigener Screen), erster Kontakt
-  und Grenze geschlossen. Die Liste ist fest, es gibt keine Einstellung.
+  Gebiete), Volk verschwunden, Spielende (eigener Screen), erster Kontakt,
+  Grenze geschlossen, Kriegserklärung, Frieden (jedes Kriegsende, auch das
+  einer Rebellion) und neues Bündnis (`Requirement Krieg.md`). Die Liste ist
+  fest, es gibt keine Einstellung.
 - Alle anderen Einträge stehen nur still in der Chronik-Liste: kein Dialog,
   keine Pause, kein Banner, keine Ungelesen-Markierung. Das sind
   Steueränderungen, alle Handelsabkommen (geschlossen, gebrochen, beendet,
   ausgelaufen), Migrationsabkommen (geschlossen, beendet), Freihandel,
-  Grenze geöffnet und die erste Werkstatt eines Volks.
+  Grenze geöffnet, die erste Werkstatt eines Volks, Kriegsbeitritt eines
+  Verbündeten, Belagerung, Besetzung, Verteidigungspakte (geschlossen,
+  beendet) und Bündnisse herabgestuft oder beendet.
 - Jeder Eintrag bleibt in der Chronik; die Zählung der Einträge für die
   Messwerte ändert sich nicht.
 - Der Dialog enthält die Zeitsteuerung (Pause und Geschwindigkeiten). Beim

@@ -92,7 +92,7 @@ Entschieden (Nutzer), Phase 3a.
 - **Erschöpfung:** Nach 10 Jahren ohne Besetzung oder Sieg endet der Krieg ohne Gebietsänderung (Frieden).
 - **Nach dem Krieg:** Vertrauen −30 (klingt in 10 Jahren ab), Grenzen geschlossen, alle Abkommen aufgehoben, 20 Jahre Waffenstillstand (keine neue Erklärung zwischen diesen Völkern).
 - **Eroberung:** Der ganze Bezirk des Sitzes wechselt den Besitzer (am Kriegsende, Abschnitt 5). Am Grenzübergang zum Eroberer entsteht eine Straße, damit der eroberte Bezirk nicht sofort abgeschnitten ist. Zufriedenheit dort: Teilwert „erobert“ −15, klingt über 10 Jahre ab.
-- Chronik: Kriegserklärung, Belagerung, Besetzung, Frieden, mit Dialog und „Go to“; Annexion des ganzen Volks gibt es nicht.
+- Chronik (alle mit „Go to“): Kriegserklärung und Frieden (jedes Kriegsende, auch das Ende einer Rebellion, mit Ausgang) öffnen einen Dialog mit Pause (Entscheidung Nutzer); Belagerung und Besetzung stehen nur still in der Chronik-Liste. Annexion des ganzen Volks gibt es nicht.
 
 ## 7. Bündnisse
 
@@ -123,7 +123,7 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 - **Beute:** Verbündete bekommen keine Beute, aber +10 Vertrauen beim Partner. Verbündete des Verlierers verlieren 10 Vertrauen beim Sieger.
 - **Durchmarsch:** Armeen von Verbündeten dürfen durch das Land des Partners ziehen. Der Handel bleibt unverändert.
 
-**Anzeige:** Auf der Karte nichts Neues. Das Diplomatie-Panel zeigt Pakt und Bündnis, die Chronik Abschluss, Auflösung und Kriegsbeitritt eines Verbündeten, das Kriegs-Panel die Seiten.
+**Anzeige:** Auf der Karte nichts Neues. Das Diplomatie-Panel zeigt Pakt und Bündnis, die Chronik Abschluss, Auflösung und Kriegsbeitritt eines Verbündeten, das Kriegs-Panel die Seiten. Nur ein neues Bündnis öffnet einen Dialog mit Pause (Entscheidung Nutzer); Verteidigungspakt geschlossen oder beendet, Bündnis herabgestuft oder beendet und Kriegsbeitritt eines Verbündeten stehen nur still in der Chronik-Liste.
 
 ## 8. Aufstände als Krieg
 
