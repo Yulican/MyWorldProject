@@ -20,7 +20,7 @@ anderen Völkern gehört zur späteren Außenpolitik.
 | Geld | 0,1 | – | 0,1 je Erwachsenem (ab 16) und Jahr |
 | Getreide | 1 | 1 | Kornspeicher |
 | Wasser (Fässer) | 1 | 1 | Wasserträger |
-| Luxusgüter (6) | 0,5 | 5 | Abbaugebäude (Zufriedenheit) |
+| Luxusgüter (6; ab Krieg Phase 0: 5, ohne Gold) | 0,5 | 5 | Abbaugebäude (Zufriedenheit) |
 
 - Ein Händler trägt 40 Gewichtseinheiten (bis „Regionale Rohstoffe“, Schritt 2: 20).
 - Feste Preise; Preise nach Knappheit kommen mit dem Außenhandel.
@@ -247,3 +247,5 @@ Verworfene Varianten aus dem Prototyp: Stopp schon unter 0 oder −10 (Reiche
 deutlich kleiner), Sitz-Unterhalt durch die Siedlung selbst (kaum Sitze,
 weil die Ernte den Unterhalt nicht trägt), Sitz-Unterhalt in Geld (gut, aber
 der Nutzer will, dass das Reich den Sitz versorgt).
+
+**Ab Krieg Phase 0 (Code hat bis dahin noch 6 Luxusgüter):** Gold ist kein Luxusgut und keine Handelsware mehr. Beim Abbau wird es direkt zu Geld der Siedlung (`Requirement Regionale Rohstoffe.md`, Abschnitt 10). Die Zahl der Luxusgüter in diesem Dokument sinkt von 6 auf 5. Neu als Handelswaren kommen Eisen und Feuerstein dazu (`Requirement Krieg.md`).

@@ -44,6 +44,7 @@ test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=unrest'), 'unrest');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=trade'), 'trade');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=government'), 'government');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=war'), 'war');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });
 
@@ -101,6 +102,29 @@ test('the trade scenario opens trade everywhere and merchants set out', async ()
   assert.equal(SCENARIOS.trade.trade, true);
 });
 
+test('the trade scenario runs on in tick parts, as the game clock runs it, like whole ticks', async () => {
+  const { createSimulation, generateWorld, TICKS_PER_YEAR, stepSimulation, stepSimulationPart } = await import('../sim');
+  const { openTrade } = await import('./openTrade');
+  const make = () => {
+    const sim = createSimulation(generateWorld({ seed: 11 }));
+    for (let t = 0; t < 150 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+    openTrade(sim);
+    return sim;
+  };
+  const whole = make();
+  const parts = make();
+  // Two years: every yearly plan that runs in several parts (diplomacy, military, war) comes up twice.
+  for (let t = 0; t < 2 * TICKS_PER_YEAR; t++) {
+    stepSimulation(whole);
+    while (!stepSimulationPart(parts));
+  }
+  assert.equal(parts.tick, whole.tick);
+  assert.deepEqual(parts.world.owner, whole.world.owner);
+  assert.deepEqual(parts.economy.stock, whole.economy.stock);
+  assert.equal(JSON.stringify(parts.diplomacy.agreements), JSON.stringify(whole.diplomacy.agreements));
+  assert.equal(parts.planStep, 0);
+});
+
 test('the diplomacy scenario opens every border and merchants travel abroad', async () => {
   const { createSimulation, generateWorld, livingCivilizations, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
   const { openDiplomacy } = await import('./openDiplomacy');
@@ -128,4 +152,90 @@ test('the government scenario puts up seats and government buildings everywhere 
   assert.ok(traders > 2 * seatsBefore, `${traders} government traders`);
   assert.ok(sim.government.tripCount > 0, 'government traders on their way');
   assert.equal(SCENARIOS.government.government, true);
+});
+
+test('the war scenario puts peoples at war in pairs with as many armies as the caps allow and sieges, two blocks of allies', async () => {
+  const { ArmyState, createSimulation, generateWorld, stepSimulation, TICKS_PER_YEAR, WAR } = await import('../sim');
+  const { declareWarsEverywhere } = await import('./declareWars');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  declareWarsEverywhere(sim);
+  const w = sim.war;
+  assert.ok(w.wars >= 5, `${w.wars} wars`);
+  // Per war and people: at most WAR.maxArmies; the attacker has its one main army (retreating ones aside).
+  const all = new Map<number, number>();
+  const main = new Map<number, number>();
+  for (let a = 0; a < w.live.length; a++) {
+    if (!w.live[a]) continue;
+    const s = w.aWar[a];
+    const key = s * 256 + w.aCiv[a];
+    all.set(key, (all.get(key) ?? 0) + 1);
+    if (w.aCiv[a] === w.wAtt[s] && w.aState[a] !== ArmyState.Retreating) main.set(s, (main.get(s) ?? 0) + 1);
+    assert.notEqual(w.aState[a], ArmyState.Gathering, 'all gathered');
+  }
+  for (const k of all.values()) assert.ok(k <= WAR.maxArmies, `${k} armies of one people`);
+  for (const k of main.values()) assert.equal(k, WAR.mainArmies);
+  // 32 armies (WAR.worldArmies) are out of reach under the caps: one war per people, 1 + up to 3 armies per war.
+  assert.ok(w.armies <= WAR.worldArmies);
+  assert.ok(w.armies >= 10 && w.armies >= w.wars + 2, `${w.armies} armies in ${w.wars} wars`);
+  const sieges = w.siege.reduce((n, v) => n + v, 0);
+  assert.ok(sieges >= 1, `${sieges} sieges in ${w.wars} wars`);
+  // Two blocks of allies: alliances formed, allies joined the wars with their armies.
+  const { Pact, pactBetween } = await import('../sim');
+  const { PAIRS } = await import('../sim/society/diplomacy');
+  let alliances = 0;
+  let allies = 0;
+  let allyArmies = 0;
+  for (let a = 1; a < sim.civs.length; a++) for (let b = a + 1; b < sim.civs.length; b++) if (pactBetween(sim, a, b) === Pact.Alliance) alliances++;
+  for (let s = 0; s < w.wLive.length; s++) {
+    if (!w.wLive[s]) continue;
+    for (let p = 1; p < PAIRS; p++) if (p !== w.wAtt[s] && p !== w.wDef[s] && w.side[s * PAIRS + p] >= 0) allies++;
+  }
+  for (let a = 0; a < w.live.length; a++) if (w.live[a] && w.civWar[w.aCiv[a]] !== w.aWar[a]) allyArmies++;
+  assert.ok(alliances >= 10, `${alliances} alliances`);
+  assert.ok(allies >= w.wars, `${allies} allies in ${w.wars} wars`);
+  assert.ok(allyArmies >= 2, `${allyArmies} ally armies`);
+  // Phase 5: three rebellions in the strongest realms, the mothers' armies in the field.
+  const { REBELLIONS } = await import('./declareWars');
+  let rebelWars = 0;
+  let rebelArmies = 0;
+  for (let s = 0; s < w.wLive.length; s++) if (w.wLive[s] && w.wRebel[s]) rebelWars++;
+  for (let a = 0; a < w.live.length; a++) if (w.live[a] && w.wRebel[w.aWar[a]]) rebelArmies++;
+  assert.equal(rebelWars, REBELLIONS);
+  assert.ok(rebelArmies >= REBELLIONS, `${rebelArmies} armies in rebel wars`);
+  assert.equal(SCENARIOS.war.war, true);
+});
+
+test('the war scenario draws 32 armies: real ones plus map-only decoys that keep moving', async () => {
+  const { MAX_ARMIES, createSimulation, generateWorld, isWaterBiome, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { declareWarsEverywhere } = await import('./declareWars');
+  const { armyDecoys } = await import('./armyDecoys');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  declareWarsEverywhere(sim);
+  const real = sim.war.armies;
+  const markers = { cell: new Int32Array(MAX_ARMIES), civ: new Uint8Array(MAX_ARMIES), state: new Uint8Array(MAX_ARMIES) };
+  const decoys = armyDecoys();
+  assert.equal(decoys.fill(sim, markers, real), 32);
+  const before = markers.cell.slice(real);
+  for (let i = real; i < 32; i++) {
+    assert.ok(!isWaterBiome(sim.world.biome[markers.cell[i]]), 'on land');
+    assert.ok(sim.civs[markers.civ[i]], 'a living people');
+  }
+  for (let t = 0; t < 4; t++) stepSimulation(sim);
+  // Decoys never enter the simulation: the map's count is the real armies' plus theirs, filled to 32 again.
+  assert.equal(decoys.fill(sim, markers, real), 32);
+  let moved = 0;
+  for (let i = 0; i < before.length; i++) if (markers.cell[real + i] !== before[i]) moved++;
+  assert.ok(moved > 0, 'decoys march');
+  assert.equal(decoys.fill(sim, markers, sim.war.armies), 32);
+  // Siege frames: real ones plus map-only decoys on seats of peoples at war, at least 3 (SIEGE_FRAMES when there are enough seats).
+  const siege = Uint8Array.from(sim.war.siege);
+  const frames = decoys.sieges(sim, siege);
+  assert.ok(frames >= 3, `${frames} siege frames`);
+  for (let c = 0; c < siege.length; c++) {
+    if (!siege[c] || sim.war.siege[c]) continue;
+    const o = sim.world.owner[c];
+    assert.ok(sim.world.seats[c] > 0 && (sim.war.enemy[o] !== 0 || sim.war.allyWarsOf[o] > 0), 'decoy frame on a seat at war');
+  }
 });

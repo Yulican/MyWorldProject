@@ -39,7 +39,8 @@ for (let seed = 1; seed <= worlds; seed++) {
     moods.sort((a, b) => a - b);
     const q = (p: number) => (moods.length ? moods[Math.min(moods.length - 1, Math.floor(p * moods.length))] : 0);
     const revolts = sim.chronicle.filter((e) => e.text.includes('rose up'));
-    const leagueSizes = revolts.map((e) => (e.text.startsWith('A settlement') ? 1 : Number(e.text.split(' ')[0])));
+    // "Rebellion: a settlement in …" or "Rebellion: 3 settlements in …" (one entry per rebel group).
+    const leagueSizes = revolts.map((e) => Number(/(\d+) settlements/.exec(e.text)?.[1] ?? 1));
     const row: Row = {
       people: sim.pop.count,
       settlements: moods.length,

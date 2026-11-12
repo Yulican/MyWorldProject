@@ -4,9 +4,9 @@ import type { CivMood } from './satisfaction';
 
 /**
  * Soft cap: new tribes only appear while fewer civilizations than this live
- * (design doc: 3–6). Peoples splitting off can go beyond it.
+ * (design doc: up to 9). Peoples splitting off can go beyond it.
  */
-export const MAX_CIVS = 6;
+export const MAX_CIVS = 9;
 /**
  * Hard limit of civilizations alive at once: ids 1..MAX_CIV_ID are stored per
  * inhabitant and per hex in Uint8Arrays; an extinct civilization's id is
@@ -43,15 +43,19 @@ export type FaithLedger = {
   emigrated: number;
   /** Believers who moved here from another people. */
   immigrated: number;
+  /** Believers trained as soldiers (soldiers are not part of the population). */
+  enlisted: number;
+  /** Believers who came back from the soldiers (dismissed). */
+  discharged: number;
 };
 
 export function emptyFaithLedger(): FaithLedger {
-  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0, brokeAway: 0, emigrated: 0, immigrated: 0 };
+  return { born: 0, died: 0, grewDevout: 0, wonByNeighbors: 0, lostToNeighbors: 0, forgot: 0, brokeAway: 0, emigrated: 0, immigrated: 0, enlisted: 0, discharged: 0 };
 }
 
 /** Net change in believers the ledger explains. */
 export function ledgerNet(l: FaithLedger): number {
-  return l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot - l.brokeAway - l.emigrated + l.immigrated;
+  return l.born - l.died + l.grewDevout + l.wonByNeighbors - l.lostToNeighbors - l.forgot - l.brokeAway - l.emigrated + l.immigrated - l.enlisted + l.discharged;
 }
 
 export type Civilization = {

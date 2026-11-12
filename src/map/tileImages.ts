@@ -1,4 +1,5 @@
 import type { SkImage } from '@shopify/react-native-skia';
+import { logWork } from '../state/perfStats';
 import type { TileRef } from './viewport';
 
 /** JS time spent rendering tiles before yielding, so view updates aren't held up. */
@@ -9,6 +10,8 @@ const SLICE_MS = 8;
  * into fresh map, a snapshot) would all land in one frame.
  */
 const TILES_PER_SLICE = 3;
+/** While the map moves only one per slice: a swipe into fresh map spreads its tiles (and their memory) over more frames. */
+const TILES_PER_SLICE_MOVING = 1;
 const SLICE_PAUSE_MS = 16;
 /**
  * Shared by all layers (terrain and territory), so the pause holds between
@@ -17,24 +20,18 @@ const SLICE_PAUSE_MS = 16;
  * A layer kept waiting gets the next turn.
  */
 const gate: { lastSliceAt: number; waiting: TileImages | null } = { lastSliceAt: -Infinity, waiting: null };
-/** Memory for rendered tiles (4 bytes per pixel). */
+/** Default memory for rendered tiles (4 bytes per pixel). */
 const BUDGET_BYTES = 96 * 1024 * 1024;
 /** A replaced or evicted image is only freed after this long (it may still be on screen). */
 const KEEP_MS = 1000;
-/**
- * Outdated tiles still show their old image, so they are only redone once the
- * view has rested this long: rendering them while the map moves takes CPU
- * time from drawing frames, and each new image is uploaded to the GPU when
- * first drawn.
- */
-const REDO_IDLE_MS = 300;
 
 /** Renders one tile at a scale (pixels per picture pixel); null when the tile is empty. */
 export type RenderTile = (chunk: number, pxPerUnit: number) => SkImage | null;
 /** A number that only changes when a tile's image would change (see `invalidate`). */
 export type TileSignature = (chunk: number) => number;
 
-type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; signature: number };
+/** `unchecked`: the data changed while the tile was out of view; its signature is compared once it is wanted again. */
+type Entry = { image: SkImage | null; bytes: number; usedAt: number; stale: boolean; unchecked: boolean; signature: number };
 export type TileRequest = TileRef & { tier: number };
 
 /**
@@ -52,8 +49,13 @@ export class TileImages {
   /** Tiles of the current view (any tier): never freed. */
   private wanted = new Set<number>();
   private bytes = 0;
-  /** When the view last changed (`want`). */
-  private wantedAt = 0;
+  /**
+   * Whether the map rests (setResting). Outdated tiles still show their old
+   * image, so they are only redone while it rests: rendering them while the
+   * map moves takes CPU time from drawing frames, and each new image is
+   * uploaded to the GPU when first drawn.
+   */
+  private resting = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   /** Longest recent tile render in ms (decays), to stop a slice before it overruns SLICE_MS. */
@@ -66,7 +68,15 @@ export class TileImages {
     /** Pixels per picture pixel for each tier. */
     private tierScales: readonly number[],
     private onReady: () => void,
-  ) {}
+    /** Memory for this layer's images; least recently drawn tiles out of view are freed beyond it. */
+    private budgetBytes: number = BUDGET_BYTES,
+    /** The layer's name in the benchmark's work log. */
+    name = 'tiles',
+  ) {
+    this.renderLabel = `tile ${name}`;
+  }
+
+  private renderLabel: string;
 
   /** The image of a tile at a tier, or at any other tier as a stand-in. */
   get(chunk: number, tier: number): SkImage | null {
@@ -89,13 +99,16 @@ export class TileImages {
   /** Replaces the wanted tiles; missing ones are rendered first, then outdated ones, nearest first. */
   want(requests: TileRequest[]) {
     if (this.disposed) return;
-    this.wantedAt = Date.now();
     this.wanted = new Set(requests.map((r) => r.chunk));
     const seen = new Set<string>();
     this.queue = requests
       .filter((r) => {
         const k = key(r.chunk, r.tier);
         const entry = this.entries.get(k);
+        if (entry?.unchecked) {
+          entry.unchecked = false;
+          if (!this.signature || this.signature(r.chunk) !== entry.signature) entry.stale = true;
+        }
         if ((entry && !entry.stale) || seen.has(k)) return false;
         seen.add(k);
         return true;
@@ -105,23 +118,28 @@ export class TileImages {
     if (this.queue.length > 0 && this.timer === null) this.timer = setTimeout(this.work, 0);
   }
 
+  /** The map stopped moving (true) or started (false): outdated tiles are redone only while it rests. */
+  setResting(resting: boolean) {
+    this.resting = resting;
+    if (resting && this.queue.length > 0 && this.timer === null && !this.disposed) this.timer = setTimeout(this.work, 0);
+  }
+
   private redo(r: TileRequest): number {
     return this.entries.has(key(r.chunk, r.tier)) ? 1 : 0;
   }
 
   /**
-   * The layer's data changed: tiles near the view are rendered again on the
-   * next `want`, the others are dropped.
+   * The layer's data changed: tiles near the view that look different are
+   * rendered again on the next `want`. The others keep their image and are
+   * checked once they are wanted again: coming into view while the map
+   * moves, they show the old image (like any outdated tile) instead of
+   * having to be rendered during the movement.
    */
   invalidate() {
     for (const [k, e] of this.entries) {
-      const chunk = chunkOf(k);
-      if (this.wanted.has(chunk)) {
-        if (!this.signature || this.signature(chunk) !== e.signature) e.stale = true;
-      } else {
-        this.entries.delete(k);
-        this.free(e);
-      }
+      if (this.wanted.has(chunkOf(k))) {
+        if (!this.signature || this.signature(chunkOf(k)) !== e.signature) e.stale = true;
+      } else e.unchecked = true;
     }
   }
 
@@ -141,11 +159,12 @@ export class TileImages {
     if (gate.waiting === this) gate.waiting = null;
     const start = Date.now();
     let rendered = 0;
-    let wait = 0;
+    /** Only outdated tiles are left and the map moves: go on once it rests (setResting). */
+    let held = false;
     // A further tile only if one more of the recent (worst) duration still fits the slice.
     while (
       this.queue.length > 0 &&
-      rendered < TILES_PER_SLICE &&
+      rendered < (this.resting ? TILES_PER_SLICE : TILES_PER_SLICE_MOVING) &&
       (rendered === 0 || Date.now() - start + this.tileMs <= SLICE_MS)
     ) {
       const r = this.queue[0];
@@ -155,17 +174,19 @@ export class TileImages {
         this.queue.shift();
         continue;
       }
-      if (old) {
-        wait = this.wantedAt + REDO_IDLE_MS - Date.now();
-        if (wait > 0) break;
+      if (old && !this.resting) {
+        held = true;
+        break;
       }
       this.queue.shift();
       const signature = this.signature ? this.signature(r.chunk) : 0;
       const before = Date.now();
+      const t0 = performance.now();
       const image = this.render(r.chunk, this.tierScales[r.tier]);
+      logWork(this.renderLabel, t0, performance.now() - t0);
       this.tileMs = Math.max(Date.now() - before, this.tileMs * 0.9);
       const bytes = image ? image.width() * image.height() * 4 : 0;
-      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, signature });
+      this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, unchecked: false, signature });
       this.bytes += bytes;
       if (old) this.free(old);
       rendered++;
@@ -173,18 +194,18 @@ export class TileImages {
     this.evict();
     if (rendered > 0) gate.lastSliceAt = performance.now();
     if (rendered > 0) this.onReady();
-    if (this.queue.length > 0) this.timer = setTimeout(this.work, Math.max(rendered > 0 ? SLICE_PAUSE_MS : 0, wait));
+    if (this.queue.length > 0 && !held) this.timer = setTimeout(this.work, rendered > 0 ? SLICE_PAUSE_MS : 0);
   };
 
   /** Frees the least recently drawn tiles while over budget. */
   private evict() {
-    if (this.bytes <= BUDGET_BYTES) return;
+    if (this.bytes <= this.budgetBytes) return;
     const now = Date.now();
     const old = [...this.entries]
       .filter(([k, e]) => !this.wanted.has(chunkOf(k)) && now - e.usedAt > KEEP_MS)
       .sort((a, b) => a[1].usedAt - b[1].usedAt);
     for (const [k, e] of old) {
-      if (this.bytes <= BUDGET_BYTES) break;
+      if (this.bytes <= this.budgetBytes) break;
       this.entries.delete(k);
       this.free(e);
     }

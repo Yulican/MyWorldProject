@@ -6,7 +6,8 @@ import { buildingFits, updateCellSupply, usableSlots } from '../sim/society/econ
 // The "government" benchmark scenario: the most the central government
 // shows and does at once. Every settlement at least SEAT_SPACING hexes from
 // a seat of government gets one (flags and districts all over the map),
-// every settlement fills its government slots with standing buildings, and
+// every settlement fills its government slots with standing buildings (the
+// military ones first, so soldiers are trained and paid everywhere), and
 // every seat gets money; then a year runs so the districts, taxes and
 // projects follow and government traders are on their way during the swipes.
 
@@ -15,8 +16,15 @@ const SEAT_SPACING = 2;
 /** Money each seat's treasury gets, so its traders buy and deliver. */
 const TREASURY = 300;
 const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
-/** Government buildings to fill slots with: anything but seats, luxury workshops and trade buildings. */
-const FILL_TYPES = BUILDINGS.map((b, i) => (b.good !== Good.Seat && b.deposit === undefined && b.good !== Good.Merchants && b.good !== Good.Harbor ? i : -1)).filter((i) => i >= 0);
+const MILITARY_GOODS: readonly number[] = [Good.Barracks, Good.Range, Good.Stable];
+const isMilitary = (i: number) => MILITARY_GOODS.includes(BUILDINGS[i].good);
+/**
+ * Government buildings to fill slots with: anything but seats, mines and trade buildings, the military
+ * buildings first (barracks, shooting ranges, stables), so soldiers are trained and paid everywhere.
+ */
+const FILL_TYPES = BUILDINGS.map((b, i) => (b.good !== Good.Seat && b.deposit === undefined && b.good !== Good.Merchants && b.good !== Good.Harbor ? i : -1))
+  .filter((i) => i >= 0)
+  .sort((a, b) => Number(isMilitary(b)) - Number(isMilitary(a)) || a - b);
 
 /** Seats and government buildings everywhere, money in every treasury, then a year of simulation. */
 export function empowerGovernment(sim: Simulation): void {

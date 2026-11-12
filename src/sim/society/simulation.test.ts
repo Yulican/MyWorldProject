@@ -54,7 +54,7 @@ test('same seed gives the same history', () => {
   assert.deepEqual(a.chronicle, b.chronicle);
 });
 
-for (const seed of [2, 3, 4]) {
+for (const seed of [3, 4, 5]) {
   test(`seed ${seed}: after 200 years the bookkeeping is consistent`, () => {
     const sim = createSimulation(generateWorld({ seed }));
     runYears(sim, 200);
@@ -265,9 +265,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement is cut off in year 151.
-  const sim = createSimulation(generateWorld({ seed: 103 }));
-  for (let year = 1; year <= 154; year++) {
+  // In this world a settlement is cut off in year 272.
+  const sim = createSimulation(generateWorld({ seed: 8 }));
+  for (let year = 1; year <= 275; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
@@ -280,7 +280,8 @@ test('land cut off from its capital becomes its own people', () => {
 });
 
 test('splinters may go beyond the soft cap, new tribes may not', () => {
-  const sim = createSimulation(generateWorld({ seed: 77 }));
+  // A world whose splinters pass the cap within 650 years (seed 77 stays at 9 peoples since allies on both sides join wars).
+  const sim = createSimulation(generateWorld({ seed: 1 }));
   let most = 0;
   for (let year = 1; year <= 650 && most <= MAX_CIVS; year++) {
     runYears(sim, 1);
@@ -329,8 +330,8 @@ test('settlers never go where the connection to a seat would fall below the stop
 });
 
 test('a people of 100 lacking a luxury good settles a free deposit of it nearby', () => {
-  // In this world it happens in year 68.
-  const sim = createSimulation(generateWorld({ seed: 102 }));
+  // In this world it happens in year 65.
+  const sim = createSimulation(generateWorld({ seed: 17 }));
   runYears(sim, 70);
   const settled = sim.chronicle.filter((e) => / settled the /.test(e.text));
   assert.ok(settled.length > 0, 'a deposit was settled');
@@ -338,7 +339,7 @@ test('a people of 100 lacking a luxury good settles a free deposit of it nearby'
   assert.ok(sim.world.deposit[cell] !== 0);
 });
 
-test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact and closed borders are important', () => {
+test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace and alliances are important', () => {
   const important = [
     / They pray to you\.$/,
     /^A new people, /,
@@ -348,6 +349,16 @@ test('only founding, new peoples, uprisings, secessions, vanished peoples, game 
     /^Nobody prays to you anymore\.$/,
     / met\.$/,
     / closed their borders to the /,
+    / declared war on the /,
+    / gave up: the /,
+    / gave up their war against the /,
+    / made peace, exhausted by war\.$/,
+    /^The war between the .* ended\.$/,
+    / crushed the rebellion /,
+    /^The rebels gave up: /,
+    / could not crush the rebellion: /,
+    /^The rebellion against the .* ended\.$/,
+    / formed an alliance\.$/,
   ];
   const seen = { important: 0, silent: 0 };
   for (const seed of [5, 16, 102]) {

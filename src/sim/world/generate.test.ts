@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DIRECTION_COUNT } from '../hex';
 import { BIOMES, BIOME_COUNT, Biome, isWaterBiome } from './biomes';
-import { DEPOSITS } from './deposits';
+import { DEPOSITS, Deposit } from './deposits';
 import { generateWorld } from './generate';
 
 const SEEDS = [1, 2, 3, 42, 1234, 99999];
@@ -57,6 +57,23 @@ for (const seed of SEEDS) {
     );
   });
 }
+
+test('iron and flint deposits are twice as frequent as copper (strategic goods for war)', () => {
+  assert.equal(DEPOSITS[Deposit.Iron].frequency, 2 * DEPOSITS[Deposit.Copper].frequency);
+  assert.equal(DEPOSITS[Deposit.Flint].frequency, 2 * DEPOSITS[Deposit.Copper].frequency);
+  const count = [0, 0, 0];
+  for (const seed of SEEDS) {
+    const w = generateWorld({ seed });
+    for (let c = 0; c < w.cellCount; c++) {
+      const d = w.deposit[c];
+      if (d === Deposit.Iron) count[0]++;
+      else if (d === Deposit.Flint) count[1]++;
+      else if (d === Deposit.Copper) count[2]++;
+    }
+  }
+  assert.ok(count[0] >= 1.6 * count[2], `iron ${count[0]}, copper ${count[2]}`);
+  assert.ok(count[1] >= 1.6 * count[2], `flint ${count[1]}, copper ${count[2]}`);
+});
 
 test('a large map generates fast enough', () => {
   const t0 = performance.now();

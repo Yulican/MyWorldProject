@@ -1,10 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
-import { perfEvents } from '../state/perfStats';
-import { advanceYears, createNewWorld, setChronicleDialogs } from '../state/worldStore';
+import { gcTotals, logWork, perfEvents, setWorkLogging, workBetween } from '../state/perfStats';
+import { advanceYears, createNewWorld, setChronicleDialogs, setExtraArmies } from '../state/worldStore';
+import { armyDecoys } from './armyDecoys';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
+import { declareWarsEverywhere } from './declareWars';
 import { empowerGovernment } from './empowerGovernment';
 import { openDiplomacy } from './openDiplomacy';
 import { stirUnrest } from './stirUnrest';
@@ -17,6 +19,7 @@ import {
   type BenchmarkSummary,
   type ScenarioName,
   type SwipeResult,
+  type SwipeStats,
 } from './benchmark';
 
 /** Log prefix CI looks for in logcat (scripts/run-benchmark.sh). */
@@ -50,10 +53,13 @@ export function useBenchmark(controller: { current: MapController | null }) {
     const plan = swipePlan();
     const results: SwipeResult[] = [];
     console.log(`${LOG}_START ${JSON.stringify({ ...BENCHMARK, scenario })}`);
+    const stopMonitor = monitorJsThread();
     for (let world = 0; world < BENCHMARK.worlds; world++) {
       const seed = randomSeed();
       createNewWorld(seed);
       const setup = SCENARIOS[scenario];
+      // The war scenario draws the worst case: extra markers up to 32 armies on the map (armyDecoys.ts).
+      setExtraArmies(setup.war ? armyDecoys() : null);
       const prepare = setup.buildings
         ? fillWithBuildings
         : setup.unrest
@@ -64,7 +70,9 @@ export function useBenchmark(controller: { current: MapController | null }) {
               ? openDiplomacy
               : setup.government
                 ? empowerGovernment
-                : undefined;
+                : setup.war
+                  ? declareWarsEverywhere
+                  : undefined;
       advanceYears(setup.years, prepare);
       setStatus({ running: true, scenario, world, swipe: 0, failed: results.filter((r) => !r.pass).length });
       await delay(WORLD_SETTLE_MS);
@@ -76,20 +84,34 @@ export function useBenchmark(controller: { current: MapController | null }) {
       for (let i = 0; i < plan.length; i++) {
         await delay(PAUSE_MS);
         const before = { ...perfEvents, ...gcStats() };
+        const swipeStart = performance.now();
         const stats = await map.swipe(plan[i]);
         const events: Record<string, number> = {};
         for (const [k, v] of Object.entries({ ...perfEvents, ...gcStats() })) {
           events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
         }
-        const result = { world, seed, direction: plan[i].direction, ...evaluateSwipe(stats), events };
+        // The UI runtime's own collections during the swipe (counted on the UI thread).
+        events.uiGcCount = stats.uiGcCount ?? 0;
+        events.uiGcMs = Math.round((stats.uiGcMs ?? 0) * 10) / 10;
+        const evaluated = evaluateSwipe(stats);
+        const result = {
+          world,
+          seed,
+          direction: plan[i].direction,
+          ...evaluated,
+          events,
+          ...(evaluated.pass ? {} : { worstFrame: worstFrameWork(swipeStart, stats) }),
+        };
         results.push(result);
         console.log(`${LOG}_SWIPE ${JSON.stringify(result)}`);
         setStatus({ running: true, scenario, world, swipe: i + 1, failed: results.filter((r) => !r.pass).length });
       }
     }
+    stopMonitor();
     const summary = { ...summarizeBenchmark(results), scenario };
     console.log(`${LOG}_DONE ${JSON.stringify(summary)}`);
     setStatus({ running: false, summary });
+    setExtraArmies(null);
     setChronicleDialogs(true);
     running.current = false;
   }, [controller]);
@@ -108,4 +130,50 @@ function gcStats(): { gcCount: number; gcMs: number } {
   const stats = hermes?.getInstrumentedStats?.();
   // Hermes reports the GC time in seconds.
   return { gcCount: stats?.js_numGCs ?? 0, gcMs: (stats?.js_gcTime ?? 0) * 1000 };
+}
+
+/**
+ * Watches the JS thread while the benchmark runs: a frame callback that comes
+ * late means the thread was busy (work not logged elsewhere: React renders,
+ * timers, garbage collection), and every collection is logged with its time.
+ * Turns the work log on (perfStats.logWork) and returns the function that stops both.
+ */
+function monitorJsThread(): () => void {
+  setWorkLogging(true);
+  let prev = performance.now();
+  let gc = gcTotals();
+  let id = requestAnimationFrame(function onFrame(now) {
+    const gap = now - prev;
+    // Frames come every 16.7 ms; one that is 8 ms late or more is worth naming.
+    if (gap > 25) logWork('JS thread busy (frame callback late)', prev, gap);
+    const next = gcTotals();
+    if (next.count !== gc.count) logWork(`GC ${next.count - gc.count}×`, prev, next.ms - gc.ms);
+    gc = next;
+    prev = now;
+    id = requestAnimationFrame(onFrame);
+  });
+  return () => {
+    cancelAnimationFrame(id);
+    setWorkLogging(false);
+  };
+}
+
+/**
+ * What ran around the worst frame of a swipe: the JS work logged from 8 ms
+ * before it began to 24 ms after it ended (the UI thread's clock is mapped
+ * through the swipe's start, which is known only to a frame or so), and the
+ * UI thread's tile and army pictures in that frame.
+ */
+function worstFrameWork(swipeStart: number, stats: SwipeStats): string {
+  const parts: string[] = [];
+  if (stats.worstStartMs !== undefined && stats.worstEndMs !== undefined) {
+    parts.push(...workBetween(swipeStart + stats.worstStartMs - 8, swipeStart + stats.worstEndMs + 24));
+    parts.push(`at ${stats.worstStartMs.toFixed(0)}-${stats.worstEndMs.toFixed(0)} ms of the swipe`);
+  }
+  parts.push(
+    `UI: ${stats.worstTileDraws ?? 0} tile pictures, ${stats.worstArmySwaps ?? 0} army pictures, ` +
+      `${stats.worstUiGcCount ?? 0} UI-runtime GC ${(stats.worstUiGcMs ?? 0).toFixed(1)}ms (since the last long frame), ` +
+      `UI callback ${(stats.worstCallbackLateMs ?? 0).toFixed(0)}ms later than the swipe's promptest`,
+  );
+  return parts.join('; ');
 }

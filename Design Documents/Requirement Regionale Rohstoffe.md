@@ -1,6 +1,6 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
-Stand: Abschnitt 10 (Stadtstufen) neu; davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
+Stand: Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
 (Ablauf: Design → Simulation → Umsetzung), Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
@@ -282,7 +282,33 @@ haben dann nur 2–3 Sitze für über 80 Siedlungen.
 Verbleibende Hauptgründe: Enge 48 %, weiter Weg zum Sitz 30 %, keine
 Straße zum Sitz 10 %.
 
-## 10. Stadtstufen nach belegten Bauplätzen
+## 10. Strategische Güter und Truppen (Krieg)
+
+Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Phase 0 und 1 sind simuliert (Abschnitt 14 dort).
+
+- Je Truppenart und strategischem Gut gibt es einen Stärkefaktor (Startwert ×1,5), z. B. Pferde für Schock. Zuordnung: siehe unten.
+- Das Gut wird verbraucht: 1 Einheit je 20 Soldaten und Jahr; ohne Gut gilt der Faktor nicht (×1,5).
+- Strategische Güter sind Teil der Handelsabkommen, mit starkem Wunsch (5-faches Gewicht). Verkauf nur, wenn die Gefahr des Käufers für den Verkäufer ≤ 40 ist, nie an Kriegsgegner und deren Verbündete; ohne Abkommen kein Handel über geschlossene Grenzen (`Requirement Diplomatie.md`).
+- Regierungshändler kaufen fehlende Güter (Eisen, Feuerstein, Pferde) bei eigenen Siedlungen und bringen sie zu den Soldaten.
+- Vorkommen Iron und Flint sind bei der Weltgenerierung doppelt so häufig; Völker siedeln freie Vorkommen nur, wenn sie bedroht sind (Gefahr ≥ 50 durch ein Volk).
+- Die gezielte Luxusabbau-Regel (Abschnitt 6) greift auch bei Bedarf der Armee.
+- Neue Gebäude im Katalog: Kaserne (Nahkampf), Schießplatz (Fernkampf), Stall (Schock, braucht Pferde); Kosten und Unterhalt: kalibrieren (Simulation).
+
+**Entschieden (Nutzer):**
+- **Eisen → Nahkampf, Feuerstein → Fernkampf, Pferde → Schock.**
+- **Voraussetzung vor Phase 1:** Eisen und Feuerstein werden bisher nicht abgebaut. Sie brauchen Abbaugebäude (auf den Vorkommen Iron und Flint) und werden Handelswaren.
+- **Marmor** hat keine Kriegsrolle. Einen Verteidigerbonus gibt es nur als direkten Verteidigerbonus (Krieg.md, Abschnitt 5).
+- **Gold** wird abgebaut und in Geld umgewandelt (Richtung entschieden, Einzelheiten offen, siehe unten).
+- **Später:** Kupfer + Zinn → Bronze; Meteorit.
+
+**Ebenfalls entschieden (Nutzer):**
+- Eisen und Feuerstein sind keine Luxusgüter und geben keinen Komfort.
+- **Gold wird sofort Geld:** Beim Abbau kommt es direkt als zusätzliches Geld in die Siedlung (kein eigenes Gut zum Lagern oder Handeln). Kurs: 5 Geld je Einheit (= heutiger Handelspreis), gewollt, damit Goldvölker viel mehr Soldaten bezahlen können. Es wird wie anderes in der Siedlung erzeugtes Geld besteuert (Steueranteil in die Kasse des Bezirks).
+- **Gold ist kein Luxusgut mehr** (kein Komfort +5, kein Handel als Ware). Folge: Die Zahl der Luxusgüter sinkt von 6 auf 5 (`LUXURY_COUNT`); die Auswirkung auf die Zufriedenheit wird in der Simulation geprüft (`Requirement Zufriedenheit.md`, Komfort: Luxusgüter).
+
+**Offen:** nichts zu strategischen Gütern.
+
+## 11. Stadtstufen nach belegten Bauplätzen
 
 Die Stufe einer Siedlung (Stamm, kleine Stadt, große Stadt) richtet sich nach
 dem Anteil der belegten Bauplätze ihres Hex. Sie ersetzt die alte feste

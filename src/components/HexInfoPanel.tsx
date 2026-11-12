@@ -4,18 +4,28 @@ import {
   BIOMES,
   CityTier,
   DEPOSITS,
+  GOOD_NAMES,
+  ArmyState,
+  MAX_ARMIES,
+  MIL,
   RESOURCE_COUNT,
   RESOURCE_NAMES,
   SUPPLY_NAMES,
+  TROOP_NAMES,
+  armySoldiers,
   elevationMeters,
   hasFreshWater,
   resourceCapacityTerms,
   sumTerms,
   type HexEconomy,
+  type HexMilitary,
   type HexSatisfaction,
+  type Simulation,
   type Term,
   type World,
 } from '../sim';
+import { FIRST_LUXURY, LUXURY_COUNT, STORED_COUNT } from '../sim/society/buildings';
+import { TROOP_GOOD } from '../sim/society/military';
 import { colors, spacing } from '../theme';
 
 type Props = {
@@ -32,6 +42,12 @@ type Props = {
   economy?: HexEconomy | null;
   /** How satisfied the settlement is and why; null if nobody lives here. */
   satisfaction?: HexSatisfaction | null;
+  /** Soldiers per troop type; null for water. */
+  military?: HexMilitary | null;
+  /** Strategic goods without comfort (iron, flint) in stock; horses show with the luxury goods. */
+  strategic?: readonly StrategicStock[] | null;
+  /** The war here: siege or occupation, armies on the hex (see hexWar). */
+  war?: readonly string[];
   onClose: () => void;
 };
 
@@ -39,7 +55,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, war, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -63,6 +79,8 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
   const highlights = [
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     civName ? settlementName(world.cityTier[cell]) : null,
+    war && war.length > 0 ? war[0] : null,
+    military && military.soldiers > 0 ? `${military.soldiers} soldier${military.soldiers > 1 ? 's' : ''}` : null,
     !civName && ruins > 0 ? `${ruins} ruin${ruins > 1 ? 's' : ''}` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
     deposit ? deposit.name : null,
@@ -142,10 +160,15 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
               {satisfaction.terms.map((t, i) => (
                 <TermRow key={i} term={t} digits={1} />
               ))}
-              {satisfaction.unhappyYears > 0 && (
+              {(satisfaction.unhappyYears > 0 || satisfaction.restless) && (
                 <Row
                   label="Unhappy"
-                  value={`for ${satisfaction.unhappyYears} year${satisfaction.unhappyYears > 1 ? 's' : ''}${satisfaction.restless ? ' · ready to break away' : ''}`}
+                  value={[
+                    satisfaction.unhappyYears > 0 && `for ${satisfaction.unhappyYears} year${satisfaction.unhappyYears > 1 ? 's' : ''}`,
+                    satisfaction.restless && 'may rebel',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 />
               )}
               {satisfaction.luxury.map((g) => (
@@ -153,8 +176,9 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
               ))}
               <Text style={styles.note}>
                 Satisfaction moves a quarter of the way to its target each year. Satisfied settlements have more
-                children and harvest more; unhappy ones send people away, and after {UNHAPPY_NOTE} below zero,
-                settlements joined by roads break away together.
+                children and harvest more; unhappy ones send people away. A realm's settlements below zero (not
+                the capital) rise together once their soldiers and militia outweigh the realm, and fight a war for
+                their independence.
               </Text>
             </>
           )}
@@ -214,6 +238,9 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                 <TermRow key={i} term={t} digits={1} />
               ))}
               <Row label="Money" value={`${Math.floor(economy.trade.money)} · +${economy.trade.income.toFixed(1)} a year`} />
+              {strategic?.map((g) => (
+                <Row key={g.name} label={g.name} value={`${Math.floor(g.stock)} · for soldiers`} />
+              ))}
               {economy.trade.grain >= 0.5 && <Row label="Grain" value={String(Math.floor(economy.trade.grain))} />}
               {economy.trade.barrels >= 0.5 && <Row label="Water barrels" value={String(Math.floor(economy.trade.barrels))} />}
               <Text style={styles.note}>
@@ -244,6 +271,35 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                   </Text>
                 </>
               )}
+            </>
+          )}
+
+          {war && war.length > 0 && (
+            <>
+              <Text style={styles.section}>War</Text>
+              {war.map((line, i) => (
+                <Text key={i} style={styles.note}>
+                  {line}
+                </Text>
+              ))}
+            </>
+          )}
+
+          {military && military.troops.length > 0 && (
+            <>
+              <Text style={styles.section}>Soldiers {military.soldiers}</Text>
+              {military.troops.map((t) => (
+                <Row
+                  key={t.name}
+                  label={t.name}
+                  value={`${t.soldiers}/${t.capacity} · ${t.supplied ? `with ${troopGood(t.name)}, ×${MIL.factor} strength` : `no ${troopGood(t.name)}`}`}
+                />
+              ))}
+              <Text style={styles.note}>
+                Barracks, shooting ranges and stables train soldiers from the adults while the district treasury can
+                pay them ({MIL.sold} money each a year); unpaid soldiers go home. Iron, flint and horses make melee,
+                ranged and shock soldiers {MIL.factor} times as strong.
+              </Text>
             </>
           )}
 
@@ -298,6 +354,45 @@ function Bar({ label, value, capacity }: { label: string; value: number; capacit
     </View>
   );
 }
+
+/** A strategic good in a hex's stock. */
+export type StrategicStock = { name: string; stock: number };
+
+/** Iron and flint in the hex's stock (horses are a luxury good too and show with them). */
+export function strategicStock(sim: Simulation, cell: number): StrategicStock[] {
+  const goods: StrategicStock[] = [];
+  for (let k = LUXURY_COUNT; k < STORED_COUNT; k++) {
+    const stock = sim.economy.luxury[cell * STORED_COUNT + k];
+    if (stock >= 0.5) goods.push({ name: GOOD_NAMES[FIRST_LUXURY + k], stock });
+  }
+  return goods;
+}
+
+/** The war on a hex, e.g. "Besieged by the Arani", "Army of the Arani (40 soldiers, retreating)"; empty in peace. */
+export function hexWar(sim: Simulation, cell: number): string[] {
+  const w = sim.war;
+  const lines: string[] = [];
+  const name = (civ: number) => sim.civs[civ]?.name ?? 'a vanished people';
+  if (w.siege[cell]) {
+    const owner = sim.world.owner[cell];
+    const s = w.civWar[owner];
+    const occupied = s >= 0 && w.wGoal[s] === cell && w.wOccupied[s] === 1;
+    const by = w.enemy[owner];
+    lines.push(`${occupied ? 'Occupied' : 'Besieged'}${by !== 0 ? ` by the ${name(by)}` : ''}`);
+  }
+  for (let a = 0; a < MAX_ARMIES; a++) {
+    if (!w.live[a] || w.aCell[a] !== cell) continue;
+    const state = w.aState[a] === ArmyState.Gathering ? ', gathering' : w.aState[a] === ArmyState.Retreating ? ', retreating' : '';
+    lines.push(`Army of the ${name(w.aCiv[a])} (${Math.round(armySoldiers(w, a))} soldiers${state})`);
+  }
+  return lines;
+}
+
+/** The strategic good a troop type needs, lower case ("iron"). */
+const troopGood = (troop: string) => {
+  const t = TROOP_NAMES.indexOf(troop as (typeof TROOP_NAMES)[number]);
+  return t >= 0 ? GOOD_NAMES[FIRST_LUXURY + TROOP_GOOD[t]].toLowerCase() : 'its good';
+};
 
 const percent = (v: number) => `${Math.round(v * 100)} %`;
 const goodsList = (goods: readonly { good: string; amount: number }[]) =>

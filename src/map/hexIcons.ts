@@ -1,6 +1,6 @@
 import { Skia, type SkPaint, type SkPathBuilder } from '@shopify/react-native-skia';
 import { Biome, type World } from '../sim';
-import { fillPaint, strokePaint } from './paints';
+import { sharedFillPaint, sharedStrokePaint } from './paints';
 
 // Simple vector icons per biome, drawn in code. All icons of the map are
 // collected into a few shared paths (one per color), so the whole layer is a
@@ -37,7 +37,7 @@ const LAYERS = [
 export function createIconLayers(r: number): IconLayers {
   const layers: IconLayers = new Map();
   for (const [name, color, width] of LAYERS) {
-    const paint = width > 0 ? strokePaint(color, width * r) : fillPaint(color);
+    const paint = width > 0 ? sharedStrokePaint(color, width * r) : sharedFillPaint(color);
     layers.set(name, { path: Skia.PathBuilder.Make(), paint });
   }
   return layers;
@@ -56,16 +56,20 @@ function hash(cell: number, salt: number): number {
   return (h >>> 0) / 4294967296;
 }
 
+/** Tree positions in a forest and a jungle hex (made once, not per hex). */
+const FOREST_TREES = [[-0.32, 0.1], [0.3, 0.14], [0, -0.22]] as const;
+const JUNGLE_TREES = [[-0.3, 0.12], [0.3, 0.1], [0, -0.2]] as const;
+
 export function drawBiomeIcon(layers: IconLayers, world: World, cell: number, x: number, y: number, r: number) {
   const j = (salt: number) => (hash(cell, salt) - 0.5) * 0.16 * r; // small position jitter
   switch (world.biome[cell]) {
     case Biome.Forest:
-      for (const [ox, oy] of [[-0.32, 0.1], [0.3, 0.14], [0, -0.22]]) {
+      for (const [ox, oy] of FOREST_TREES) {
         tree(layers, x + ox * r + j(1), y + oy * r + j(2), r);
       }
       break;
     case Biome.Jungle:
-      for (const [ox, oy] of [[-0.3, 0.12], [0.3, 0.1], [0, -0.2]]) {
+      for (const [ox, oy] of JUNGLE_TREES) {
         const cx = x + ox * r + j(3);
         const cy = y + oy * r + j(4);
         layer(layers, 'trunk').moveTo(cx, cy + 0.12 * r).lineTo(cx, cy + 0.3 * r);

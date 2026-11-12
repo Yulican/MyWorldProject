@@ -5,7 +5,9 @@ import { isWaterBiome } from '../world/biomes';
 import { stepCost } from '../world/roads';
 import type { CivMood } from './satisfaction';
 import type { Simulation } from './simulation';
-import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, stockOf } from './trade';
+import { mayBuyStrategic, strengthSize } from './military';
+import { pactTrust } from './pacts';
+import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, isStrategic, stockOf } from './trade';
 
 // Diplomacy, stage 1 (agreed requirement: "Design Documents/Requirement
 // Diplomatie.md"): every people rates every people it knows by trust and
@@ -38,7 +40,7 @@ export const CLOSED_TRUST = -20;
 /** Trust lost per group of people that moved to the other without a migration agreement, at most MIGRATION_LOSS_MAX. */
 export const MIGRATION_LOSS = -5;
 const MIGRATION_LOSS_MAX = -20;
-/** Danger: this × the other's population over our own (at most 100), times nearness. */
+/** Danger: this × (the other's strength + floor) over (our own + floor), at most 100, times nearness (military.ts: strengthSize). */
 export const DANGER_SCALE = 50;
 /** Borders open at this trust and danger, and close below / above these. */
 export const OPEN_TRUST = 50;
@@ -206,7 +208,7 @@ export function resetCivRelations(dip: Diplomacy, id: number): void {
 }
 
 /** Every people's trade partners and the flat list of legs, after agreements changed. */
-function rebuildPartners(dip: Diplomacy): void {
+export function rebuildPartners(dip: Diplomacy): void {
   const partners: number[][] = [];
   for (let a = 1; a <= dip.maxId; a++) {
     for (let b = 1; b <= dip.maxId; b++) if (dip.freeTrade[pair(a, b)]) (partners[a] ??= []).push(b);
@@ -257,7 +259,7 @@ function moodNow(mood: CivMood, tick: number): number {
 }
 
 /** a's new mood towards b; one of the same label replaces the old one. */
-function addMood(dip: Diplomacy, a: number, b: number, label: string, value: number, tick: number): void {
+export function addMood(dip: Diplomacy, a: number, b: number, label: string, value: number, tick: number): void {
   const k = pair(a, b);
   const list = (dip.moods.get(k) ?? []).filter((m) => m.label !== label);
   list.push({ label, value, tick });
@@ -303,6 +305,8 @@ export function trustTerms(sim: Simulation, a: number, b: number): Term[] {
   }
   if (deals > 0) terms.push({ label: `Trade agreements (${deals})`, value: deals * AGREEMENT_TRUST });
   if (lack > 0) terms.push({ label: 'Delivers goods we lack', value: lack * LACK_TRUST });
+  const bond = sim.war.pactCount > 0 ? pactTrust(sim, a, b) : 0;
+  if (bond !== 0) terms.push({ label: sim.war.pact[k] === 2 ? 'Alliance' : 'Defense pact', value: bond });
   for (const m of dip.moods.get(k) ?? []) {
     const v = moodNow(m, sim.tick);
     if (v !== 0) terms.push({ label: m.label, value: v });
@@ -315,10 +319,10 @@ export function dangerTerms(sim: Simulation, a: number, b: number): Term[] {
   const civA = sim.civs[a];
   const civB = sim.civs[b];
   if (!civA || !civB) return [];
-  const size = Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
+  const size = strengthSize(sim, a, b, DANGER_SCALE);
   const near = nearness(sim.diplomacy.distance[pair(a, b)]);
   return [
-    { label: `Size: ${civB.population} people against our ${civA.population}`, value: size },
+    { label: `Strength ${Math.round(sim.military.strength[b] ?? 0)} against our ${Math.round(sim.military.strength[a] ?? 0)}`, value: size },
     { label: `Distance ${distanceText(sim.diplomacy.distance[pair(a, b)])} (nearness ${Math.round(near * 100)} %)`, value: size * near - size },
   ];
 }
@@ -424,13 +428,43 @@ const reachTouched: number[] = [];
  * export hub.
  */
 export function updateTransitHubs(sim: Simulation): void {
+  for (let step = 0; step >= 0; step = updateTransitHubsStep(sim, step));
+}
+
+/** Transit hubs searched per step of updateTransitHubsStep (each searches up to 3 merchants' ways). */
+export const TRANSIT_HUBS_PER_STEP = 4;
+
+/**
+ * updateTransitHubs in steps, so the game clock can spread it over frames
+ * (with free trade everywhere a people has a partner in every other): step 0
+ * clears this week's rows, every step then finds TRANSIT_HUBS_PER_STEP hubs,
+ * in people and partner order. Returns the next step, -1 after the last; the
+ * steps in a row give exactly the same hubs (a hub's search doesn't read the
+ * transit hubs).
+ */
+export function updateTransitHubsStep(sim: Simulation, step: number): number {
   const dip = sim.diplomacy;
   const week = sim.tick % TICKS_PER_YEAR;
-  for (let a = week === 0 ? TICKS_PER_YEAR : week; a < sim.civs.length; a += TICKS_PER_YEAR) {
-    if (!sim.civs[a]) continue;
-    for (let b = 1; b <= dip.maxId; b++) dip.transitHub[pair(a, b)] = -1;
-    for (const b of dip.partners[a] ?? []) dip.transitHub[pair(a, b)] = exportHub(sim, a, b, 0);
+  const first = week === 0 ? TICKS_PER_YEAR : week;
+  if (step === 0) {
+    for (let a = first; a < sim.civs.length; a += TICKS_PER_YEAR) {
+      if (sim.civs[a]) for (let b = 1; b <= dip.maxId; b++) dip.transitHub[pair(a, b)] = -1;
+    }
   }
+  const from = step * TRANSIT_HUBS_PER_STEP;
+  const to = from + TRANSIT_HUBS_PER_STEP;
+  let i = 0;
+  for (let a = first; a < sim.civs.length; a += TICKS_PER_YEAR) {
+    if (!sim.civs[a]) continue;
+    const partners = dip.partners[a];
+    if (!partners) continue;
+    for (let j = 0; j < partners.length; j++, i++) {
+      if (i < from) continue;
+      if (i >= to) return step + 1;
+      dip.transitHub[pair(a, partners[j])] = exportHub(sim, a, partners[j], 0);
+    }
+  }
+  return -1;
 }
 
 export function measureDistances(sim: Simulation, owner: Uint8Array): void {
@@ -494,13 +528,17 @@ export function measureDistances(sim: Simulation, owner: Uint8Array): void {
 export type Record = (text: string, cell: number, important: boolean) => void;
 
 /**
- * Yearly: who meets whom, peaceful neighborhood, trust and danger; then
- * every people decides on its borders and agreements, in id order. Trade
- * agreements that ran out are renewed or end; deliveries are judged every
- * PERIOD_YEARS (see there). `trade` holds what each people asks for and
- * spares in total (civ * goods + good).
+ * Yearly, in steps so the game clock can spread it over frames (steps 0,
+ * 1, 2, ... in a row each return the next, -1 after the last; the default,
+ * -1, runs all at once): who meets whom, peaceful neighborhood, trust and
+ * danger, borders, free trade and migration; then the running trade
+ * agreements; then new ones, one buyer per step. Every people decides on its
+ * borders and agreements, in id order. Trade agreements that ran out are
+ * renewed or end; deliveries are judged every PERIOD_YEARS (see there).
+ * `trade` holds what each people asks for and spares in total (civ * goods +
+ * good).
  */
-export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Record): void {
+export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Record, step = -1): number {
   const dip = sim.diplomacy;
   const { civWant, civSpare } = sim.trade;
   const goods = TRADE_GOODS;
@@ -510,163 +548,169 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   const name = (id: number) => sim.civs[id]!.name;
   const capital = (id: number) => sim.civs[id]!.capital;
 
-  // Contact and peaceful neighborhood.
-  for (const a of living) {
-    for (const b of living) {
-      if (a >= b) continue;
-      const k = pair(a, b);
-      if (!dip.known[k] && dip.distance[k] <= SIGHT_RANGE) {
-        dip.known[k] = 1;
-        dip.known[pair(b, a)] = 1;
-        record(`The ${name(a)} and the ${name(b)} met.`, capital(b), true);
-      }
-      if (!dip.known[k]) continue;
-      const near = nearness(dip.distance[k]);
-      dip.peace[k] = Math.min(PEACE_MAX, dip.peace[k] + PEACE_PER_YEAR * near);
-      dip.peace[pair(b, a)] = Math.min(PEACE_MAX, dip.peace[pair(b, a)] + PEACE_PER_YEAR * near);
-    }
-  }
-  // Faded moods go.
-  for (const [k, list] of dip.moods) {
-    const kept = list.filter((m) => sim.tick - m.tick < MOOD_YEARS * TICKS_PER_YEAR);
-    if (kept.length) dip.moods.set(k, kept);
-    else dip.moods.delete(k);
-  }
-  refreshRelations(sim, living);
-
   const trust = (a: number, b: number) => dip.trust[pair(a, b)];
   const danger = (a: number, b: number) => dip.danger[pair(a, b)];
   const mutual = (a: number, b: number, min: number) => trust(a, b) >= min && trust(b, a) >= min;
-
-  for (const a of living) {
-    for (const b of living) {
-      if (a === b || !dip.known[pair(a, b)]) continue;
-      // Borders: open to those we trust and don't fear; close when that ends.
-      const k = pair(a, b);
-      if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER) {
-        dip.open[k] = 1;
-        dip.bordersVersion++;
-        addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
-        record(`The ${name(a)} opened their borders to the ${name(b)}.`, capital(a), false);
-      } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST || danger(a, b) > CLOSE_DANGER)) {
-        closeBorders(sim, a, b, record);
-      }
-    }
-  }
-  refreshRelations(sim, living);
-
-  for (const a of living) {
-    for (const b of living) {
-      if (a >= b || !dip.known[pair(a, b)]) continue;
-      const k = pair(a, b);
-      const both = dip.open[k] && dip.open[pair(b, a)];
-      if (!dip.freeTrade[k] && both && mutual(a, b, FREE_TRADE_TRUST)) {
-        setSymmetric(dip.freeTrade, a, b, 1);
-        celebrate(dip, a, b, 'Signed free trade with us', sim.tick);
-        record(`The ${name(a)} and the ${name(b)} agreed on free trade.`, capital(a), false);
-      }
-      if (!dip.migration[k] && mutual(a, b, MIGRATION_TRUST)) {
-        setSymmetric(dip.migration, a, b, 1);
-        celebrate(dip, a, b, 'Signed a migration agreement with us', sim.tick);
-        record(`The ${name(a)} and the ${name(b)} agreed that their people may settle with each other.`, capital(a), false);
-      } else if (dip.migration[k] && (trust(a, b) < MIGRATION_END_TRUST || trust(b, a) < MIGRATION_END_TRUST)) {
-        setSymmetric(dip.migration, a, b, 0);
-        record(`The migration agreement between the ${name(a)} and the ${name(b)} ended.`, capital(a), false);
-      }
-    }
-  }
-
-  // Trade agreements: deliveries of the year, renewals, new ones.
-  const kept: TradeAgreement[] = [];
   const pause = (t: TradeAgreement) => {
     for (const l of t.legs) dip.agreementPause.set(agreementKey(l.supplier, l.buyer, l.good), sim.tick + AGREEMENT_YEARS * TICKS_PER_YEAR);
   };
   const lower = (g: number) => goodName(g).toLowerCase();
-  for (const t of dip.agreements) {
-    if (!sim.civs[t.a] || !sim.civs[t.b]) continue;
-    const [first, second] = t.legs;
-    const what = second
-      ? `${lower(first.good)} and ${lower(second.good)} between the ${name(t.a)} and the ${name(t.b)}`
-      : `${lower(first.good)} from the ${name(first.supplier)} to the ${name(first.buyer)}`;
-    // A full period since it started: did enough set out? The buyer agreed
-    // and takes everything; the first period is for getting started.
-    const period = PERIOD_YEARS;
-    let broken: TradeLeg | null = null;
-    let shrunk = false;
-    let tookOver = false;
-    for (const l of t.legs) {
-      if (sim.tick - l.periodStart >= period * TICKS_PER_YEAR) {
-        const short = l.periods > 0 && l.delivered < BREACH_SHARE * l.amount * period;
-        const missing = BREACH_SHARE * l.amount * period - l.delivered;
-        // A breach only if the goods were ready at the hub and still not sent.
-        const ready = short && sim.world.owner[l.hub] === l.supplier && stockOf(sim.economy, l.hub, l.good) >= missing;
-        l.shortPeriods = ready ? l.shortPeriods + 1 : 0;
-        if (short && !ready) {
-          // The supplier couldn't: another settlement with the goods takes
-          // over, or the amount is halved (no hard feelings).
-          l.behind++;
-          const other = exportHub(sim, l.supplier, l.buyer, l.good, l.amount);
-          if (other >= 0) {
-            l.hub = other;
-            tookOver = true;
-          } else if (l.behind >= HALVE_PERIODS) {
-            l.amount *= 0.5;
-            shrunk = true;
-          }
-        } else if (!short) l.behind = 0;
-        l.periods++;
-        l.delivered = 0;
-        l.periodStart = sim.tick;
+
+  if (step <= 0) {
+    // Contact and peaceful neighborhood.
+    for (const a of living) {
+      for (const b of living) {
+        if (a >= b) continue;
+        const k = pair(a, b);
+        if (!dip.known[k] && dip.distance[k] <= SIGHT_RANGE) {
+          dip.known[k] = 1;
+          dip.known[pair(b, a)] = 1;
+          record(`The ${name(a)} and the ${name(b)} met.`, capital(b), true);
+        }
+        if (!dip.known[k]) continue;
+        const near = nearness(dip.distance[k]);
+        dip.peace[k] = Math.min(PEACE_MAX, dip.peace[k] + PEACE_PER_YEAR * near);
+        dip.peace[pair(b, a)] = Math.min(PEACE_MAX, dip.peace[pair(b, a)] + PEACE_PER_YEAR * near);
       }
-      if (l.shortPeriods >= BREACH_PERIODS && !broken) broken = l;
     }
-    if (broken) {
-      // Only the side that got too little holds it against the other.
-      addMood(dip, broken.buyer, broken.supplier, 'Broke a trade agreement with us', CLOSED_TRUST, sim.tick);
-      record(`The trade agreement for ${what} broke: too little ${lower(broken.good)} arrived.`, capital(broken.buyer), false);
-      pause(t);
-      continue;
+    // Faded moods go.
+    for (const [k, list] of dip.moods) {
+      const kept = list.filter((m) => sim.tick - m.tick < MOOD_YEARS * TICKS_PER_YEAR);
+      if (kept.length) dip.moods.set(k, kept);
+      else dip.moods.delete(k);
     }
-    if (shrunk && second) {
-      // Both legs keep the same value.
-      const value = Math.min(first.amount * PRICE[first.good], second.amount * PRICE[second.good]);
-      first.amount = value / PRICE[first.good];
-      second.amount = value / PRICE[second.good];
+    refreshRelations(sim, living);
+
+    for (const a of living) {
+      for (const b of living) {
+        if (a === b || !dip.known[pair(a, b)]) continue;
+        // Borders: open to those we trust and don't fear; close when that ends.
+        const k = pair(a, b);
+        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER && sim.war.foe[k] === 0) {
+          dip.open[k] = 1;
+          dip.bordersVersion++;
+          addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
+          record(`The ${name(a)} opened their borders to the ${name(b)}.`, capital(a), false);
+        } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST || danger(a, b) > CLOSE_DANGER)) {
+          closeBorders(sim, a, b, record);
+        }
+      }
     }
-    if (shrunk && t.legs.some((l) => l.amount < AGREEMENT_MIN_AMOUNT)) {
-      record(`The trade agreement for ${what} ended: too little could be delivered.`, capital(first.buyer), false);
-      pause(t);
-      continue;
+    refreshRelations(sim, living);
+
+    for (const a of living) {
+      for (const b of living) {
+        if (a >= b || !dip.known[pair(a, b)]) continue;
+        const k = pair(a, b);
+        const both = dip.open[k] && dip.open[pair(b, a)];
+        if (sim.war.foe[k] > 0) continue;
+        if (!dip.freeTrade[k] && both && mutual(a, b, FREE_TRADE_TRUST)) {
+          setSymmetric(dip.freeTrade, a, b, 1);
+          celebrate(dip, a, b, 'Signed free trade with us', sim.tick);
+          record(`The ${name(a)} and the ${name(b)} agreed on free trade.`, capital(a), false);
+        }
+        if (!dip.migration[k] && mutual(a, b, MIGRATION_TRUST)) {
+          setSymmetric(dip.migration, a, b, 1);
+          celebrate(dip, a, b, 'Signed a migration agreement with us', sim.tick);
+          record(`The ${name(a)} and the ${name(b)} agreed that their people may settle with each other.`, capital(a), false);
+        } else if (dip.migration[k] && (trust(a, b) < MIGRATION_END_TRUST || trust(b, a) < MIGRATION_END_TRUST)) {
+          setSymmetric(dip.migration, a, b, 0);
+          record(`The migration agreement between the ${name(a)} and the ${name(b)} ended.`, capital(a), false);
+        }
+      }
     }
-    if (sim.tick - t.since >= AGREEMENT_YEARS * TICKS_PER_YEAR) {
-      // Renegotiated, from the hubs that suit best now.
-      for (const l of t.legs) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
-      const amounts = second
-        ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier))
-        : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
-      const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
-      if (!ok || !mutual(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
-        record(`The trade agreement for ${what} ran out.`, capital(first.buyer), false);
+  }
+  if (step === 0) return 1;
+  if (step < 0 || step === 1) {
+    // Trade agreements: deliveries of the year, renewals, new ones.
+    const kept: TradeAgreement[] = [];
+    for (const t of dip.agreements) {
+      if (!sim.civs[t.a] || !sim.civs[t.b]) continue;
+      const [first, second] = t.legs;
+      const what = second
+        ? `${lower(first.good)} and ${lower(second.good)} between the ${name(t.a)} and the ${name(t.b)}`
+        : `${lower(first.good)} from the ${name(first.supplier)} to the ${name(first.buyer)}`;
+      // A full period since it started: did enough set out? The buyer agreed
+      // and takes everything; the first period is for getting started.
+      const period = PERIOD_YEARS;
+      let broken: TradeLeg | null = null;
+      let shrunk = false;
+      let tookOver = false;
+      for (const l of t.legs) {
+        if (sim.tick - l.periodStart >= period * TICKS_PER_YEAR) {
+          const short = l.periods > 0 && l.delivered < BREACH_SHARE * l.amount * period;
+          const missing = BREACH_SHARE * l.amount * period - l.delivered;
+          // A breach only if the goods were ready at the hub and still not sent.
+          const ready = short && sim.world.owner[l.hub] === l.supplier && stockOf(sim.economy, l.hub, l.good) >= missing;
+          l.shortPeriods = ready ? l.shortPeriods + 1 : 0;
+          if (short && !ready) {
+            // The supplier couldn't: another settlement with the goods takes
+            // over, or the amount is halved (no hard feelings).
+            l.behind++;
+            const other = exportHub(sim, l.supplier, l.buyer, l.good, l.amount);
+            if (other >= 0) {
+              l.hub = other;
+              tookOver = true;
+            } else if (l.behind >= HALVE_PERIODS) {
+              l.amount *= 0.5;
+              shrunk = true;
+            }
+          } else if (!short) l.behind = 0;
+          l.periods++;
+          l.delivered = 0;
+          l.periodStart = sim.tick;
+        }
+        if (l.shortPeriods >= BREACH_PERIODS && !broken) broken = l;
+      }
+      if (broken) {
+        // Only the side that got too little holds it against the other.
+        addMood(dip, broken.buyer, broken.supplier, 'Broke a trade agreement with us', CLOSED_TRUST, sim.tick);
+        record(`The trade agreement for ${what} broke: too little ${lower(broken.good)} arrived.`, capital(broken.buyer), false);
         pause(t);
         continue;
       }
-      if (second) {
-        first.amount = (amounts as [number, number])[0];
-        second.amount = (amounts as [number, number])[1];
-      } else first.amount = amounts as number;
-      t.since = sim.tick;
+      if (shrunk && second) {
+        // Both legs keep the same value.
+        const value = Math.min(first.amount * PRICE[first.good], second.amount * PRICE[second.good]);
+        first.amount = value / PRICE[first.good];
+        second.amount = value / PRICE[second.good];
+      }
+      if (shrunk && t.legs.some((l) => l.amount < AGREEMENT_MIN_AMOUNT)) {
+        record(`The trade agreement for ${what} ended: too little could be delivered.`, capital(first.buyer), false);
+        pause(t);
+        continue;
+      }
+      if (sim.tick - t.since >= AGREEMENT_YEARS * TICKS_PER_YEAR) {
+        // Renegotiated, from the hubs that suit best now.
+        for (const l of t.legs) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
+        const amounts = second
+          ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier))
+          : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
+        const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
+        if (!ok || !mutual(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
+          record(`The trade agreement for ${what} ran out.`, capital(first.buyer), false);
+          pause(t);
+          continue;
+        }
+        if (second) {
+          first.amount = (amounts as [number, number])[0];
+          second.amount = (amounts as [number, number])[1];
+        } else first.amount = amounts as number;
+        t.since = sim.tick;
+      }
+      // The hub may be gone or a better one may exist by now (unless another
+      // settlement just took over the deliveries).
+      for (const l of t.legs) {
+        if (sim.world.owner[l.hub] !== l.supplier || (sim.tick - l.periodStart === 0 && !tookOver)) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
+      }
+      kept.push(t);
     }
-    // The hub may be gone or a better one may exist by now (unless another
-    // settlement just took over the deliveries).
-    for (const l of t.legs) {
-      if (sim.world.owner[l.hub] !== l.supplier || (sim.tick - l.periodStart === 0 && !tookOver)) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
-    }
-    kept.push(t);
+    dip.agreements = kept;
+    rebuildPartners(dip);
   }
-  dip.agreements = kept;
-  rebuildPartners(dip);
+  if (step === 1) return 2;
   const free = (supplier: number, buyer: number, g: number) =>
-    g !== TradeGood.Money && !agreementFor(dip, supplier, buyer, g) && (dip.agreementPause.get(agreementKey(supplier, buyer, g)) ?? -1) <= sim.tick;
+    g !== TradeGood.Money && !agreementFor(dip, supplier, buyer, g) && (!isStrategic(g) || mayBuyStrategic(sim, supplier, buyer, PAIRS)) && (dip.agreementPause.get(agreementKey(supplier, buyer, g)) ?? -1) <= sim.tick;
   const leg = (supplier: number, buyer: number, good: number, amount: number, hub: number): TradeLeg => ({
     supplier,
     buyer,
@@ -679,15 +723,31 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     behind: 0,
     hub,
   });
-  for (const a of living) {
+  // A hub doesn't depend on the good (no stock asked for) and the ways only
+  // change with the partners: each pair's hub is searched once until then.
+  const hubs = new Map<number, number>();
+  const hubFor = (supplier: number, buyer: number) => {
+    const key = pair(supplier, buyer);
+    let hub = hubs.get(key);
+    if (hub === undefined) {
+      hub = exportHub(sim, supplier, buyer, 0);
+      hubs.set(key, hub);
+    }
+    return hub;
+  };
+  // New agreements: one buyer per step (step 2 + i: the i-th living people), all at once without steps.
+  const firstBuyer = step < 0 ? 0 : step - 2;
+  const endBuyer = step < 0 ? living.length : Math.min(living.length, firstBuyer + 1);
+  for (let ia = firstBuyer; ia < endBuyer; ia++) {
+    const a = living[ia];
     for (const b of living) {
-      if (a === b || !dip.known[pair(a, b)] || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
+      if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
         const amount = agreedAmount(civWant, civSpare, goods, b, a, g);
         if (amount < AGREEMENT_MIN_AMOUNT) continue;
-        const hub = exportHub(sim, b, a, g);
+        const hub = hubFor(b, a);
         if (hub < 0) continue;
         // The counter goods worth the most, up to the value of this one; the
         // first of COUNTER_TRIES that a's merchants can bring to b.
@@ -710,7 +770,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           if (!amounts0) break;
           tried++;
           triedGoods |= 1 << h0;
-          counterHub = exportHub(sim, a, b, h0);
+          counterHub = hubFor(a, b);
           const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, spareVia(dip, civWant, civSpare, a, h0, b)) : null;
           if (balanced) {
             best = h0;
@@ -737,14 +797,17 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           record(`The ${name(b)} agreed to deliver ${Math.round(amount)} ${lower(g)} a year to the ${name(a)}.`, capital(a), false);
         } else continue;
         rebuildPartners(dip);
+        hubs.clear();
       }
     }
   }
+  if (endBuyer < living.length) return step + 1;
   rebuildPartners(dip);
   refreshRelations(sim, living);
   // Export hubs and what is owed changed: trade.ts marks them anew.
   sim.trade.hubTick = -1;
   sim.trade.owedTick = -1;
+  return -1;
 }
 
 const agreementKey = (supplier: number, buyer: number, good: number) => (supplier * PAIRS + buyer) * 64 + good;
@@ -856,6 +919,7 @@ export function trustValue(sim: Simulation, a: number, b: number): number {
     sum += AGREEMENT_TRUST;
     if (deliversUs(t, a, b)) sum += LACK_TRUST;
   }
+  if (sim.war.pactCount > 0) sum += pactTrust(sim, a, b);
   const moods = dip.moods.get(k);
   if (moods) for (const m of moods) sum += moodNow(m, sim.tick);
   return clamp100(sum);
@@ -866,7 +930,7 @@ export function dangerValue(sim: Simulation, a: number, b: number): number {
   const civA = sim.civs[a];
   const civB = sim.civs[b];
   if (!civA || !civB) return 0;
-  const size = Math.min(100, (DANGER_SCALE * civB.population) / Math.max(1, civA.population));
+  const size = strengthSize(sim, a, b, DANGER_SCALE);
   return clamp100(size * nearness(sim.diplomacy.distance[pair(a, b)]));
 }
 
@@ -887,6 +951,11 @@ export type Relation = {
   /** Trade agreements between the two, as "12 wood a year to the X" (one-sided) or "… for 3 tools" (two-sided). */
   deals: string[];
   distance: number;
+  /** War phase 4: 0 none, 1 defense pact, 2 alliance (pacts.ts: Pact), a defense pact's common threat (people id, else 0). */
+  pact: number;
+  pactThreat: number;
+  /** Whether the two are on opposite sides of a war (main parties or allies). */
+  atWar: boolean;
 };
 
 export function relationsOf(sim: Simulation, a: number): Relation[] {
@@ -913,6 +982,9 @@ export function relationsOf(sim: Simulation, a: number): Relation[] {
       migration: dip.migration[pair(a, b)] === 1,
       deals,
       distance: dip.distance[pair(a, b)],
+      pact: sim.war.pact[pair(a, b)],
+      pactThreat: sim.war.pact[pair(a, b)] === 1 ? sim.war.pactX[pair(a, b)] : 0,
+      atWar: sim.war.foe[pair(a, b)] > 0,
     });
   }
   return out;

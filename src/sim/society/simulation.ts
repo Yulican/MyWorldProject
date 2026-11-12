@@ -1,3 +1,5 @@
+import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
+import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import {
   advanceGovernment,
   createGovernment,
@@ -27,7 +29,7 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
-import { BUILDINGS, FIRST_LUXURY, cityTier, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, type Economy } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, cityTier, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, isStored, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
   EXPAND_MIN_CONNECTION,
@@ -44,10 +46,7 @@ import {
 } from './economy';
 import {
   MOOD_NEW_PEOPLE,
-  MOOD_REVOLUTION_LOST,
-  MOOD_REVOLUTION_WON,
   SATISFACTION_MAX,
-  UNHAPPY_QUARTERS,
   addMood,
   birthFactor,
   cellOwners,
@@ -64,7 +63,7 @@ import {
   mayPass,
   PAIRS,
   measureDistances,
-  updateTransitHubs,
+  updateTransitHubsStep,
   noteEmigration,
   payToll,
   resetCivRelations,
@@ -91,6 +90,12 @@ const SEATS_WEEK = 6;
 const CAPTURE_WEEK = 19;
 const SUPPLY_ROADS_WEEK = 32;
 const DIPLOMACY_WEEK = 45;
+/** Soldiers' pay, training and strength (military.ts), before diplomacy rates the danger from it. */
+const MILITARY_WEEK = 40;
+/** Age of a dismissed soldier who goes back to the population (soldiers don't age). */
+const SOLDIER_RETURN_AGE = 30;
+/** The war's yearly part: end checks, new armies, declarations (war.ts). */
+const WAR_WEEK = 47;
 const GOVERNMENT_WEEK = 28;
 const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
@@ -113,9 +118,6 @@ const ADULT_AGE = 16;
 /** Civilization slots per cell in `cellCivPop` at first (index 0 = nobody); doubles as needed. */
 const INITIAL_CIV_SLOTS = 8;
 export { EXPANSION_GROUP };
-/** A league of settlements ready to break away needs this many settlements or people. */
-export const LEAGUE_MIN_SETTLEMENTS = 3;
-export const LEAGUE_MIN_PEOPLE = 100;
 /** Unhappy people move to settlements reachable by road within this travel cost. */
 const MIGRATION_REACH = 8;
 /** ...that are at least this much more satisfied than their own. */
@@ -141,7 +143,9 @@ const GOOD_LAND_PEOPLE = 150;
 /** Years of population and believer counts kept for the trend chart. */
 const HISTORY_YEARS = 200;
 const NEW_TRIBE_MIN_YEAR = 25;
-const NEW_TRIBE_CHANCE = 0.02;
+const NEW_TRIBE_CHANCE = 0.03;
+/** Soft cap on living peoples and yearly chance of a new tribe; mutable only for tools/warMapStats.ts comparisons. */
+export const TRIBE_TUNING = { maxCivs: MAX_CIVS, tribeChance: NEW_TRIBE_CHANCE };
 /** New tribes appear at least this many hexes from anyone else. */
 const NEW_TRIBE_DISTANCE = 8;
 
@@ -208,6 +212,10 @@ export type Simulation = {
   diplomacy: Diplomacy;
   /** The central government of every people: districts, taxes, treasuries, its buildings and traders (see government.ts). */
   government: Government;
+  /** Soldiers and strengths (see military.ts). */
+  military: Military;
+  /** Wars, armies and sieges (see war.ts). */
+  war: WarState;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -232,6 +240,8 @@ export type Simulation = {
   refreshOwner: Uint8Array | null;
   /** The current tick's seat planning while it runs in parts. */
   seatPlan: SeatPlan | null;
+  /** The next step of a yearly plan that runs in several parts (the military's, the war's, diplomacy's); 0 otherwise. */
+  planStep: number;
   /** The current tick's government year (districts, taxes) while it runs in parts. */
   governmentYear: GovernmentYear | null;
   /** The hex the current tick's economy continues at while it runs in parts; -1 before it starts. */
@@ -267,6 +277,8 @@ export function createSimulation(world: World): Simulation {
     trade: createTrade(world.seed, n),
     diplomacy: createDiplomacy(n),
     government: createGovernment(n),
+    military: createMilitary(n),
+    war: createWar(world.seed, n),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -279,6 +291,7 @@ export function createSimulation(world: World): Simulation {
     part: TickPart.Start,
     refreshOwner: null,
     seatPlan: null,
+    planStep: 0,
     governmentYear: null,
     economyCell: -1,
   };
@@ -319,11 +332,32 @@ export const TickPart = {
   RefreshPeople: 6,
   /** Quarterly: the map snapshot. */
   RefreshSnapshot: 7,
-  /** The yearly plan of this week (seats of government in several parts). */
+  /** The yearly plan of this week (seats of government, the government's, military's, war's and diplomacy's years in several parts). */
   Plan: 8,
-  /** Government traders, distances, transit hubs, the year's totals. */
+  /** Government traders, armies on their way, battles and sieges. */
+  Armies: 10,
+  /** Distances. */
   Finish: 9,
+  /** Transit hubs (a few per part), the year's totals. */
+  Hubs: 11,
 } as const;
+/** Number of TickPart values (for tables by part). */
+export const TICK_PARTS = 12;
+/** TickPart names by value (perf diagnostics). */
+export const TICK_PART_NAMES = [
+  'Start',
+  'YearEnd',
+  'Economy',
+  'RefreshLand',
+  'RefreshCutOff',
+  'RefreshSatisfaction',
+  'RefreshPeople',
+  'RefreshSnapshot',
+  'Plan',
+  'Finish',
+  'Armies',
+  'Hubs',
+] as const;
 export type TickPart = (typeof TickPart)[keyof typeof TickPart];
 
 /** Advances the world by one week (or finishes the week stepSimulationPart has started). */
@@ -401,7 +435,6 @@ export function stepSimulationPart(sim: Simulation): boolean {
       const owner = sim.refreshOwner!;
       sim.refreshOwner = null;
       emigrate(sim, owner);
-      breakAway(sim, owner);
       sim.part = TickPart.RefreshSnapshot;
       return false;
     }
@@ -426,17 +459,56 @@ export function stepSimulationPart(sim: Simulation): boolean {
         sim.seatPlan = null;
       } else if (weekOfYear === CAPTURE_WEEK) captureDeposits(sim, owner);
       else if (weekOfYear === SUPPLY_ROADS_WEEK) buildSupplyRoads(sim, owner);
-      else if (weekOfYear === DIPLOMACY_WEEK) updateDiplomacy(sim, owner, (text, cell, important) => record(sim, text, cell, important));
+      else if (weekOfYear === MILITARY_WEEK) {
+        const next = runMilitaryYearStep(sim, sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
+      else if (weekOfYear === WAR_WEEK) {
+        // One running war per part, then the declarations up to one new war per part.
+        const next = runWarYearStep(sim, sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
+      else if (weekOfYear === DIPLOMACY_WEEK) {
+        // Relations, the running trade agreements, new ones: a part each.
+        const next = updateDiplomacy(sim, owner, (text, cell, important) => record(sim, text, cell, important), sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell, important) => record(sim, text, cell, important));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
+      sim.part = TickPart.Armies;
+      return false;
+    }
+    case TickPart.Armies: {
+      advanceGovernment(sim);
+      advanceWar(sim);
       sim.part = TickPart.Finish;
       return false;
     }
     case TickPart.Finish: {
-      advanceGovernment(sim);
       measureDistances(sim, sim.world.owner);
-      updateTransitHubs(sim);
+      sim.part = TickPart.Hubs;
+      return false;
+    }
+    case TickPart.Hubs: {
+      const next = updateTransitHubsStep(sim, sim.planStep);
+      if (next >= 0) {
+        sim.planStep = next;
+        return false;
+      }
+      sim.planStep = 0;
       if (weekOfYear === 0) closeYear(sim);
       sim.part = TickPart.Start;
       return true;
@@ -491,6 +563,102 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
   sim.cellCivPop[cell * sim.civSlots + civ]++;
 }
 
+/** The military's year (military.ts: updateMilitary): pay, dismissals, training; trained adults leave the population, dismissed soldiers return to it. */
+export function runMilitaryYear(sim: Simulation): void {
+  for (let step = 0; step >= 0; step = runMilitaryYearStep(sim, step));
+}
+
+/** runMilitaryYear in two steps (0, then 1; returns the next, -1 after the last), so the game clock can spread it over frames. */
+function runMilitaryYearStep(sim: Simulation, step: number): number {
+  const owner = sim.world.owner;
+  if (step === 0) {
+    updateMilitary(sim, owner);
+    drawSoldiers(sim);
+    return 1;
+  }
+  returnSoldiers(sim, owner);
+  reconcileWar(sim);
+  return -1;
+}
+
+/**
+ * Soldiers dismissed for lack of pay, or beyond their buildings' capacity
+ * (military.release), go back to their settlement as adults of its people,
+ * with their soldiers' mean faith; without a settlement they are lost.
+ */
+function returnSoldiers(sim: Simulation, owner: Uint8Array): void {
+  const { military } = sim;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    const n = military.release[c];
+    const stay = soldiersAt(sim, c);
+    if (n === 0) {
+      if (stay === 0) military.faith[c] = 0;
+      continue;
+    }
+    military.release[c] = 0;
+    const faith = military.faith[c] / (stay + n);
+    military.faith[c] = stay > 0 ? faith * stay : 0;
+    const civ = owner[c];
+    if (civ === 0 || sim.cellPop[c] === 0) continue;
+    for (let k = 0; k < n; k++) addInhabitant(sim, c, civ, SOLDIER_RETURN_AGE, faith);
+    if (faith >= BELIEVER_FAITH) sim.civs[civ]!.faithYear.discharged += n;
+  }
+}
+
+/**
+ * Takes the adults the military buildings trained (military.train per hex)
+ * out of the population; their faith goes with them (military.faith).
+ * Soldiers not found among the adults are dropped.
+ */
+export function drawSoldiers(sim: Simulation): void {
+  const { pop, military } = sim;
+  let open = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) open += military.train[c];
+  if (open === 0) return;
+  for (let i = 0; i < pop.end && open > 0; i++) {
+    if (!pop.alive[i] || pop.age[i] < ADULT_AGE) continue;
+    const c = pop.cell[i];
+    if (military.train[c] === 0) continue;
+    military.train[c]--;
+    open--;
+    military.faith[c] += pop.faith[i];
+    const civ = sim.civs[pop.civ[i]];
+    if (civ && pop.faith[i] >= BELIEVER_FAITH) civ.faithYear.enlisted++;
+    removeInhabitant(sim, i);
+  }
+  // Rare: fewer adults than counted; the missing soldiers are not there.
+  if (open > 0) {
+    for (let c = 0; c < sim.world.cellCount && open > 0; c++) {
+      let missing = military.train[c];
+      for (let t = 0; t < TROOP_TYPES && missing > 0; t++) {
+        const cut = Math.min(missing, military.soldiers[c * TROOP_TYPES + t]);
+        military.soldiers[c * TROOP_TYPES + t] -= cut;
+        missing -= cut;
+      }
+      open -= military.train[c];
+      military.train[c] = 0;
+    }
+  }
+}
+
+/**
+ * War phase 5: `n` soldiers of the cell (melee, militia) go back to its
+ * people as adults, with the soldiers' mean faith (like returnSoldiers).
+ */
+export function dischargeSoldiers(sim: Simulation, cell: number, n: number): void {
+  const m = sim.military;
+  const have = Math.min(n, m.soldiers[cell * TROOP_TYPES]);
+  if (have <= 0) return;
+  const before = soldiersAt(sim, cell);
+  m.soldiers[cell * TROOP_TYPES] -= have;
+  const stay = before - have;
+  const faith = before > 0 ? m.faith[cell] / before : 0.5;
+  m.faith[cell] = stay > 0 ? faith * stay : 0;
+  const civ = sim.world.owner[cell];
+  if (civ === 0 || sim.cellPop[cell] === 0) return;
+  for (let k = 0; k < have; k++) addInhabitant(sim, cell, civ, SOLDIER_RETURN_AGE, faith);
+}
+
 function removeInhabitant(sim: Simulation, i: number): void {
   const { pop } = sim;
   const cell = pop.cell[i];
@@ -511,7 +679,7 @@ function moveInhabitant(sim: Simulation, i: number, to: number): void {
   pop.cell[i] = to;
 }
 
-function changeCiv(sim: Simulation, i: number, civ: number): void {
+export function changeCiv(sim: Simulation, i: number, civ: number): void {
   const { pop } = sim;
   const cell = pop.cell[i];
   sim.cellCivPop[cell * sim.civSlots + pop.civ[i]]--;
@@ -779,7 +947,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
       const st = economy.state[s];
       if (st === SlotState.Empty || st === SlotState.Ruin) continue;
       const good = BUILDINGS[economy.type[s]].good;
-      if (isLuxury(good)) makes[owner[c]] |= 1 << (good - FIRST_LUXURY);
+      if (isStored(good)) makes[owner[c]] |= 1 << (good - FIRST_LUXURY);
     }
   }
   const free = (c: number) => owner[c] === 0 && sim.cellPop[c] === 0 && !isWaterBiome(world.biome[c]) && sim.cellCapacity[c] >= group;
@@ -807,7 +975,9 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
           prev[nb] = c;
           touched.push(nb);
           const workshop = WORKSHOP_OF[world.deposit[nb]];
-          if (workshop !== undefined && !(makes[civ.id] & (1 << (BUILDINGS[workshop].good - FIRST_LUXURY)))) found = nb;
+          // Luxury deposits always; iron and flint only while the people feels threatened (war phase 1).
+          const good = workshop === undefined ? -1 : BUILDINGS[workshop].good;
+          if (good >= 0 && !(makes[civ.id] & (1 << (good - FIRST_LUXURY))) && (isLuxury(good) || (isStored(good) && threatened(sim, civ.id, PAIRS)))) found = nb;
           else next.push(nb);
         }
       }
@@ -995,12 +1165,26 @@ function moveGroup(sim: Simulation, from: number, to: number, civId: number, cou
  * Recomputes the per-hex snapshot the map shows (owner, population, faith),
  * civilization stats, extinctions and game over.
  */
+/** refreshSnapshot's sums, reused (a new world or more peoples make them anew). */
+let snapFaith = new Float64Array(0);
+let snapCivFaith = new Float64Array(0);
+let snapBelievers = new Int32Array(0);
+let snapCivPop = new Int32Array(0);
+let snapTerritory = new Int32Array(0);
+
 function refreshSnapshot(sim: Simulation): void {
   const { world, pop } = sim;
 
-  const faithSum = new Float64Array(world.cellCount);
-  const believers = new Int32Array(sim.civSlots);
-  const civFaithSum = new Float64Array(sim.civSlots);
+  if (snapFaith.length !== world.cellCount) snapFaith = new Float64Array(world.cellCount);
+  if (snapCivPop.length !== sim.civSlots) {
+    snapCivFaith = new Float64Array(sim.civSlots);
+    snapBelievers = new Int32Array(sim.civSlots);
+    snapCivPop = new Int32Array(sim.civSlots);
+    snapTerritory = new Int32Array(sim.civSlots);
+  }
+  const faithSum = snapFaith.fill(0);
+  const believers = snapBelievers.fill(0);
+  const civFaithSum = snapCivFaith.fill(0);
   sim.cellAdults.fill(0);
   for (let i = 0; i < pop.end; i++) {
     if (!pop.alive[i]) continue;
@@ -1010,15 +1194,16 @@ function refreshSnapshot(sim: Simulation): void {
     if (pop.faith[i] >= BELIEVER_FAITH) believers[pop.civ[i]]++;
   }
 
-  const civPop = new Int32Array(sim.civSlots);
-  const territory = new Int32Array(sim.civSlots);
+  const civPop = snapCivPop.fill(0);
+  const territory = snapTerritory.fill(0);
   for (let c = 0; c < world.cellCount; c++) {
     const people = sim.cellPop[c];
     world.population[c] = people;
     world.faith[c] = people > 0 ? faithSum[c] / people : 0;
     let owner = 0;
     let most = 0;
-    for (let id = 1; id < sim.civSlots; id++) {
+    // An empty hex has nobody of any people (most hexes: skip them).
+    for (let id = 1; people > 0 && id < sim.civSlots; id++) {
       const n = sim.cellCivPop[c * sim.civSlots + id];
       civPop[id] += n;
       if (n > most) {
@@ -1064,7 +1249,7 @@ function refreshSnapshot(sim: Simulation): void {
   sim.snapshotVersion++;
 }
 
-function mostPopulousCell(sim: Simulation, civId: number, allowed: Uint8Array | null): number {
+export function mostPopulousCell(sim: Simulation, civId: number, allowed: Uint8Array | null): number {
   let best = -1;
   let most = 0;
   for (let c = 0; c < sim.world.cellCount; c++) {
@@ -1205,87 +1390,14 @@ function neighborDirection(world: World, cell: number, other: number): number {
   return -1;
 }
 
-/**
- * Quarterly: settlements below zero for UNHAPPY_QUARTERS in a row (never a
- * capital) that are joined by roads form leagues; a league with at least
- * LEAGUE_MIN_SETTLEMENTS settlements or LEAGUE_MIN_PEOPLE people breaks away
- * as a new people. Its capital is its most populous seat of government, else
- * its most populous settlement. Faith stays as it is; the new people starts
- * proud of its revolution, the old one is shaken. Satisfied settlements stay
- * with their people, and a lone unhappy settlement only loses people.
- */
-function breakAway(sim: Simulation, owner: Uint8Array): void {
-  const { world, pop } = sim;
-  const n = world.cellCount;
-  const ready = UNHAPPY_QUARTERS;
-  // Settlements ready to break away (never a capital), by people.
-  const byCiv = new Map<number, number[]>();
-  for (let c = 0; c < n; c++) {
-    if (sim.unhappyQuarters[c] < ready || owner[c] === 0 || sim.civs[owner[c]]?.capital === c) continue;
-    const list = byCiv.get(owner[c]);
-    if (list) list.push(c);
-    else byCiv.set(owner[c], [c]);
-  }
-  if (byCiv.size === 0) return;
-  const league = new Int32Array(n).fill(-1);
-  for (const [parentId, restlessCells] of byCiv) {
-    const parent = sim.civs[parentId]!;
-    const restless = (c: number) => owner[c] === parentId && sim.unhappyQuarters[c] >= ready && c !== parent.capital;
-    const leagues: number[][] = [];
-    for (const start of restlessCells) {
-      if (league[start] >= 0) continue;
-      const cells = [start];
-      league[start] = leagues.length;
-      for (let k = 0; k < cells.length; k++) {
-        const c = cells[k];
-        for (let d = 0; d < DIRECTION_COUNT; d++) {
-          if (!hasRoad(world, c, d)) continue;
-          const nb = world.neighbors[c * DIRECTION_COUNT + d];
-          if (nb < 0 || league[nb] >= 0 || !restless(nb)) continue;
-          league[nb] = leagues.length;
-          cells.push(nb);
-        }
-      }
-      leagues.push(cells);
-    }
-    for (const cells of leagues) {
-      const people = cells.reduce((sum, c) => sum + sim.cellCivPop[c * sim.civSlots + parent.id], 0);
-      if (cells.length < LEAGUE_MIN_SETTLEMENTS && people < LEAGUE_MIN_PEOPLE) continue;
-      const inLeague = new Uint8Array(n);
-      for (const c of cells) inLeague[c] = 1;
-      let capital = -1;
-      for (const c of cells) {
-        if (hasSeat(sim.economy, c) && (capital < 0 || sim.cellPop[c] > sim.cellPop[capital])) capital = c;
-      }
-      if (capital < 0) capital = mostPopulousCell(sim, parent.id, inLeague);
-      UPRISING_HOOK.fn?.(sim, cells, parent.id);
-      const civ = foundCivilization(sim, 'revolution', capital, parent);
-      if (!civ) return; // all civilization ids in use; try again next quarter
-      for (let i = 0; i < pop.end; i++) {
-        if (!pop.alive[i] || pop.civ[i] !== parent.id || !inLeague[pop.cell[i]]) continue;
-        if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
-        changeCiv(sim, i, civ.id);
-      }
-      for (const c of cells) {
-        sim.unhappyQuarters[c] = 0;
-        owner[c] = civ.id;
-      }
-      addMood(civ, 'Won its revolution', MOOD_REVOLUTION_WON, sim.tick);
-      addMood(parent, 'Lost a revolution', MOOD_REVOLUTION_LOST, sim.tick);
-      const who = cells.length === 1 ? 'A settlement' : `${cells.length} settlements`;
-      record(sim, `${who} in the ${biomeName(world, capital)} rose up against the ${parent.name} and became the ${civ.name}.`, capital, true);
-    }
-  }
-}
-
-/** Statistics only (tools/economyStats.ts: why settlements rise up): called with the settlements of every uprising before they become a people; unset in the game. */
+/** Statistics only (tools/economyStats.ts: why settlements rise up): called with the settlements of every rebel group (rebellion.ts) before they change sides; unset in the game. */
 export const UPRISING_HOOK: { fn: ((sim: Simulation, cells: readonly number[], parent: number) => void) | null } = { fn: null };
 
 /** Occasionally a new people appears in empty, livable land far from everyone. */
 function tryNewTribe(sim: Simulation): void {
   const { world, rng } = sim;
-  if (simulationYear(sim) < NEW_TRIBE_MIN_YEAR || livingCivilizations(sim).length >= MAX_CIVS) return;
-  if (rng() >= NEW_TRIBE_CHANCE) return;
+  if (simulationYear(sim) < NEW_TRIBE_MIN_YEAR || livingCivilizations(sim).length >= TRIBE_TUNING.maxCivs) return;
+  if (rng() >= TRIBE_TUNING.tribeChance) return;
 
   const settled: number[] = [];
   for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > 0) settled.push(c);
@@ -1315,7 +1427,7 @@ function tryNewTribe(sim: Simulation): void {
  * around its capital; a breakaway starts halfway between that and its
  * parent's culture.
  */
-function foundCivilization(
+export function foundCivilization(
   sim: Simulation,
   origin: CivOrigin,
   capital: number,
@@ -1344,6 +1456,7 @@ function foundCivilization(
   if (parent) civ.parentName = parent.name;
   addMood(civ, 'A new people', MOOD_NEW_PEOPLE, sim.tick);
   resetCivRelations(sim.diplomacy, id);
+  resetWarCiv(sim, id);
   sim.civs[id] = civ;
   return civ;
 }
@@ -1402,6 +1515,6 @@ function biomeName(world: World, cell: number): string {
   return BIOMES[world.biome[cell]].name.toLowerCase();
 }
 
-function record(sim: Simulation, text: string, cell: number, important: boolean): void {
+export function record(sim: Simulation, text: string, cell: number, important = false): void {
   sim.chronicle.push({ tick: sim.tick, text, cell, important });
 }

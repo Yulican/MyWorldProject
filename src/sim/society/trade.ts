@@ -4,7 +4,8 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { isWaterBiome } from '../world/biomes';
 import { addRoad, hasRoad, oppositeDirection, ROAD_TRAVEL_FACTOR } from '../world/roads';
 import type { World } from '../world/world';
-import { BUILDINGS, Good, LUXURY_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { BUILDINGS, Good, LUXURY_COUNT, STORED_COUNT, MATERIAL_COUNT, SETTLEMENT_SLOTS, SLOTS, SlotState, forageYield, withBuildings, type Economy } from './buildings';
+import { MIL, TROOP_GOOD, TROOP_TYPES, mayBuyStrategic, yearlyGoodNeed } from './military';
 import { PAIRS, agreementFor, hasFreeTrade, legOwed, mayPass, payToll, suppliesTo, tollValue } from './diplomacy';
 import { LUXURY_PER_PERSON, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -23,12 +24,14 @@ import { SUPPLY_KINDS, SupplyKind, type SupplyModifier } from './supply';
 
 /** Goods merchants carry, as indexed in Trade's per-cell arrays. Luxury goods follow from TradeGood.Luxury on. */
 export const TradeGood = { Wood: 0, Stone: 1, Money: 2, Grain: 3, Water: 4, Luxury: 5 } as const;
-export const TRADE_GOODS = 5 + LUXURY_COUNT;
-export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Salt', 'Spices', 'Gems', 'Gold', 'Marble', 'Horses'] as const;
+export const TRADE_GOODS = 5 + STORED_COUNT;
+export const TRADE_GOOD_NAMES = ['Wood', 'Stone', 'Money', 'Grain', 'Water', 'Salt', 'Spices', 'Gems', 'Marble', 'Horses', 'Iron', 'Flint'] as const;
 /** Weight of one unit; a merchant carries MERCHANT_LOAD. */
-const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+const WEIGHT = [1, 1.5, 0.1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 /** Money one unit costs. */
-export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5];
+export const PRICE = [1, 1.5, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5];
+/** Trade goods that are strategic (horses, iron, flint: the last three of the stored goods): sold only to peoples that don't threaten the seller (military.ts: mayBuyStrategic). */
+export const isStrategic = (g: number) => g >= TradeGood.Luxury + STORED_COUNT - 3;
 export const MERCHANT_LOAD = 40;
 /** Money every adult earns per year. */
 export const MONEY_PER_ADULT = 0.1;
@@ -209,7 +212,7 @@ export function stockOf(eco: Economy, cell: number, good: number): number {
   if (good <= TradeGood.Stone) return eco.stock[cell * MATERIAL_COUNT + good];
   if (good === TradeGood.Money) return eco.money[cell];
   if (good <= TradeGood.Water) return eco.provisions[cell * 2 + good - TradeGood.Grain];
-  return eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury];
+  return eco.luxury[cell * STORED_COUNT + good - TradeGood.Luxury];
 }
 
 /** Adds to (or takes from) a hex's stock; grain and water change its supply, so with `trade` it is marked for an update. */
@@ -219,7 +222,7 @@ export function addStock(eco: Economy, cell: number, good: number, amount: numbe
   else if (good <= TradeGood.Water) {
     eco.provisions[cell * 2 + good - TradeGood.Grain] += amount;
     if (trade && amount !== 0) markSupply(trade, cell);
-  } else eco.luxury[cell * LUXURY_COUNT + good - TradeGood.Luxury] += amount;
+  } else eco.luxury[cell * STORED_COUNT + good - TradeGood.Luxury] += amount;
 }
 
 /** Grain and water in stock as food and water supply (up to PROVISIONS_MAX people). */
@@ -275,6 +278,8 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   trade.surplus.fill(0, t, t + TRADE_GOODS);
   trade.interest[cell] = 0;
   if (people === 0) return changed;
+  // A besieged seat's settlement does not trade (war phase 3b).
+  if (sim.war.siege[cell] === 1) return changed;
 
   // Wood and stone: ask for what the next building lacks, spare what is
   // beyond it and a reserve for upkeep.
@@ -330,9 +335,21 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   const keep = people * LUXURY_PER_PERSON * LUXURY_YEARS;
   for (let k = 0; k < LUXURY_COUNT; k++) {
     const g = TradeGood.Luxury + k;
-    const stock = economy.luxury[cell * LUXURY_COUNT + k];
+    const stock = economy.luxury[cell * STORED_COUNT + k];
     trade.want[t + g] = Math.max(0, keep - stock - trade.incoming[t + g]);
     trade.surplus[t + g] = Math.max(0, stock - keep);
+  }
+  // Strategic goods (war): the soldiers' yearly need of MIL.keepYears years is kept and asked for, on top of the
+  // luxury need of horses; the rest is for sale. Iron and flint have no other use, and the soldiers' wish for
+  // them weighs MIL.wish times (so trade agreements form for them).
+  for (let tt = 0; tt < TROOP_TYPES; tt++) {
+    const k = TROOP_GOOD[tt];
+    const g = TradeGood.Luxury + k;
+    const stock = economy.luxury[cell * STORED_COUNT + k];
+    const army = yearlyGoodNeed(sim, cell, tt) * MIL.keepYears;
+    const own = k < LUXURY_COUNT ? keep : 0;
+    trade.want[t + g] = Math.max(0, own + army * (k < LUXURY_COUNT ? 1 : MIL.wish) - stock - trade.incoming[t + g]);
+    trade.surplus[t + g] = Math.max(0, stock - own - army);
   }
   // An export hub asks its people for what its trade agreements still owe;
   // that stock is its surplus for the buyers. The further behind its
@@ -485,6 +502,10 @@ function isPartner(sim: Simulation, civ: number, other: number): boolean {
 let trialSupplier = -1;
 let trialBuyer = -1;
 
+/** exportHub's candidate settlements and their sort keys. */
+const hubHomes = new Int32Array(HUB_CANDIDATES);
+const hubKeys = new Float64Array(HUB_CANDIDATES);
+
 /**
  * The export hub for a trade agreement: the settlement of `supplier` with
  * merchants that reaches a settlement of `buyer` soonest on ways (as under
@@ -503,18 +524,33 @@ export function exportHub(sim: Simulation, supplier: number, buyer: number, good
   // Only HUB_CANDIDATES settlements with merchants are searched from: the
   // nearest to the buyer's capital, or those with the most in stock.
   const capital = sim.civs[buyer]?.capital ?? -1;
-  const homes: number[] = [];
+  // The first HUB_CANDIDATES by that order (ties: the lower cell), kept sorted while scanning.
+  let count = 0;
   for (let home = 0; home < world.cellCount; home++) {
-    if (owner[home] === supplier && trade.merchants[home] && (stocked <= 0 || stockOf(economy, home, good) >= stocked)) homes.push(home);
-  }
-  if (stocked > 0) homes.sort((a, b) => stockOf(economy, b, good) - stockOf(economy, a, good) || a - b);
-  else if (capital >= 0) homes.sort((a, b) => hexDistance(world, a, capital) - hexDistance(world, b, capital) || a - b);
-  for (const home of homes.slice(0, HUB_CANDIDATES)) {
-    let nearest = Infinity;
-    for (const t of searchWays(sim, owner, home, MAX_TRIP_COST, -1)) {
-      if (owner[t] === buyer && sim.cellPop[t] > 0) nearest = Math.min(nearest, wayCost[t]);
+    if (owner[home] !== supplier || !trade.merchants[home]) continue;
+    let key = 0;
+    if (stocked > 0) {
+      const stock = stockOf(economy, home, good);
+      if (stock < stocked) continue;
+      key = -stock;
+    } else if (capital >= 0) key = hexDistance(world, home, capital);
+    // Cells come in rising order, so an equal key stays behind the earlier cell.
+    let i = Math.min(count, HUB_CANDIDATES);
+    if (i === HUB_CANDIDATES && key >= hubKeys[i - 1]) continue;
+    while (i > 0 && key < hubKeys[i - 1]) {
+      if (i < HUB_CANDIDATES) {
+        hubKeys[i] = hubKeys[i - 1];
+        hubHomes[i] = hubHomes[i - 1];
+      }
+      i--;
     }
-    resetWays();
+    hubKeys[i] = key;
+    hubHomes[i] = home;
+    count++;
+  }
+  for (let j = 0; j < Math.min(count, HUB_CANDIDATES); j++) {
+    const home = hubHomes[j];
+    const nearest = nearestWay(sim, owner, home, MAX_TRIP_COST, buyer, hubCost);
     if (nearest < hubCost) {
       hubCost = nearest;
       hub = home;
@@ -597,6 +633,54 @@ function searchWays(sim: Simulation, owner: Uint8Array, from: number, maxCost: n
   return wayReached;
 }
 
+/**
+ * The cost of the cheapest way (as searchWays finds it) from `from` to a
+ * settlement of `buyer`; Infinity if there is none, or none cheaper than
+ * `below`. The search stops at the first such settlement it takes from the
+ * queue: its cost is final and no other can be cheaper.
+ */
+function nearestWay(sim: Simulation, owner: Uint8Array, from: number, maxCost: number, buyer: number, below: number): number {
+  const { world } = sim;
+  const n = world.cellCount;
+  if (wayCost.length !== n) {
+    wayCost = new Float32Array(n).fill(Infinity);
+    wayPrev = new Int32Array(n).fill(-1);
+    waySea = new Uint8Array(n);
+    wayToll = new Float32Array(n);
+  }
+  const civ = owner[from];
+  wayReached.length = 0;
+  wayCost[from] = 0;
+  wayReached.push(from);
+  wayHeap.push(from, 0);
+  let found = Infinity;
+  while (wayHeap.size > 0) {
+    const c = wayHeap.pop();
+    const here = wayCost[c];
+    if (here >= below) break;
+    if (owner[c] === buyer && sim.cellPop[c] > 0) {
+      found = here;
+      break;
+    }
+    for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const step = wayStep(sim, owner, civ, -1, c, d);
+      if (step === Infinity) continue;
+      const nb = world.neighbors[c * DIRECTION_COUNT + d];
+      const sea = waterOf[nb] === 1 ? waySea[c] + 1 : 0;
+      if (sea > MAX_SEA_HEXES) continue;
+      const next = here + step;
+      if (next >= wayCost[nb] || next > maxCost) continue;
+      if (wayCost[nb] === Infinity) wayReached.push(nb);
+      wayCost[nb] = next;
+      waySea[nb] = sea;
+      wayHeap.push(nb, next);
+    }
+  }
+  wayHeap.size = 0;
+  resetWays();
+  return found;
+}
+
 function resetWays(): void {
   for (const c of wayReached) {
     wayCost[c] = Infinity;
@@ -663,6 +747,8 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     const agreement = abroad ? agreementFor(sim.diplomacy, homeCiv, targetCiv, g) : null;
     // The buyer takes what the agreement still owes, asked for or not.
     const owed = agreement ? legOwed(agreement, sim.tick) : 0;
+    // Strategic goods are not sold to peoples that threaten the seller.
+    if (abroad && isStrategic(g) && !mayBuyStrategic(sim, homeCiv, targetCiv, PAIRS)) continue;
     const amount = Math.min(trade.surplus[home * TRADE_GOODS + g], Math.max(trade.want[target * TRADE_GOODS + g], owed), load / WEIGHT[g]);
     if (amount <= 0) continue;
     dealSell[g] = amount;
@@ -784,7 +870,7 @@ function owesDelivery(sim: Simulation, supplier: number, buyer: number): boolean
 
 /** FOCUS_LUXURY for a luxury good the settlement's stock didn't cover last year, else 1. */
 function lacking(eco: Economy, cell: number, good: number): number {
-  if (good < TradeGood.Luxury) return 1;
+  if (good < TradeGood.Luxury || good >= TradeGood.Luxury + LUXURY_COUNT) return 1;
   return eco.luxuryCovered[cell] & (1 << (good - TradeGood.Luxury)) ? 1 : FOCUS_LUXURY;
 }
 

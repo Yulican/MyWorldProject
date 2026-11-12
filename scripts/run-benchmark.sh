@@ -2,7 +2,7 @@
 # Runs the map benchmark on a connected Android device or emulator and fails
 # unless every swipe passes (rules in src/bench/benchmark.ts).
 #
-# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest|trade|diplomacy|government]
+# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest|trade|diplomacy|government|war]
 # The app is opened with the link myworld://benchmark?scenario=..., which
 # starts the benchmark; it logs MYWORLD_BENCH_* lines.
 set -euo pipefail
@@ -66,6 +66,7 @@ const scenarioText = {
   trade: 'worlds after 300 years, a trade center in every settlement and a harbor on every coast',
   diplomacy: 'worlds after 300 years, all borders open and free trade between all peoples',
   government: 'worlds after 300 years, seats of government and government buildings everywhere',
+  war: 'worlds after 300 years, uprisings, seats and soldiers everywhere, three rebellions and two blocks of allies at war, 32 army markers, 6 siege frames',
 }[scenario] ?? scenario;
 const summary = JSON.parse(fs.readFileSync(`${out}/summary.json`, 'utf8'));
 const swipes = fs.readFileSync(`${out}/swipes.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -109,6 +110,11 @@ if (withEvents.length > 0) {
     lines.push('', '### Failing swipes', '', '| World | Direction | fps | Worst ms | ' + keys.join(' | ') + ' |', '|---|---|---|---|' + keys.map(() => '---|').join(''));
     for (const s of failing) {
       lines.push(`| ${s.world + 1} | ${s.direction} | ${s.fps.toFixed(1)} | ${s.worstMs.toFixed(1)} | ` + keys.map((k) => s.events[k]).join(' | ') + ' |');
+    }
+    // What ran around each failing swipe's worst frame (useBenchmark: worstFrameWork).
+    lines.push('', '### Worst frame of each failing swipe: what ran around it', '', '| World | Direction | Worst ms | JS work (ms), when, UI pictures |', '|---|---|---|---|');
+    for (const s of failing) {
+      lines.push(`| ${s.world + 1} | ${s.direction} | ${s.worstMs.toFixed(1)} | ${(s.worstFrame ?? 'not recorded').replace(/\|/g, '/')} |`);
     }
   }
 }

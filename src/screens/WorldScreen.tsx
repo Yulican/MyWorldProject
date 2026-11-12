@@ -7,15 +7,19 @@ import { ChronicleDialog } from '../components/ChronicleDialog';
 import { CivPanel } from '../components/CivPanel';
 import { DiplomacyPanel } from '../components/DiplomacyPanel';
 import { GovernmentPanel } from '../components/GovernmentPanel';
-import { HexInfoPanel } from '../components/HexInfoPanel';
+import { WarPanel } from '../components/WarPanel';
+import { HexInfoPanel, hexWar, strategicStock } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
 import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { hexEconomy, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
+import { hexEconomy, hexMilitary, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
 import {
   acknowledgeChronicle,
+  armyStore,
   shownAfter,
   shownInDialog,
   createNewWorld,
+  mapArmies,
+  mapWar,
   setResumeSpeed,
   setSpeed,
   snapshotStore,
@@ -28,7 +32,13 @@ const buildLabel = process.env.EXPO_PUBLIC_BUILD_LABEL ?? 'local dev build';
 // CI opens the app with this link to start the benchmark (scripts/run-benchmark.sh).
 const BENCHMARK_URL = 'myworld://benchmark';
 
-type OpenPanel = { kind: 'none' } | { kind: 'hex'; cell: number } | { kind: 'peoples' } | { kind: 'diplomacy' } | { kind: 'government' };
+type OpenPanel =
+  | { kind: 'none' }
+  | { kind: 'hex'; cell: number }
+  | { kind: 'peoples' }
+  | { kind: 'diplomacy' }
+  | { kind: 'government' }
+  | { kind: 'war' };
 
 export function WorldScreen() {
   const { sim, speed, chronicleSeen, resumeSpeed, chronicleDialogs } = useGameState();
@@ -53,7 +63,12 @@ export function WorldScreen() {
 
   // Stable per world, so the map doesn't re-render with every simulation update.
   const territory = useMemo<TerritorySource>(
-    () => ({ ...snapshotStore, civColor: (id) => sim?.civs[id]?.color ?? '#ffffff' }),
+    () => ({
+      ...snapshotStore,
+      civColor: (id) => sim?.civs[id]?.color ?? '#ffffff',
+      war: mapWar,
+      armies: { ...armyStore, markers: mapArmies },
+    }),
     [sim],
   );
 
@@ -133,6 +148,9 @@ export function WorldScreen() {
             supply={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexSupplyTerms(sim, panel.cell)}
             economy={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexEconomy(sim, panel.cell)}
             satisfaction={hexSatisfaction(sim, panel.cell)}
+            military={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexMilitary(sim, panel.cell)}
+            strategic={isWaterBiome(sim.world.biome[panel.cell]) ? null : strategicStock(sim, panel.cell)}
+            war={hexWar(sim, panel.cell)}
             onClose={closePanel}
           />
         )}
@@ -142,10 +160,12 @@ export function WorldScreen() {
             onClose={closePanel}
             onDiplomacy={() => setPanel({ kind: 'diplomacy' })}
             onGovernment={() => setPanel({ kind: 'government' })}
+            onWar={() => setPanel({ kind: 'war' })}
           />
         )}
         {sim && panel.kind === 'diplomacy' && <DiplomacyPanel sim={sim} onClose={closePanel} />}
         {sim && panel.kind === 'government' && <GovernmentPanel sim={sim} onClose={closePanel} />}
+        {sim && panel.kind === 'war' && <WarPanel sim={sim} onClose={closePanel} />}
         {sim && entry && (
           <ChronicleDialog
             entry={entry}

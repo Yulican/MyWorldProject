@@ -12,11 +12,22 @@
  * every settlement trades (openTrade.ts), where every people opened its
  * borders to every other and trades freely (dashed borders, merchants
  * abroad; openDiplomacy.ts), and where seats of government and government
- * buildings stand everywhere (flags, government traders; empowerGovernment.ts).
+ * buildings stand everywhere (flags, government traders, soldiers; empowerGovernment.ts),
+ * and where all peoples are at war in pairs, their armies out and the
+ * attackers besieging their goal seats (army markers, siege frames, red
+ * dashed war borders; declareWars.ts).
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government',
-  { years: number; buildings?: boolean; unrest?: boolean; trade?: boolean; diplomacy?: boolean; government?: boolean }
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war',
+  {
+    years: number;
+    buildings?: boolean;
+    unrest?: boolean;
+    trade?: boolean;
+    diplomacy?: boolean;
+    government?: boolean;
+    war?: boolean;
+  }
 > = {
   young: { years: 0 },
   aged: { years: 300 },
@@ -25,6 +36,7 @@ export const SCENARIOS: Record<
   trade: { years: 300, trade: true },
   diplomacy: { years: 300, diplomacy: true },
   government: { years: 300, government: true },
+  war: { years: 300, war: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 
@@ -84,7 +96,24 @@ export function swipePlan(): Swipe[] {
 }
 
 /** Frames measured during one swipe. */
-export type SwipeStats = { frames: number; timeMs: number; worstMs: number };
+export type SwipeStats = {
+  frames: number;
+  timeMs: number;
+  worstMs: number;
+  /** When the worst frame began and ended, in ms after the swipe's first frame began (UI thread clock). */
+  worstStartMs?: number;
+  worstEndMs?: number;
+  /** UI-thread work in the worst frame: tile pictures recorded, army pictures swapped in. */
+  worstTileDraws?: number;
+  worstArmySwaps?: number;
+  /** Garbage collections of the UI runtime (the worklets' own heap; they stop the UI thread) in the swipe and in its worst frame, with their time. */
+  uiGcCount?: number;
+  uiGcMs?: number;
+  worstUiGcCount?: number;
+  worstUiGcMs?: number;
+  /** How much later than the swipe's promptest frame the worst frame's UI callback ran after the frame's time (large: the UI thread was busy before it; small: the wait was in rendering, after it). */
+  worstCallbackLateMs?: number;
+};
 
 export type SwipeResult = {
   world: number;
@@ -95,6 +124,8 @@ export type SwipeResult = {
   pass: boolean;
   /** What else happened in the app during the swipe (see perfStats.perfEvents), to find what costs frames. */
   events?: Record<string, number>;
+  /** What ran around the worst frame: JS work by label with its ms (perfStats.logWork) and the UI thread's tile and army pictures. */
+  worstFrame?: string;
 };
 
 export function evaluateSwipe(stats: SwipeStats): { fps: number; worstMs: number; pass: boolean } {

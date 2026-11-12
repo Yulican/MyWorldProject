@@ -12,8 +12,8 @@ export type WorldOptions = {
   height?: number;
 };
 
-export const DEFAULT_WORLD_WIDTH = 64;
-export const DEFAULT_WORLD_HEIGHT = 64;
+export const DEFAULT_WORLD_WIDTH = 46;
+export const DEFAULT_WORLD_HEIGHT = 44;
 
 /**
  * Generates a complete world from a seed. Deterministic: the same seed and

@@ -1,4 +1,4 @@
-import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage, type SkPicture } from '@shopify/react-native-skia';
+import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage, type SkPaint, type SkPicture } from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -23,15 +23,19 @@ import {
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
-import { countEvent, recordMapBuild } from '../state/perfStats';
+import { countEvent, logWork, recordMapBuild } from '../state/perfStats';
+import { setMapMoving } from '../state/worldStore';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
+import { ArmySprites, buildArmyPicture, type ArmyMarkers } from './armyLayer';
 import { MapPerfMeter } from './MapPerfMeter';
+import { uiArmySwaps, uiTileDraws } from './uiCounters';
 import { SELECTION_COLOR } from './palette';
 import {
   buildTerritoryOverview,
   renderTerritoryTile,
   TERRITORY_TILE_RESOLUTION,
   territoryTileSignature,
+  type MapWar,
 } from './territoryLayers';
 import { TileImages } from './tileImages';
 import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
@@ -41,6 +45,36 @@ const MAX_SCALE = 3;
 const START_SCALE = 1;
 /** A tap right after dragging or pinching is almost always a finger lifting off, not a tap. */
 const TAP_COOLDOWN_MS = 300;
+/** The map rests once it hasn't moved for this long (outdated tiles are redone then, see TileImages.setResting). */
+const REST_MS = 100;
+/** A benchmark swipe's frame record (UI thread): totals, the worst frame and when it ended after `t0`, what the UI drew in it. */
+const NO_BENCH_SWIPE = {
+  active: false,
+  frames: 0,
+  timeMs: 0,
+  worstMs: 0,
+  t0: 0,
+  worstEnd: 0,
+  worstDraws: 0,
+  worstSwaps: 0,
+  draws: 0,
+  swaps: 0,
+  // The UI runtime's own garbage collections (they stop the UI thread): totals at the swipe's start and at the last frame, and in the worst frame.
+  gc0: 0,
+  gcMs0: 0,
+  gc: 0,
+  gcMs: 0,
+  worstGc: 0,
+  worstGcMs: 0,
+  // How long after a frame's time its callback ran (the two clocks may differ by a constant: the shortest of the swipe is the base).
+  worstLate: 0,
+  minLate: 0,
+};
+/** Frames longer than this count as long for the benchmark's diagnostics (a frame is 16.7 ms). */
+const LONG_FRAME_MS = 20;
+type HermesGlobals = { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> }; gc?: () => void };
+/** Memory for territory tile images (the terrain tiles have their own, see tileImages.ts). */
+const TERRITORY_BUDGET_BYTES = 40 * 1024 * 1024;
 /** Slower releases just stop; faster ones let the map glide on. */
 const MIN_FLING_VELOCITY = 150;
 /** Lifting the fingers after a pinch reports a pan velocity that isn't a fling. */
@@ -65,6 +99,14 @@ export type TerritorySource = {
   subscribe: (listener: () => void) => () => void;
   getVersion: () => number;
   civColor: (civ: number) => string;
+  /** Wars and sieges as of the current snapshot (red dashed borders, siege frames). */
+  war: MapWar;
+  /** Army markers: their own store, as armies move weekly, between snapshots. */
+  armies: {
+    subscribe: (listener: () => void) => () => void;
+    getVersion: () => number;
+    markers: ArmyMarkers;
+  };
 };
 
 /** Drives the map from code, for the performance benchmark. */
@@ -126,6 +168,22 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   // be called from gesture worklets without re-creating them.
   const tileListener = useRef<(view: ViewTiles) => void>(() => {});
   const onViewChange = useCallback((view: ViewTiles) => tileListener.current(view), []);
+  // Told when the map starts moving and when it rests again (outdated tiles are redone while it rests).
+  const restListener = useRef<(resting: boolean) => void>(() => {});
+  const onRest = useCallback((resting: boolean) => {
+    restListener.current(resting);
+    // Long simulation parts and snapshots wait while the map moves (worldStore).
+    setMapMoving(!resting);
+  }, []);
+  const moving = useSharedValue(false);
+  /** The map moved in this frame (UI thread). */
+  const moved = () => {
+    'worklet';
+    lastMoveAt.value = Date.now();
+    if (moving.value) return;
+    moving.value = true;
+    scheduleOnRN(onRest, false);
+  };
 
   // Latest tap handler, called through a stable function for the same reason.
   const tapHandler = useRef<(x: number, y: number) => void>(() => {});
@@ -189,14 +247,14 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
       if (dx === 0 && dy === 0) return;
       tx.value = wrapX(tx.value + dx, mapWidth * scale.value);
       ty.value = clampY(ty.value + dy, mapHeight * scale.value, viewH);
-      lastMoveAt.value = Date.now();
+      moved();
       reportView();
     },
     [mapWidth, mapHeight, viewW, viewH],
   );
 
   // Benchmark swipes: frames are counted on the UI thread while one runs.
-  const benchSwipe = useSharedValue({ active: false, frames: 0, timeMs: 0, worstMs: 0 });
+  const benchSwipe = useSharedValue({ ...NO_BENCH_SWIPE });
   // Times the swipe on its own: an animation of an offset that doesn't change
   // (dx = 0 for a north swipe) would end at once.
   const benchClock = useSharedValue(0);
@@ -204,13 +262,52 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   const onSwipeDone = useCallback((stats: SwipeStats) => swipeDone.current(stats), []);
   useFrameCallback((frame) => {
     'worklet';
+    const hermes = globalThis as HermesGlobals;
+    if (moving.value && Date.now() - lastMoveAt.value >= REST_MS) {
+      moving.value = false;
+      scheduleOnRN(onRest, true);
+    }
     const dt = frame.timeSincePreviousFrame;
     if (!benchSwipe.value.active || dt === null) return;
+    const draws = uiTileDraws.value;
+    const swaps = uiArmySwaps.value;
+    // The runtime's collections so far, read only at the swipe's first frame and at long frames (reading allocates).
+    const first = benchSwipe.value.frames === 0;
+    const long = dt > LONG_FRAME_MS;
+    const stats = first || long ? hermes.HermesInternal?.getInstrumentedStats?.() : undefined;
+    const gc = stats?.js_numGCs ?? 0;
+    const gcMs = (stats?.js_gcTime ?? 0) * 1000;
+    const clock = (globalThis as { performance?: { now?: () => number } }).performance;
+    const late = clock?.now ? clock.now() - frame.timestamp : 0;
     benchSwipe.modify((b) => {
       'worklet';
+      if (first) {
+        b.t0 = frame.timestamp - dt;
+        b.gc0 = gc;
+        b.gcMs0 = gcMs;
+        b.gc = gc;
+        b.gcMs = gcMs;
+        b.minLate = late;
+      }
+      if (late < b.minLate) b.minLate = late;
       b.frames += 1;
       b.timeMs += dt;
-      if (dt > b.worstMs) b.worstMs = dt;
+      if (dt > b.worstMs) {
+        b.worstMs = dt;
+        b.worstEnd = frame.timestamp - b.t0;
+        b.worstDraws = draws - b.draws;
+        b.worstSwaps = swaps - b.swaps;
+        // Collections since the swipe began or its last long frame, whichever is later.
+        b.worstGc = long ? gc - b.gc : 0;
+        b.worstGcMs = long ? gcMs - b.gcMs : 0;
+        b.worstLate = late;
+      }
+      b.draws = draws;
+      b.swaps = swaps;
+      if (long) {
+        b.gc = gc;
+        b.gcMs = gcMs;
+      }
       return b;
     }, false);
   });
@@ -244,7 +341,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
           swipeDone.current = resolve;
           scheduleOnUI(() => {
             'worklet';
-            benchSwipe.value = { active: true, frames: 0, timeMs: 0, worstMs: 0 };
+            benchSwipe.value = { ...NO_BENCH_SWIPE, active: true, draws: uiTileDraws.value, swaps: uiArmySwaps.value };
             // Ignore the system's reduce-motion setting (off on CI emulators),
             // which would otherwise end the swipe at once.
             const timing = { duration: durationMs, easing: Easing.linear, reduceMotion: ReduceMotion.Never };
@@ -254,7 +351,21 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
             benchClock.value = withTiming(1, timing, () => {
               const b = benchSwipe.value;
               benchSwipe.value = { ...b, active: false };
-              scheduleOnRN(onSwipeDone, { frames: b.frames, timeMs: b.timeMs, worstMs: b.worstMs });
+              const end = (globalThis as HermesGlobals).HermesInternal?.getInstrumentedStats?.();
+              scheduleOnRN(onSwipeDone, {
+                frames: b.frames,
+                timeMs: b.timeMs,
+                worstMs: b.worstMs,
+                worstStartMs: b.worstEnd - b.worstMs,
+                worstEndMs: b.worstEnd,
+                worstTileDraws: b.worstDraws,
+                worstArmySwaps: b.worstSwaps,
+                uiGcCount: (end?.js_numGCs ?? b.gc0) - b.gc0,
+                uiGcMs: (end?.js_gcTime ?? 0) * 1000 - (end ? b.gcMs0 : 0),
+                worstUiGcCount: b.worstGc,
+                worstUiGcMs: b.worstGcMs,
+                worstCallbackLateMs: b.worstLate - b.minLate,
+              });
             });
           });
         }),
@@ -279,7 +390,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
       'worklet';
       tx.value = wrapX(tx.value + e.changeX, mapWidth * scale.value);
       ty.value = clampY(ty.value + e.changeY, mapHeight * scale.value, viewH);
-      lastMoveAt.value = Date.now();
+      moved();
       reportView();
     },
   });
@@ -307,7 +418,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
       tx.value = wrapX(e.focalX - (e.focalX - tx.value) * k, mapWidth * next);
       ty.value = clampY(e.focalY - (e.focalY - ty.value) * k, mapHeight * next, viewH);
       scale.value = next;
-      lastMoveAt.value = Date.now();
+      moved();
       reportView();
     },
   });
@@ -355,7 +466,14 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
                 fit="fill"
               />
             ))}
-            <TileLayer world={world} layers={layers} listener={tileListener} territory={territory} view={lastView} />
+            <TileLayer
+              world={world}
+              layers={layers}
+              listener={tileListener}
+              restListener={restListener}
+              territory={territory}
+            />
+            <ArmyLayer world={world} mapWidth={mapWidth} territory={territory} />
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -374,25 +492,21 @@ type TileLayerProps = {
   world: World;
   layers: WorldLayers;
   listener: { current: (view: ViewTiles) => void };
+  /** Set by the tile layer: called when the map starts moving (false) and rests again (true). */
+  restListener: { current: (resting: boolean) => void };
   territory: TerritorySource;
-  /** The current view, kept on the UI thread by the gestures. */
-  view: SharedValue<ViewTiles>;
 };
 
-/** Finished images the UI thread may draw, by tile, for the current zoom tier. */
-type TileSet = {
-  terrain: Record<number, SkImage>;
-  territory: Record<number, SkImage>;
-  /** Zoomed out: territories as one image. */
-  overview: SkImage | null;
-};
-const EMPTY_TILE_SET: TileSet = { terrain: {}, territory: {}, overview: null };
 const EMPTY_PICTURE = createPicture(() => {});
 
 /**
  * The detail tile images near the screen and the territories above them,
- * drawn as one picture that the UI thread records again whenever the view
- * crosses a tile border, so moving the map never re-renders React.
+ * as one picture of the view's tiles plus a ring around it. The JS thread
+ * records it whenever the view crosses a tile border or new tiles are ready
+ * and hands it to the UI thread, which only replays it: the UI thread's own
+ * JS runtime never holds the tile images (each would count with its full
+ * size towards that runtime's garbage collections, which stop the UI thread)
+ * and allocates nothing for the tiles. Moving the map never re-renders React.
  *
  * The JS thread renders tiles in the background and publishes the finished
  * ones for the view plus a ring around it (PREFETCH_TILES), so tiles coming
@@ -401,14 +515,19 @@ const EMPTY_PICTURE = createPicture(() => {});
  * ready tier meanwhile, or the overview image underneath; after a snapshot
  * the old territory tiles stay until the new ones are ready.
  */
-const TileLayer = memo(function TileLayer({ world, layers, listener, territory, view }: TileLayerProps) {
+const TileLayer = memo(function TileLayer({ world, layers, listener, restListener, territory }: TileLayerProps) {
   countEvent('tileLayerRenders');
-  const tileSet = useSharedValue<TileSet>(EMPTY_TILE_SET);
   const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
-  /** Images handed over but not drawn yet (UI thread), drawn ahead a few per frame. */
-  const warm = useSharedValue<SkImage[]>([]);
-  /** The images drawn ahead in this frame, kept if the view redraws in it too. */
-  const ahead = useSharedValue<SkImage[]>([]);
+  const warmPicture = useSharedValue<SkPicture>(EMPTY_PICTURE);
+  /** Pictures handed to the UI thread, oldest first, to free the replaced ones (see show). */
+  const shown = useRef<{ picture: SkPicture; at: number }[]>([]);
+  const shownWarm = useRef<{ picture: SkPicture; at: number }[]>([]);
+  /** Tile images the GPU has (drawn on screen or ahead), those still to draw ahead, and the ones in the current warm-up picture. */
+  const uploaded = useRef(new WeakSet<SkImage>());
+  const pending = useRef<SkImage[]>([]);
+  const warming = useRef<SkImage[]>([]);
+  const warmFrame = useRef<number | null>(null);
+  const overviewRect = layers.overviewRect;
   const current = useRef<ViewTiles>(NO_TILES);
   const publish = useRef<() => void>(() => {});
   const onReady = useCallback(() => publish.current(), []);
@@ -424,6 +543,8 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
         null,
         scales,
         onReady,
+        undefined,
+        'terrain',
       ),
     [world, layers, scales, onReady],
   );
@@ -432,23 +553,30 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
       new TileImages(
         (chunk, px) => {
           countEvent('territoryTiles');
-          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor);
+          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor, territory.war);
         },
-        (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor),
+        (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor, territory.war),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
         onReady,
+        // Out-of-view tiles are kept through snapshots (see TileImages.invalidate): a smaller budget than the terrain's.
+        TERRITORY_BUDGET_BYTES,
+        'territory',
       ),
     [world, layers, scales, onReady, territory],
   );
   useEffect(() => () => terrainTiles.dispose(), [terrainTiles]);
   useEffect(() => () => territoryTiles.dispose(), [territoryTiles]);
+  restListener.current = (resting) => {
+    terrainTiles.setResting(resting);
+    territoryTiles.setResting(resting);
+  };
 
   // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
   const overview = useRef<{ version: number; image: SkImage } | null>(null);
   const overviewFor = (version: number): SkImage => {
     if (overview.current?.version !== version) {
       const t0 = performance.now();
-      const built = buildTerritoryOverview(world, territory.civColor, layers);
+      const built = buildTerritoryOverview(world, territory.civColor, layers, territory.war);
       recordMapBuild(performance.now() - t0);
       countEvent('territoryOverviews');
       overview.current = { version, image: built.overview };
@@ -458,19 +586,111 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
 
   publish.current = () => {
     const v = current.current;
-    const set: TileSet = { terrain: {}, territory: {}, overview: null };
-    if (v.detail) {
-      for (const t of visibleTiles(v, layers, PREFETCH_TILES)) {
-        const ground = terrainTiles.get(t.chunk, v.tier);
-        if (ground) set.terrain[t.chunk] = ground;
-        const people = territoryTiles.get(t.chunk, v.tier);
-        if (people) set.territory[t.chunk] = people;
+    const t0 = performance.now();
+    // The images to draw ahead are those of this picture's ring (earlier ones may have been replaced and freed).
+    pending.current.length = 0;
+    const next = createPicture((canvas) => {
+      if (!v.detail) {
+        // Zoomed out: territories as one image. Two copies cover any view: the offset stays within one map width.
+        const image = overviewFor(territory.getVersion());
+        const src = Skia.XYWHRect(0, 0, image.width(), image.height());
+        for (let copy = 0; copy < 2; copy++) {
+          const dst = Skia.XYWHRect(overviewRect.x + copy * layers.width, overviewRect.y, overviewRect.width, overviewRect.height);
+          canvas.drawImageRect(image, src, dst, tilePaint(), true);
+        }
+        return;
       }
-    } else {
-      set.overview = overviewFor(territory.getVersion());
-    }
-    showTiles(set);
+      const tiles = visibleTiles(v, layers, PREFETCH_TILES);
+      const seen = visibleTiles(v, layers);
+      const onScreen = new Set<number>();
+      for (const t of seen) onScreen.add(t.chunk);
+      // An image on screen is drawn (and uploaded to the GPU) with this picture; one in the ring is drawn ahead (warmUp).
+      const note = (image: SkImage, chunk: number) => {
+        if (onScreen.has(chunk)) uploaded.current.add(image);
+        else if (!uploaded.current.has(image) && pending.current.indexOf(image) < 0) pending.current.push(image);
+      };
+      // Terrain tiles are opaque and overlap by their bleed, so no seam shows.
+      for (const t of tiles) {
+        const image = terrainTiles.get(t.chunk, v.tier);
+        if (!image) continue;
+        note(image, t.chunk);
+        const src = Skia.XYWHRect(0, 0, image.width(), image.height());
+        const dst = Skia.XYWHRect(
+          t.col * CHUNK_W + t.offsetX - TILE_BLEED,
+          t.row * CHUNK_H - TILE_BLEED,
+          CHUNK_W + 2 * TILE_BLEED,
+          CHUNK_H + 2 * TILE_BLEED,
+        );
+        canvas.drawImageRect(image, src, dst, tilePaint(), true);
+      }
+      // Territory tiles are semi-transparent and must not overlap (a strip
+      // drawn twice would show darker): each is drawn exactly into its tile,
+      // its bleed pixels only feed the smoothing at the edges.
+      for (const t of tiles) {
+        const image = territoryTiles.get(t.chunk, v.tier);
+        if (!image) continue;
+        note(image, t.chunk);
+        const sx = image.width() / (CHUNK_W + 2 * TILE_BLEED);
+        const sy = image.height() / (CHUNK_H + 2 * TILE_BLEED);
+        const src = Skia.XYWHRect(TILE_BLEED * sx, TILE_BLEED * sy, CHUNK_W * sx, CHUNK_H * sy);
+        const dst = Skia.XYWHRect(t.col * CHUNK_W + t.offsetX, t.row * CHUNK_H, CHUNK_W, CHUNK_H);
+        canvas.drawImageRect(image, src, dst, tilePaint(), true);
+      }
+    });
+    logWork('tile picture', t0, performance.now() - t0);
+    scheduleOnUI((p: SkPicture) => {
+      'worklet';
+      uiTileDraws.value += 1;
+      picture.value = p;
+    }, next);
+    keepPicture(next, shown.current);
+    if (pending.current.length > 0 && warmFrame.current === null) warmFrame.current = requestAnimationFrame(warmUp);
   };
+  /**
+   * Images in the ring around the view, not drawn yet: WARM_PER_FRAME of
+   * them per frame are drawn as an invisible dot in the middle of the view,
+   * so the GPU uploads them now instead of when they come into view. Each
+   * stays for two pictures in a row, in case the UI thread skips one.
+   */
+  const warmUp = () => {
+    warmFrame.current = null;
+    const batch = pending.current.splice(0, WARM_PER_FRAME);
+    const before = warming.current;
+    warming.current = batch;
+    const v = current.current;
+    let next = EMPTY_PICTURE;
+    if (batch.length + before.length > 0) {
+      try {
+        next = createPicture((canvas) => {
+          const dst = Skia.XYWHRect(((v.x0 + v.x1 + 1) / 2) * CHUNK_W, ((v.y0 + v.y1 + 1) / 2) * CHUNK_H, 0.5, 0.5);
+          for (const image of [...before, ...batch]) {
+            canvas.drawImageRect(image, Skia.XYWHRect(0, 0, image.width(), image.height()), dst, faintPaint(), true);
+          }
+        });
+        for (const image of batch) uploaded.current.add(image);
+      } catch {
+        // An image was replaced and freed meanwhile: the next tile picture lists what is still to draw ahead.
+        warming.current = [];
+        pending.current.length = 0;
+        next = EMPTY_PICTURE;
+      }
+    }
+    scheduleOnUI((p: SkPicture) => {
+      'worklet';
+      warmPicture.value = p;
+    }, next);
+    keepPicture(next, shownWarm.current);
+    if (batch.length > 0) warmFrame.current = requestAnimationFrame(warmUp);
+  };
+  useEffect(
+    () => () => {
+      if (warmFrame.current !== null) cancelAnimationFrame(warmFrame.current);
+      warmFrame.current = null;
+      pending.current = [];
+      warming.current = [];
+    },
+    [terrainTiles, territoryTiles],
+  );
   listener.current = (v) => {
     current.current = v;
     const wanted = visibleTiles(v, layers, PREFETCH_TILES).map((t) => ({ ...t, tier: v.tier }));
@@ -492,118 +712,81 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, territory, 
       const version = territory.getVersion();
       if (version === seen) return;
       seen = version;
+      const t0 = performance.now();
       territoryTiles.invalidate();
       listener.current(current.current);
+      logWork('tile check (snapshot)', t0, performance.now() - t0);
     });
   }, [territory, territoryTiles, listener]);
 
-  const grid = { width: layers.width, chunkCols: layers.chunkCols, chunkRows: layers.chunkRows };
-  const overviewRect = layers.overviewRect;
-  /**
-   * Records the tile picture for a view and image set (UI thread), plus
-   * `ahead`: images drawn as an invisible dot in the middle of the view, so
-   * the GPU uploads them now instead of when they come into view.
-   */
-  const draw = (v: ViewTiles, set: TileSet, ahead: SkImage[] = []) => {
-    'worklet';
-    picture.value = createPicture((canvas) => {
-      const paint = Skia.Paint();
-      if (ahead.length > 0) {
-        const faint = Skia.Paint();
-        faint.setAlphaf(1 / 255);
-        const x = ((v.x0 + v.x1 + 1) / 2) * CHUNK_W;
-        const y = ((v.y0 + v.y1 + 1) / 2) * CHUNK_H;
-        const dst = Skia.XYWHRect(x, y, 0.5, 0.5);
-        for (const image of ahead) {
-          canvas.drawImageRect(image, Skia.XYWHRect(0, 0, image.width(), image.height()), dst, faint, true);
-        }
-      }
-      if (!v.detail) {
-        const image = set.overview;
-        if (!image) return;
-        const src = Skia.XYWHRect(0, 0, image.width(), image.height());
-        // Two copies cover any view: the offset stays within one map width.
-        for (let copy = 0; copy < 2; copy++) {
-          const dst = Skia.XYWHRect(overviewRect.x + copy * grid.width, overviewRect.y, overviewRect.width, overviewRect.height);
-          canvas.drawImageRect(image, src, dst, paint, true);
-        }
-        return;
-      }
-      const tiles = visibleTiles(v, grid);
-      // Terrain tiles are opaque and overlap by their bleed, so no seam shows.
-      for (const t of tiles) {
-        const image = set.terrain[t.chunk];
-        if (!image) continue;
-        const src = Skia.XYWHRect(0, 0, image.width(), image.height());
-        const dst = Skia.XYWHRect(
-          t.col * CHUNK_W + t.offsetX - TILE_BLEED,
-          t.row * CHUNK_H - TILE_BLEED,
-          CHUNK_W + 2 * TILE_BLEED,
-          CHUNK_H + 2 * TILE_BLEED,
-        );
-        canvas.drawImageRect(image, src, dst, paint, true);
-      }
-      // Territory tiles are semi-transparent and must not overlap (a strip
-      // drawn twice would show darker): each is drawn exactly into its tile,
-      // its bleed pixels only feed the smoothing at the edges.
-      for (const t of tiles) {
-        const image = set.territory[t.chunk];
-        if (!image) continue;
-        const sx = image.width() / (CHUNK_W + 2 * TILE_BLEED);
-        const sy = image.height() / (CHUNK_H + 2 * TILE_BLEED);
-        const src = Skia.XYWHRect(TILE_BLEED * sx, TILE_BLEED * sy, CHUNK_W * sx, CHUNK_H * sy);
-        const dst = Skia.XYWHRect(t.col * CHUNK_W + t.offsetX, t.row * CHUNK_H, CHUNK_W, CHUNK_H);
-        canvas.drawImageRect(image, src, dst, paint, true);
-      }
-    });
-  };
-
-  // Redraw when the view crosses a tile border (gestures, UI thread)...
-  useAnimatedReaction(
-    () => view.value,
-    (v) => draw(v, tileSet.value, ahead.value),
+  return (
+    <>
+      <Picture picture={picture} />
+      <Picture picture={warmPicture} />
+    </>
   );
-  // ...and when JS hands over new images: applied and drawn on the UI thread
-  // right away, without waiting for the next movement.
-  function showTiles(set: TileSet) {
-    scheduleOnUI((next: TileSet) => {
-      'worklet';
-      // Images off screen not drawn yet: new ones, and those still waiting
-      // from before (the ones on screen are drawn right below).
-      const v = view.value;
-      const prev = tileSet.value;
-      const onScreen: Record<number, boolean> = {};
-      for (const t of visibleTiles(v, grid)) onScreen[t.chunk] = true;
-      const pending: SkImage[] = [];
-      const waiting = warm.value;
-      const add = (images: Record<number, SkImage>, before: Record<number, SkImage>) => {
-        for (const k in images) {
-          const image = images[k];
-          if (!onScreen[k] && (before[k] !== image || waiting.indexOf(image) >= 0)) pending.push(image);
-        }
-      };
-      add(next.terrain, prev.terrain);
-      add(next.territory, prev.territory);
-      warm.value = pending;
-      tileSet.value = next;
-      draw(v, next, ahead.value);
-    }, set);
-  }
-  // Off-screen images not drawn yet, a few per frame, ahead of being seen.
-  useFrameCallback(() => {
-    'worklet';
-    const pending = warm.value;
-    if (pending.length === 0) {
-      // Only ever one frame old: a replaced image is freed a while later.
-      if (ahead.value.length > 0) ahead.value = [];
-      return;
-    }
-    const batch = pending.slice(0, WARM_PER_FRAME);
-    warm.value = pending.slice(WARM_PER_FRAME);
-    ahead.value = batch;
-    draw(view.value, tileSet.value, batch);
-  });
+});
 
+/** Paints for the tile pictures, made once: plain, and nearly invisible for the images drawn ahead. */
+let plainPaint: SkPaint | null = null;
+const tilePaint = () => (plainPaint ??= Skia.Paint());
+let dotPaint: SkPaint | null = null;
+function faintPaint(): SkPaint {
+  if (!dotPaint) {
+    dotPaint = Skia.Paint();
+    dotPaint.setAlphaf(1 / 255);
+  }
+  return dotPaint;
+}
+
+/** A picture's earlier versions are freed this long after they were replaced (they hold their tile images' memory). */
+const PICTURE_KEEP_MS = 1000;
+
+/**
+ * Notes a picture handed to the UI thread and frees the ones it replaced
+ * once they can no longer be on screen: never the latest two, and only
+ * PICTURE_KEEP_MS after their successor was shown.
+ */
+function keepPicture(next: SkPicture, earlier: { picture: SkPicture; at: number }[]) {
+  const now = Date.now();
+  while (earlier.length > 2 && now - earlier[1].at >= PICTURE_KEEP_MS) {
+    const old = earlier.shift()!;
+    if (old.picture !== EMPTY_PICTURE) old.picture.dispose();
+  }
+  earlier.push({ picture: next, at: now });
+}
+
+/**
+ * The army markers above the territories: one small picture (at most 32
+ * markers, both map copies), recorded on the JS thread when an army moved
+ * and handed to the UI thread, which only replays it in a frame.
+ */
+const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { world: World; mapWidth: number; territory: TerritorySource }) {
+  const picture = useSharedValue<SkPicture>(EMPTY_PICTURE);
+  useEffect(() => {
+    const { armies, civColor } = territory;
+    // Sprites as sharp as the closest zoom tier, made before the first army appears.
+    const sprites = new ArmySprites(TIER_ZOOMS[TIER_ZOOMS.length - 1] * PixelRatio.get());
+    let seen = -1;
+    const update = () => {
+      const version = armies.getVersion();
+      if (version === seen) return;
+      seen = version;
+      const t0 = performance.now();
+      const next = buildArmyPicture(world, armies.markers, civColor, mapWidth, sprites);
+      logWork('army picture', t0, performance.now() - t0);
+      countEvent('armyPictures');
+      scheduleOnUI((p: SkPicture) => {
+        'worklet';
+        uiArmySwaps.value += 1;
+        picture.value = p;
+      }, next);
+    };
+    update();
+    const unsubscribe = armies.subscribe(update);
+    // The sprites are a few small images: the garbage collector frees them with the last picture using them.
+    return unsubscribe;
+  }, [world, mapWidth, territory, picture]);
   return <Picture picture={picture} />;
 });
 

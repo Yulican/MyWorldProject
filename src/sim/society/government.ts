@@ -1,6 +1,8 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
+import { armingWanted, districtPay, pickMilitaryBuilding, prepareArming } from './military';
+import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
 import { GOV_TUNING, TAX_MAX, goodsRateFor, goodsTaxValue, rateFor, taxValue } from './taxes';
@@ -30,6 +32,8 @@ const UPKEEP_GRACE_YEARS = 2;
 /** Years a project may wait for its materials before the government drops it (seats excepted). */
 const PROJECT_YEARS = 5;
 const WEEKS_PER_YEAR = 52;
+/** Project score of a military building: below loyalty (seats 1000, comfort 100+), above growth (capped below it). */
+const MILITARY_SCORE = 50;
 const SEAT_TYPE = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 const COMFORT_TYPES = BUILDINGS.map((b, i) => (b.good === Good.Comfort ? i : -1)).filter((i) => i >= 0);
 const GROWTH_TYPES = BUILDINGS.map((b, i) => (b.good <= Good.Space && !b.deposit ? i : -1)).filter((i) => i >= 0);
@@ -56,6 +60,10 @@ export type Government = {
   seatQueued: Uint8Array;
   /** Per seat cell: what its district could raise in a year at its loyalty limit (the income check). */
   potential: Float32Array;
+  /** Per seat cell: yearly upkeep in money of its district's government buildings (standing or being built), as of the last projects update (military.ts reads it). */
+  upkeep: Float32Array;
+  /** Per seat cell: money kept back for next year's soldiers' pay (military.ts); the government doesn't spend it. */
+  reserve: Float32Array;
   /** Per civilization id: its founding tick + 1 once its government got its starting money. */
   funded: number[];
   /** Per seat cell: its traders and how many are away. */
@@ -100,6 +108,8 @@ export function createGovernment(cellCount: number): Government {
     projectYear: new Int32Array(cellCount),
     seatQueued: new Uint8Array(cellCount),
     potential: new Float32Array(cellCount),
+    upkeep: new Float32Array(cellCount),
+    reserve: new Float32Array(cellCount),
     funded: [],
     traders: new Uint8Array(cellCount),
     away: new Uint8Array(cellCount),
@@ -493,6 +503,8 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
       if (t === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(t);
     }
   }
+  for (let s = 0; s < n; s++) gov.upkeep[s] = buildUpkeep[s];
+  prepareArming(sim, owner, PAIRS);
   listDistricts(sim);
   civSeatList = [];
   if (civBudget.length < sim.civSlots) civBudget = new Float64Array(sim.civSlots);
@@ -568,7 +580,8 @@ function freeGovSlot(sim: Simulation, cell: number): number {
 
 /**
  * The next project of a seat's district, into pickSite/pickSlot/pickType: a
- * planned seat, comfort for the restless, growth for the crowded; none at the
+ * planned seat, comfort for the restless, a military building when the
+ * people arms (military.ts: armingWanted), growth for the crowded; none at the
  * site of its current project. Income check: the district's yearly upkeep
  * with the new building stays within GOV_TUNING.incomeShare of its potential
  * income; a seat is checked against the whole people's seats and income.
@@ -576,7 +589,7 @@ function freeGovSlot(sim: Simulation, cell: number): number {
 function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolean {
   const gov = sim.government;
   const budget = GOV_TUNING.incomeShare * gov.potential[seat];
-  const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false);
+  const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false) + districtPay(sim, seat);
   const civ = sim.world.owner[seat];
   let seatUpkeep = 0;
   for (const s of civSeatList[civ] ?? []) seatUpkeep += seatBuildUpkeep[s] + projectUpkeep(gov, s, true);
@@ -586,6 +599,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
   let bestSlot = -1;
   let bestType = -1;
   let bestScore = 0;
+  const arm = !seatOnly && armingWanted(sim, seat);
   for (let i = districtStart[seat], last = districtStart[seat + 1]; i < last; i++) {
     const c = districtCells[i];
     if (gov.projectSite[seat] === c) continue;
@@ -608,13 +622,21 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
         break;
       }
     }
-    // 3. Growth where it is crowded (more people pay more taxes).
+    // 3. Military (below loyalty, above growth): one building of each type per settlement.
+    if (arm && bestScore < MILITARY_SCORE) {
+      const t = pickMilitaryBuilding(sim, c);
+      if (t >= 0) {
+        [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, MILITARY_SCORE];
+        continue;
+      }
+    }
+    // 4. Growth where it is crowded (more people pay more taxes).
     if (people >= 0.8 * sim.cellCapacity[c]) {
       for (const t of GROWTH_TYPES) {
         if (!buildingFits(sim, c, t) || !fits(t)) continue;
         const gain = capacityWith(sim, c, t, -1) - sim.cellCapacity[c];
         if (gain < 1) continue;
-        const score = (gain / Math.max(1, goldCost(t))) * 10;
+        const score = Math.min(MILITARY_SCORE - 1, (gain / Math.max(1, goldCost(t))) * 10);
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
       }
     }
@@ -745,12 +767,12 @@ export function advanceGovernment(sim: Simulation): void {
         if (source < 0) break;
         amount = Math.min(amount, best);
         price = amount * PRICE[needM];
-        if (gov.treasury[seat] < price) {
+        if (gov.treasury[seat] - gov.reserve[seat] < price) {
           // Ask the richest seat of the people for the money.
           let rich = -1;
           for (const s of seats) if (owner[s] === civ && s !== seat && (rich < 0 || gov.treasury[s] > gov.treasury[rich])) rich = s;
-          if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] > 2 * price) {
-            const send = gov.treasury[rich] / 2;
+          if (rich >= 0 && gov.away[rich] < gov.traders[rich] && gov.treasury[rich] - gov.reserve[rich] > 2 * price) {
+            const send = (gov.treasury[rich] - gov.reserve[rich]) / 2;
             gov.treasury[rich] -= send;
             const weeks = Math.max(1, hexDistance(world, rich, seat) * WEEKS_PER_HEX);
             gov.away[rich]++;

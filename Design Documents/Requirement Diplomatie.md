@@ -1,6 +1,6 @@
 # Requirement: Diplomatie, Stufe 1 (Beziehungen, Grenzen, Außenhandel, Migration)
 
-Status: **Umgesetzt auf Branch `feature/diplomacy` mit den Startwerten** (siehe „Umsetzung und Kalibrierung“ am Ende; die Regeln stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
+Status: **Stufe 1 umgesetzt; Stufe 2 (Krieg) ist in `Requirement Krieg.md` entworfen und ändert Abschnitt 6 (Krieg).** Stufe 1 war umgesetzt auf Branch `feature/diplomacy` mit den Startwerten** (siehe „Umsetzung und Kalibrierung“ am Ende; die Regeln stehen im Game-Design-Dokument, Abschnitt 5). Die Zahlen sind Startwerte. Vor der
 Umsetzung werden sie an 12 Testwelten kalibriert und dir vorgelegt.
 Spieltexte sind Englisch.
 
@@ -57,7 +57,7 @@ Abwanderungen: Sie addieren sich, höchstens bis −20.
 | Nähe | × Nähe (fern = harmlos) |
 
 - Bis Wissen und Spionage kommen, sehen die Völker die echten Werte.
-- Mit dem Krieg ersetzt die Militärstärke der Bündnisse die Bevölkerung.
+- Mit dem Krieg (`Requirement Krieg.md`, Abschnitt 2) gilt: Gefahr = 50 × Stärke des anderen ÷ eigene Stärke, höchstens 100, × Nähe. Die Stärke sind die Soldaten mit Güterfaktoren, Verbündete zählen zur Stärke. Offene Grenzen schließen so auch bei Aufrüstung des Nachbarn (Gefahr > 60); Schwellen kalibrieren (Simulation).
 
 ## 2. Grenzen, Zoll und Migration
 
@@ -180,7 +180,8 @@ Wege und Verluste.
 **Chronik**
 - Jedes diplomatische Ereignis kommt in die Chronik. Einen Dialog mit Pause
   (Zufriedenheit, Abschnitt 5) gibt es nur für den ersten Kontakt und für
-  eine geschlossene Grenze. Still in der Liste stehen: Grenze geöffnet,
+  eine geschlossene Grenze, dazu (`Requirement Krieg.md`) für
+  Kriegserklärung, Frieden und ein neues Bündnis. Still in der Liste stehen: Grenze geöffnet,
   Migrationsabkommen geschlossen oder beendet, Freihandel, Handelsabkommen
   geschlossen, gebrochen, beendet oder ausgelaufen, Schonfrist läuft ab.
   Es gibt keine Banner und keine Ungelesen-Markierung.
@@ -210,7 +211,16 @@ Wege und Verluste.
   - Rechenzeit
 - Das Design-Dokument wird aktualisiert.
 
-## Für Stufe 2 (Krieg) notiert
+## Stufe 2 (Krieg): Entscheidungen
+
+Ausführlich in `Requirement Krieg.md`. Hier nur die Änderungen an der Diplomatie:
+- **Gefahr aus Stärke** (siehe Abschnitt 1).
+- **Kriegszustand:** Ein Krieg hebt alle Abkommen und offenen Grenzen zwischen den Kriegsparteien auf; Handel mit dem Gegner ruht. Nach dem Krieg: Vertrauen −30 (klingt in 10 Jahren ab), Grenzen zu, 20 Jahre Waffenstillstand.
+- **Verteidigungspakt** (Vertrauen ≥ 40, gemeinsame Bedrohung durch ein drittes Volk, Gefahr ≥ 50; endet bei Vertrauen < 30 oder wenn die Gefahr beim Partner unter 35 fällt) und **Bündnis** (Vertrauen ≥ 80; unter 65 wird es zum Pakt herabgestuft). Keine Obergrenze. Vertrauen: Pakt +5, Bündnis +10 dauerhaft (zählen für offene Grenzen und Freihandel mit); Abschluss einmalig +10 (klingt in 10 Jahren ab). Erklärt ein Volk einem Verbündeten eines Bündnispartners den Krieg, endet das Bündnis mit diesem Partner (−30). Verbündete greifen einander nie an. Durchmarsch für Armeen von Verbündeten; Handel unverändert. Die Gefahr zählt Verbündete wie die 2×-Prüfung der Kriegserklärung: die Seite des anderen mit Pakten und Bündnissen, die eigene nur mit Bündnissen. Einzelheiten: `Requirement Krieg.md`, Abschnitt 7.
+- **Verkauf strategischer Güter** (Handel und Handelsabkommen): nur an Völker, deren Gefahr für den Verkäufer ≤ X ist (40, in der Simulation von Phase 0 und 1 kalibriert), nie an Kriegsgegner und deren Verbündete.
+- **Beziehung nach einer Revolution:** Rebellen sind Kriegsgegner des Mutterlands.
+
+## Für Stufe 2 (Krieg) notiert, noch offen
 
 - Stärke und Militär; die Gefahr wird dann aus der Stärke von
   Verteidigungs- und Angriffsbündnis berechnet statt aus der Bevölkerung.

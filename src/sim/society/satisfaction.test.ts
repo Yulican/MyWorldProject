@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { sumTerms } from '../terms';
 import { Deposit } from '../world/deposits';
 import { generateWorld } from '../world/generate';
-import { BUILDINGS, FIRST_LUXURY, Good, LUXURY_COUNT, SLOTS, SlotState } from './buildings';
+import { BUILDINGS, FIRST_LUXURY, Good, STORED_COUNT, SLOTS, SlotState } from './buildings';
 import { runEconomy, updateCellSupply } from './economy';
 import {
   CONNECTION_BEST,
@@ -14,7 +14,6 @@ import {
   MOOD_NEW_PEOPLE,
   MOOD_REVOLUTION_LOST,
   MOOD_REVOLUTION_WON,
-  UNHAPPY_QUARTERS,
   addMood,
   birthFactor,
   cellOwners,
@@ -25,7 +24,6 @@ import {
   yieldFactor,
 } from './satisfaction';
 import {
-  LEAGUE_MIN_SETTLEMENTS,
   TICKS_PER_YEAR,
   createSimulation,
   livingCivilizations,
@@ -33,6 +31,7 @@ import {
   type Simulation,
 } from './simulation';
 import { SUPPLY_KINDS } from './supply';
+import { REBEL_CHECK, measureRebellion } from './rebellion';
 
 const typeOf = (name: string) => BUILDINGS.findIndex((b) => b.name === name);
 
@@ -160,7 +159,7 @@ test('comfort buildings, luxury goods and seats of government raise satisfaction
   const salt = Good.Salt - FIRST_LUXURY;
   assert.equal(sim.economy.luxuryCovered[cell], 1 << salt);
   const made = BUILDINGS[typeOf('Salt works')].amount;
-  assert.ok(Math.abs(sim.economy.luxury[cell * LUXURY_COUNT + salt] - (made - people * LUXURY_PER_PERSON)) < 1e-3);
+  assert.ok(Math.abs(sim.economy.luxury[cell * STORED_COUNT + salt] - (made - people * LUXURY_PER_PERSON)) < 1e-3);
   assert.ok(Math.abs(satisfactionTarget(sim, cell, civ) - before - comfort.value - 5) < 1e-6);
 
   // A seat of government in a settlement makes it as well connected as the capital.
@@ -174,32 +173,38 @@ test('comfort buildings, luxury goods and seats of government raise satisfaction
   }
 });
 
-/** Makes every settlement of a people except its capital unhappy for years. */
+/** Makes every settlement of a people except its capital unhappy (satisfaction −80, kept low by a hardship). */
 function makeRestless(sim: Simulation, civId: number, cells: number[]): void {
   for (const c of cells) {
     sim.satisfaction[c] = -80;
     sim.moodSet[c] = 1;
-    sim.unhappyQuarters[c] = UNHAPPY_QUARTERS - 1;
   }
   addMood(sim.civs[civId]!, 'Test hardship', -200, sim.tick);
 }
 
-test('a league of unhappy settlements joined by roads breaks away as a new people', () => {
+/** Runs to the end of the war's yearly part (week 47), where the rebellions are checked. */
+function runToRebellionCheck(sim: Simulation): void {
+  do stepSimulation(sim);
+  while (sim.tick % TICKS_PER_YEAR !== 48);
+}
+
+test('dissatisfied settlements stronger than their mother rise up as new peoples, one per road-joined group, and go to war (war phase 5)', () => {
   const sim = createSimulation(generateWorld({ seed: 1 }));
   runYears(sim, 200);
   const owner = cellOwners(sim);
   const parent = livingCivilizations(sim).sort((a, b) => b.territory - a.territory)[0];
   const cells = [...owner.keys()].filter((c) => owner[c] === parent.id && c !== parent.capital);
-  assert.ok(cells.length >= LEAGUE_MIN_SETTLEMENTS, `${cells.length} settlements`);
+  assert.ok(cells.length >= 3, `${cells.length} settlements`);
   const faith = new Map<number, number>();
   for (let i = 0; i < sim.pop.end; i++) if (sim.pop.alive[i] && sim.pop.civ[i] === parent.id) faith.set(i, sim.pop.faith[i]);
   const capitalPeople = sim.cellCivPop[parent.capital * sim.civSlots + parent.id];
   const believersBefore = parent.faithYear.brokeAway;
   makeRestless(sim, parent.id, cells);
-  runQuarter(sim);
+  // No years of unhappiness needed: the first yearly check after they are below 0 decides.
+  runToRebellionCheck(sim);
 
   const rebels = livingCivilizations(sim).filter((c) => c.origin === 'revolution' && c.parentName === parent.name);
-  assert.ok(rebels.length >= 1, 'a league broke away');
+  assert.ok(rebels.length >= 1, 'the settlements rose up');
   const civ = rebels[0];
   assert.notEqual(civ.capital, parent.capital);
   assert.ok(!civ.worshipsPlayer);
@@ -208,24 +213,31 @@ test('a league of unhappy settlements joined by roads breaks away as a new peopl
   assert.ok(capitalPeople > 0);
   for (let i = 0; i < sim.pop.end; i++) {
     if (!sim.pop.alive[i] || sim.pop.civ[i] !== civ.id || !faith.has(i)) continue;
-    // Faith only changed by the yearly drift of the one quarter, never cut.
+    // Faith only changed by the yearly drift, never cut.
     assert.ok(Math.abs(sim.pop.faith[i] - faith.get(i)!) < 0.1);
   }
   assert.ok(parent.faithYear.brokeAway >= believersBefore);
+  // "A new people" from the declaration; the revolution is only won (or lost) at the war's end.
   const moods = (c: typeof civ) => c.moods.map((m) => `${m.label} ${m.value}`);
   assert.ok(moods(civ).includes(`A new people ${MOOD_NEW_PEOPLE}`));
-  assert.ok(moods(civ).includes(`Won its revolution ${MOOD_REVOLUTION_WON}`));
-  assert.ok(moods(parent).includes(`Lost a revolution ${MOOD_REVOLUTION_LOST}`));
+  assert.ok(!moods(civ).includes(`Won its revolution ${MOOD_REVOLUTION_WON}`));
+  assert.ok(!moods(parent).includes(`Lost a revolution ${MOOD_REVOLUTION_LOST}`));
   const entry = sim.chronicle.find((e) => e.text.endsWith(`became the ${civ.name}.`))!;
+  assert.ok(entry.text.startsWith('Rebellion: '), entry.text);
   assert.ok(entry.text.includes(`rose up against the ${parent.name}`), entry.text);
   assert.equal(entry.cell, civ.capital);
+  // The rebellion is a war of the mother against all rebel groups.
+  const s = sim.war.civWar[civ.id];
+  assert.ok(s >= 0 && sim.war.wLive[s] === 1 && sim.war.wRebel[s] === 1);
+  assert.equal(sim.war.wAtt[s], parent.id);
+  for (const r of rebels) assert.equal(sim.war.side[s * 256 + r.id], 1);
 });
 
-test('a lone unhappy settlement does not break away but loses people', () => {
+test('a lone dissatisfied settlement weaker than its mother does not rise up but loses people', () => {
   const sim = createSimulation(generateWorld({ seed: 5 }));
   runYears(sim, 150);
   const owner = cellOwners(sim);
-  // A settlement with fewer people than a league needs and no unhappy neighbors.
+  // A small settlement: its militia (2.5 % of its people) is weaker than the mother.
   const civ = sim.civs[owner[sim.world.startCell]]!;
   const lone = [...owner.keys()].find(
     (c) => owner[c] === civ.id && c !== civ.capital && sim.cellPop[c] > 40 && sim.cellPop[c] < 100,
@@ -236,7 +248,7 @@ test('a lone unhappy settlement does not break away but loses people', () => {
   for (let q = 0; q < 16; q++) {
     sim.satisfaction[lone] = -100;
     sim.moodSet[lone] = 1;
-    sim.unhappyQuarters[lone] = UNHAPPY_QUARTERS;
+    assert.equal(measureRebellion(sim, civ.id), false, `rebels ${REBEL_CHECK.rebels}, mother ${REBEL_CHECK.mother}`);
     runQuarter(sim);
   }
   assert.ok(livingCivilizations(sim).every((c) => c.origin !== 'revolution'));

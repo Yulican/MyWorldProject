@@ -4,9 +4,12 @@ import {
   CULTURE_NAMES,
   Culture,
   TICKS_PER_YEAR,
+  TROOP_NAMES,
+  civMilitary,
   ledgerNet,
   livingCivilizations,
   simulationYear,
+  type CivMilitary,
   type Civilization,
   type Simulation,
 } from '../sim';
@@ -24,10 +27,12 @@ type Props = {
   onDiplomacy: () => void;
   /** Opens the government panel. */
   onGovernment: () => void;
+  /** Opens the war panel. */
+  onWar: () => void;
 };
 
 /** Bottom panel listing the living peoples, how faith in the player develops, and the chronicle. */
-export function CivPanel({ sim, onClose, onDiplomacy, onGovernment }: Props) {
+export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onWar }: Props) {
   // The player's people first, then by size.
   const civs = livingCivilizations(sim).sort(
     (a, b) => Number(b.worshipsPlayer) - Number(a.worshipsPlayer) || b.population - a.population,
@@ -49,6 +54,9 @@ export function CivPanel({ sim, onClose, onDiplomacy, onGovernment }: Props) {
         <Pressable onPress={onDiplomacy} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
           <Text style={styles.diplomacyText}>Diplomacy ›</Text>
         </Pressable>
+        <Pressable onPress={onWar} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
+          <Text style={styles.diplomacyText}>War ›</Text>
+        </Pressable>
         <Pressable onPress={onClose} hitSlop={12} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
@@ -58,7 +66,7 @@ export function CivPanel({ sim, onClose, onDiplomacy, onGovernment }: Props) {
         <TrendChart population={sim.history.population} believers={sim.history.believers} />
 
         {civs.map((civ) => (
-          <CivRow key={civ.id} civ={civ} />
+          <CivRow key={civ.id} civ={civ} military={civMilitary(sim, civ.id)} />
         ))}
 
         <Text style={styles.section}>Chronicle</Text>
@@ -98,7 +106,7 @@ function TrendChart({ population, believers }: { population: number[]; believers
   );
 }
 
-function CivRow({ civ }: { civ: Civilization }) {
+function CivRow({ civ, military }: { civ: Civilization; military: CivMilitary }) {
   return (
     <View style={styles.civ}>
       <View style={styles.civHeader}>
@@ -110,6 +118,7 @@ function CivRow({ civ }: { civ: Civilization }) {
         {civ.population} people · {civ.territory} hexes · satisfaction {Math.round(civ.averageSatisfaction)} ·{' '}
         {cultureText(civ)}
       </Text>
+      <Text style={styles.stats}>{militaryText(military)}</Text>
 
       <View style={styles.faithRow}>
         <Text style={styles.faithLabel}>Faith</Text>
@@ -141,9 +150,19 @@ function ledgerText(civ: Civilization): string {
     l.brokeAway && `−${l.brokeAway} broke away`,
     l.emigrated && `−${l.emigrated} moved to other peoples`,
     l.immigrated && `+${l.immigrated} moved in from other peoples`,
+    l.enlisted && `−${l.enlisted} became soldiers`,
+    l.discharged && `+${l.discharged} returned from the army`,
   ].filter(Boolean);
   const sign = net > 0 ? '+' : net < 0 ? '−' : '±';
   return `Believers last year ${sign}${Math.abs(net)}${parts.length ? ': ' + parts.join(', ') : ''}`;
+}
+
+/** Strength and soldiers per troop type, e.g. "Strength 54 · 40 soldiers: 20 melee, 20 ranged". */
+function militaryText(m: CivMilitary): string {
+  const soldiers = Math.round(m.soldiers);
+  if (soldiers === 0) return `Strength ${Math.round(m.strength)} · no soldiers`;
+  const parts = m.byType.map((n, t) => (Math.round(n) > 0 ? `${Math.round(n)} ${TROOP_NAMES[t].toLowerCase()}` : null)).filter(Boolean);
+  return `Strength ${Math.round(m.strength)} · ${soldiers} soldier${soldiers > 1 ? 's' : ''}: ${parts.join(', ')}`;
 }
 
 /** The rule that currently drives this people's faith, in plain words. */

@@ -16,6 +16,30 @@ export { sumTerms, type Term } from './terms';
 export { BUILDINGS, CityTier, GOOD_NAMES, Good, SLOTS, cityTier, isLuxury, type BuildingType } from './society/buildings';
 export { hexSatisfaction, type HexSatisfaction } from './society/satisfaction';
 export { relationsOf, type Relation } from './society/diplomacy';
+export { MIL, TROOP_NAMES, TROOP_TYPES, Troop, civMilitary, hexMilitary, soldiersAt, type CivMilitary, type HexMilitary } from './society/military';
+export {
+  ArmyState,
+  END_NAMES,
+  EndType,
+  MAX_ARMIES,
+  MAX_WARS,
+  WAR,
+  armySoldiers,
+  civTruces,
+  civWar,
+  civWars,
+  endWar,
+  finishGathering,
+  inTruce,
+  sideStrength,
+  warArmies,
+  type ArmyInfo,
+  type CivWar,
+  type WarState,
+} from './society/war';
+export { ALLY, Pact } from './society/pacts';
+export { REBEL_CHECK, inRebellion, isDissatisfied, measureRebellion, startRebellion } from './society/rebellion';
+export { civPacts, formAlliance, pactBetween, type PactInfo } from './society/alliance';
 export { governmentOf, type District, type GovBuilding } from './society/government';
 export { hexEconomy, type BuildingInfo, type HexEconomy, type HexGovernment, type HexTrade } from './society/economy';
 export { resourceCapacityTerms } from './world/features';
@@ -29,6 +53,8 @@ export {
   simulationYear,
   stepSimulation,
   stepSimulationPart,
+  TICK_PARTS,
+  TICK_PART_NAMES,
   TickPart,
   type ChronicleEntry,
   type Simulation,

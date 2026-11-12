@@ -34,7 +34,7 @@ test('both tax terms: +5 at 0 %, 0 at 10 %, -10 at 50 %; the rate for a term is 
 });
 
 test('every settlement belongs to the district of its nearest seat of government', () => {
-  const sim = createSimulation(generateWorld({ seed: 1 }));
+  const sim = createSimulation(generateWorld({ seed: 3 }));
   runYears(sim, 150);
   const owner = sim.world.owner;
   const seats = seatsOf(sim, owner);
@@ -135,7 +135,7 @@ test('the government panel lists every district of a people with all its settlem
 });
 
 test('government slots are as many as settlement slots and seats only stand in them', () => {
-  const sim = createSimulation(generateWorld({ seed: 1 }));
+  const sim = createSimulation(generateWorld({ seed: 12 }));
   runYears(sim, 200);
   let seats = 0;
   for (let c = 0; c < sim.world.cellCount; c++) {
