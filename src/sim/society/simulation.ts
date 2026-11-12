@@ -29,6 +29,8 @@ import {
   type Civilization,
 } from './civilizations';
 import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
+import { Ev, createLeaders, leaderEvent, L, LEVERS, type Leaders } from './leaders';
+import { resetLeaderCiv, updateLeaders } from './leaderRules';
 import { BUILDINGS, FIRST_LUXURY, cityTier, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, isStored, type Economy } from './buildings';
 import {
   EXPANSION_GROUP,
@@ -214,6 +216,8 @@ export type Simulation = {
   government: Government;
   /** Soldiers and strengths (see military.ts). */
   military: Military;
+  /** Leaders of the peoples: the lever set the decisions read (see leaders.ts; neutral unless LEADER.enabled). */
+  leaders: Leaders;
   /** Wars, armies and sieges (see war.ts). */
   war: WarState;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
@@ -278,6 +282,7 @@ export function createSimulation(world: World): Simulation {
     diplomacy: createDiplomacy(n),
     government: createGovernment(n),
     military: createMilitary(n),
+    leaders: createLeaders(world.seed),
     war: createWar(world.seed, n),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
@@ -719,7 +724,7 @@ function updateInhabitant(sim: Simulation, i: number): void {
   const before = pop.faith[i];
   const neighborFaith = world.population[cell] > 0 ? world.faith[cell] : before;
   const pull = (neighborFaith - before) * 0.1;
-  const devotion = civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 : 0;
+  const devotion = civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 + sim.leaders.lev[civId * LEVERS + L.devotion] : 0;
   const fading = civ.worshipsPlayer ? 0 : 0.005;
   const faith = clamp(before + pull + devotion - fading, 0, 1);
   pop.faith[i] = faith;
@@ -779,11 +784,17 @@ export function hexSupplyTerms(sim: Simulation, cell: number): Term[][] {
 function expandSettlements(sim: Simulation): void {
   const { world } = sim;
   // Overloaded hexes are few; find them once instead of once per people.
+  // A leader (Pioneer, goal Expansion) lets its people send settlers before the hex is overloaded (lever settleOver < 1).
+  let leastOver = 1;
+  const levers = sim.leaders.lev;
+  for (let id = 1; id < sim.civSlots; id++) if (sim.civs[id] && levers[id * LEVERS + L.settleOver] < leastOver) leastOver = levers[id * LEVERS + L.settleOver];
   const overloaded: number[] = [];
-  for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > sim.cellCapacity[c]) overloaded.push(c);
+  for (let c = 0; c < world.cellCount; c++) if (sim.cellPop[c] > sim.cellCapacity[c] * leastOver) overloaded.push(c);
   if (overloaded.length === 0) return;
   for (const civ of livingCivilizations(sim)) {
-    const sources = overloaded.filter((c) => sim.cellCivPop[c * sim.civSlots + civ.id] > EXPANSION_GROUP);
+    const over = levers[civ.id * LEVERS + L.settleOver];
+    const travel = levers[civ.id * LEVERS + L.travel];
+    const sources = overloaded.filter((c) => sim.cellCivPop[c * sim.civSlots + civ.id] > EXPANSION_GROUP && sim.cellPop[c] > sim.cellCapacity[c] * over);
     if (sources.length === 0) continue;
     // Most overloaded first, so it gets the pick of the free land.
     sources.sort((a, b) => sim.cellPop[b] - sim.cellCapacity[b] - (sim.cellPop[a] - sim.cellCapacity[a]));
@@ -796,7 +807,7 @@ function expandSettlements(sim: Simulation): void {
         if (target < 0 || !isSettlementTarget(sim, target)) continue;
         const step = stepCost(world, source, d);
         // Rather stop spreading than found a settlement that is unhappy from the start.
-        if (connectionValue(sim.seatCost[source] + step) < EXPAND_MIN_CONNECTION) {
+        if (connectionValue((sim.seatCost[source] + step) * travel) < EXPAND_MIN_CONNECTION) {
           held = true;
           continue;
         }
@@ -805,7 +816,7 @@ function expandSettlements(sim: Simulation): void {
           terrainAppeal(world, civ.culture, target) +
           RAW_MATERIAL_APPEAL * rawMaterials(sim, target) +
           (SATISFACTION_APPEAL * connectionValue(sim.seatCost[source] + step)) / SATISFACTION_MAX -
-          TRAVEL_EFFORT * step;
+          TRAVEL_EFFORT * travel * step;
         if (score > bestScore) {
           bestScore = score;
           best = d;
@@ -1277,6 +1288,7 @@ function updateCivilizations(sim: Simulation): void {
     driftCulture(civ.culture, target);
   }
   tryNewTribe(sim);
+  updateLeaders(sim);
 }
 
 function civCells(sim: Simulation, civId: number): { cells: number[]; weights: number[] } {
@@ -1457,6 +1469,11 @@ export function foundCivilization(
   addMood(civ, 'A new people', MOOD_NEW_PEOPLE, sim.tick);
   resetCivRelations(sim.diplomacy, id);
   resetWarCiv(sim, id);
+  resetLeaderCiv(sim, id);
+  if (parent && origin === 'revolution') {
+    leaderEvent(sim, parent.id, Ev.Uprising);
+    sim.leaders.uprisings[parent.id]++;
+  }
   sim.civs[id] = civ;
   return civ;
 }

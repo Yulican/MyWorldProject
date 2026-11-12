@@ -37,6 +37,7 @@ import {
   yieldFactor,
 } from './satisfaction';
 import { GOV_TUNING } from './taxes';
+import { L, LEVERS } from './leaders';
 import { MIL } from './military';
 import type { Simulation } from './simulation';
 import { SUPPLY_KINDS, supplySums, type SupplyModifier } from './supply';
@@ -392,7 +393,7 @@ function canExpand(sim: Simulation, cell: number): boolean {
 function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boolean {
   const { economy } = sim;
   const capacity = sim.cellCapacity[cell];
-  if (sim.cellPop[cell] < BUILD_FROM_CROWDING * capacity) return false;
+  if (sim.cellPop[cell] < (BUILD_FROM_CROWDING + sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.buildFrom]) * capacity) return false;
   let free = 0;
   let ruins = 0;
   for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {

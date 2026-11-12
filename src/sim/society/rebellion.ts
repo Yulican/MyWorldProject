@@ -4,6 +4,7 @@ import { BIOMES } from '../world/biomes';
 import { hasSeat } from './satisfaction';
 import { MIL, TROOP_TYPES, Troop } from './military';
 import { Pact } from './pacts';
+import { L, LEVERS } from './leaders';
 import { PAIRS } from './diplomacy';
 import { WAR, MAX_GOALS, MAX_WARS, startRebelWar } from './war';
 import { BELIEVER_FAITH, UPRISING_HOOK, changeCiv, drawSoldiers, foundCivilization, record, type Simulation } from './simulation';
@@ -138,7 +139,8 @@ function measureFlagged(sim: Simulation, mother: number, count: number): boolean
   REBEL_CHECK.militia = militia;
   REBEL_CHECK.mother = motherStr;
   REBEL_CHECK.settlements = count;
-  return count > 0 && REBEL_CHECK.rebels > motherStr;
+  // The mother's leader sets how much stronger than she the rebels must be (Tyrant, Iron Fist, Weak Hand).
+  return count > 0 && REBEL_CHECK.rebels > motherStr * sim.leaders.lev[mother * LEVERS + L.rebel];
 }
 
 /** The strengths of a rebellion of `mother`'s dissatisfied settlements now (REBEL_CHECK); true if they would rebel. */

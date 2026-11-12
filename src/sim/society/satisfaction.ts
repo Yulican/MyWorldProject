@@ -186,6 +186,7 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
       const v = moodNow(mood, sim.tick);
       if (v !== 0) terms.push({ label: mood.label, value: v });
     }
+    if (sim.leaders.sat[civ.id] !== 0) terms.push({ label: 'Leader', value: sim.leaders.sat[civ.id] });
   }
   return terms;
 }
@@ -206,7 +207,10 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   sum += luxuryValue(sim.economy.luxuryCovered[cell]);
   sum += taxValue(sim.government.cellRate[cell]) + goodsTaxValue(sim.government.cellGoodsRate[cell]);
   sum += sim.war.siegeValue[cell] + conqueredValue(sim, cell);
-  if (civ) for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
+  if (civ) {
+    for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
+    sum += sim.leaders.sat[civ.id];
+  }
   return clampSatisfaction(sum);
 }
 

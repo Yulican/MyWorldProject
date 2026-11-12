@@ -1104,6 +1104,9 @@ export function advanceTrips(sim: Simulation): void {
         const arrived = amount * keep;
         trade.lost[g] += amount - arrived;
         trade.delivered[g] += arrived;
+        // Yearly trade value per people (the goal Wealth): both ends of the delivery count.
+        sim.leaders.tradeValue[owner[target]] += arrived * PRICE[g];
+        if (deal) sim.leaders.tradeValue[owner[home]] += arrived * PRICE[g];
         addStock(economy, target, g, arrived);
         if (deal) {
           trade.abroad[g] += arrived;

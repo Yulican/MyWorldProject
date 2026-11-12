@@ -5,6 +5,7 @@ import { armingWanted, districtPay, pickMilitaryBuilding, prepareArming } from '
 import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
+import { L, LEVERS, incomeShare, taxMargin } from './leaders';
 import { GOV_TUNING, TAX_MAX, goodsRateFor, goodsTaxValue, rateFor, taxValue } from './taxes';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, upkeepOf as settlementUpkeep } from './trade';
 
@@ -196,7 +197,7 @@ function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_
     if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
     sum += upkeepOf(economy.type[s], m);
   }
-  return sum * years;
+  return sum * years * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.govUpkeep];
 }
 
 /** A chronicle entry at a hex (simulation.ts: record); see diplomacy.ts: Record. */
@@ -375,7 +376,7 @@ function levyTaxes(sim: Simulation, owner: Uint8Array, year: GovernmentYear, rec
       continue;
     }
     if (count[s] === 0) continue;
-    const room = (civFinancing[owner[s]] === 1 ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - low[s];
+    const room = taxMargin(sim, owner[s], civFinancing[owner[s]] === 1 ? GOV_TUNING.seatMargin : GOV_TUNING.margin) - low[s];
     const goodsLimit = Math.min(TAX_MAX, goodsRateFor(room - GOV_TUNING.taxPlus));
     let goodsRate = 0;
     for (let m = 0; m < MATERIAL_COUNT; m++) {
@@ -434,7 +435,7 @@ export function updateGovernmentUpkeep(sim: Simulation, owner: Uint8Array): void
     const lackWood = Math.max(0, upkeepReserve(sim, c, 0, 1) - gov.stock[c * MATERIAL_COUNT]);
     const lackStone = Math.max(0, upkeepReserve(sim, c, 1, 1) - gov.stock[c * MATERIAL_COUNT + 1]);
     if (lackWood <= 1e-3 && lackStone <= 1e-3) continue;
-    const headroom = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - GOV_TUNING.margin;
+    const headroom = satisfactionTarget(sim, c, sim.civs[owner[c]] ?? null) - taxMargin(sim, owner[c], GOV_TUNING.margin);
     if (headroom <= 0) continue;
     const g0 = gov.cellGoodsRate[c];
     const extra = Math.max(0, goodsRateFor(goodsTaxValue(g0) - headroom) - g0);
@@ -461,9 +462,10 @@ export function updateGovernmentUpkeep(sim: Simulation, owner: Uint8Array): void
       if (economy.state[s] !== SlotState.Standing) continue;
       const t = economy.type[s];
       const w = c * MATERIAL_COUNT;
-      if (gov.stock[w] >= upkeepOf(t, 0) && gov.stock[w + 1] >= upkeepOf(t, 1)) {
-        gov.stock[w] -= upkeepOf(t, 0);
-        gov.stock[w + 1] -= upkeepOf(t, 1);
+      const cheaper = sim.leaders.lev[sim.world.owner[c] * LEVERS + L.govUpkeep];
+      if (gov.stock[w] >= upkeepOf(t, 0) * cheaper && gov.stock[w + 1] >= upkeepOf(t, 1) * cheaper) {
+        gov.stock[w] -= upkeepOf(t, 0) * cheaper;
+        gov.stock[w + 1] -= upkeepOf(t, 1) * cheaper;
         economy.unpaid[s] = 0;
       } else if (++economy.unpaid[s] > UPKEEP_GRACE_YEARS) {
         economy.state[s] = SlotState.Ruin;
@@ -512,7 +514,7 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
   for (let s = 0; s < n; s++) {
     if (!gov.traders[s]) continue;
     (civSeatList[owner[s]] ??= []).push(s);
-    civBudget[owner[s]] += GOV_TUNING.incomeShare * gov.potential[s];
+    civBudget[owner[s]] += incomeShare(sim, owner[s]) * gov.potential[s];
   }
   const year = Math.floor(sim.tick / WEEKS_PER_YEAR);
   for (let s = 0; s < n; s++) {
@@ -588,7 +590,7 @@ function freeGovSlot(sim: Simulation, cell: number): number {
  */
 function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolean {
   const gov = sim.government;
-  const budget = GOV_TUNING.incomeShare * gov.potential[seat];
+  const budget = incomeShare(sim, sim.world.owner[seat]) * gov.potential[seat];
   const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false) + districtPay(sim, seat);
   const civ = sim.world.owner[seat];
   let seatUpkeep = 0;
@@ -614,10 +616,11 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
     if (seatOnly) continue;
     const people = sim.cellPop[c];
     // 2. Comfort where a settlement threatens to break away.
-    if (sim.satisfaction[c] < GOV_TUNING.margin) {
+    const margin = taxMargin(sim, civ, GOV_TUNING.margin);
+    if (sim.satisfaction[c] < margin) {
       for (const t of COMFORT_TYPES) {
         if (!buildingFits(sim, c, t) || !fits(t)) continue;
-        const score = 100 + (GOV_TUNING.margin - sim.satisfaction[c]) * people * 0.01;
+        const score = 100 + (margin - sim.satisfaction[c]) * people * 0.01;
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
         break;
       }

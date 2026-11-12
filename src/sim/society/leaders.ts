@@ -1,0 +1,322 @@
+import { createRng, deriveSeed, type Rng } from '../rng';
+import { GOV_TUNING } from './taxes';
+import type { Simulation } from './simulation';
+
+// Leaders (measuring prototype, "Design Documents/Requirement Anführer.md"), the leaf part: the numbers,
+// the lever set per people, the state and the event counters. No imports besides types, so war.ts,
+// diplomacy.ts, military.ts and the rest can read the levers without import cycles at load time.
+// The yearly rules (death, succession, attributes, goals) are in leaderRules.ts.
+//
+// How the rule acts on the simulation: every decision that a leader may shift reads ONE number from the
+// lever set of its people (`sim.leaders.lev`, people x LEVERS, Float32). Additive levers are 0 and
+// multiplicative ones 1 when nobody changes them, so with LEADER.enabled = 0 the table stays untouched and
+// the simulation is exactly the one without leaders.
+
+/** Peoples the tables have room for (MAX_CIV_ID + 1). */
+export const LEADER_CIVS = 256;
+
+/** Tunable numbers (tools/leaderStats.ts changes them by name); the Requirement's starting values. */
+export const LEADER = {
+  /** 1 = peoples have leaders (the prototype); 0 = the game without them (baseline). */
+  enabled: 0,
+  /** Age at takeover: ageMin + one of (ageMax - ageMin + 1); death: from deathFrom with deathBase + deathStep per year over it, at most deathMax. */
+  ageMin: 20,
+  ageMax: 40,
+  deathFrom: 55,
+  deathBase: 0.02,
+  deathStep: 0.015,
+  deathMax: 0.5,
+  /** Years in office until the 2nd attribute. */
+  secondYears: 10,
+  /** Chance that the 1st attribute of a successor is one of the predecessor's. */
+  inherit: 0.5,
+  /** Chance that the 2nd and 3rd attribute come from experience (else random). */
+  experience: 0.6,
+  /** Share of goals chosen by the people's situation (else uniformly), and the situation factors. */
+  goalBySituation: 0.6,
+  weightExpansion: 2,
+  weightWealth: 2,
+  weightSecurity: 3,
+  weightGlory: 2,
+  /** What a goal keeps of its effect after completion. */
+  goalHalf: 0.5,
+  /** Goal completion: Expansion settlements x and at least +n; Wealth trade value x, partners and a floor for the start value; Security years; Glory years of +2 satisfaction. */
+  expansionFactor: 1.5,
+  expansionMin: 2,
+  wealthFactor: 1.8,
+  wealthPartners: 2,
+  wealthFloor: 10,
+  securityYears: 5,
+  securityDanger: 40,
+  gloryYears: 10,
+  /** Years without war that count as one "long peace" experience. */
+  peaceYears: 10,
+  /** Share of a people's settlements below satisfaction 0 that counts as "hardship" of a year (at least one settlement). */
+  hardshipShare: 0.1,
+  /** Caps (Requirement section 3). */
+  capSatisfaction: 8,
+  capRatioMin: 1.2,
+  capWarChance: 0.3,
+  /** Attribute and goal effects scaled by these (1 = the table; 0.5 = half the deviation from the base; 0 = no effect). */
+  attrScale: 1,
+  goalScale: 1,
+  /** Experiments: every new leader starts with this attribute (1..25, 0 = off), so one attribute can be compared with another on the same worlds. */
+  forceAttr: 0,
+};
+
+/** The lever set. Kind: 0 additive (identity 0), 1 multiplicative (identity 1). */
+export const L = {
+  warChance: 0,
+  warChanceMul: 1,
+  neverWar: 2,
+  ratio: 3,
+  ratioBusy: 4,
+  ratioCalm: 5,
+  giveUp: 6,
+  exhaust: 7,
+  dangerMul: 8,
+  sold: 9,
+  strength: 10,
+  truce: 11,
+  warTrust: 12,
+  moodYears: 13,
+  openTrust: 14,
+  closeTrust: 15,
+  pactTrust: 16,
+  allyTrust: 17,
+  tradeTrust: 18,
+  trust: 19,
+  trustBase: 20,
+  tollPay: 21,
+  tollAsk: 22,
+  margin: 23,
+  income: 24,
+  buildFrom: 25,
+  govUpkeep: 26,
+  travel: 27,
+  settleOver: 28,
+  threat: 29,
+  devotion: 30,
+  rebel: 31,
+  resMul: 32,
+  warPop: 33,
+  oath: 34,
+  sat: 35,
+  satWar: 36,
+  satGlory: 37,
+} as const;
+export const LEVERS = 38;
+export const LEVER_NAMES = Object.keys(L) as (keyof typeof L)[];
+/** 1 for the multiplicative levers. */
+export const LEVER_KIND = new Uint8Array(LEVERS);
+for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop]) LEVER_KIND[k] = 1;
+
+/** Experiments: levers (L index) whose effect is switched off, to see which lever causes a difference (tools only; empty in the game). */
+export const MUTE = new Set<number>();
+
+/** Kinds of experience (Requirement section 4, "Erlebtes"). */
+export const Ev = { WarWon: 0, WarLost: 1, Uprising: 2, Hardship: 3, Trade: 4, Pact: 5, BorderClosed: 6, Settled: 7, Peace: 8 } as const;
+export const EVENTS = 9;
+export const EVENT_NAMES = ['war won', 'war lost', 'uprising', 'hardship', 'trade success', 'pact/alliance', 'border closed', 'new settlements', 'long peace'] as const;
+
+export const GOALS = ['none', 'Expansion', 'Wealth', 'Security', 'Glory'] as const;
+export const Goal = { None: 0, Expansion: 1, Wealth: 2, Security: 3, Glory: 4 } as const;
+
+/** Per-year measures of a people, summed per attribute for the "do opposite attributes behave differently" question (tools only). */
+export const M = { years: 0, war: 1, declared: 2, open: 3, deals: 4, pacts: 5, tradeValue: 6, settlements: 7, growth: 8, satisfaction: 9, rebellions: 10, people: 11 } as const;
+export const MEASURES = 12;
+export const MEASURE_NAMES = ['years', 'years at war', 'wars declared', 'borders open (per pair known)', 'trade partners', 'pacts+alliances', 'trade value', 'settlements', 'settlement growth', 'satisfaction', 'rebellions suffered', 'people'] as const;
+
+/** What a finished (or, at the end of a run, running) term of office left: the tool's sample. */
+export type TermRecord = {
+  civ: number;
+  goal: number;
+  /** Years in office; years until the goal was reached, -1 if not (by the end of the term). */
+  years: number;
+  doneYears: number;
+  attrs: number[];
+  /** Why the term ended: 0 death, 1 people gone, 2 still ruling at the end of the run. */
+  end: number;
+};
+
+export type Leaders = {
+  rng: Rng;
+  /** 1 while the people has a leader. */
+  has: Uint8Array;
+  /** Dynasty counter (1 = first of the line), age at takeover, tick of takeover. */
+  counter: Uint8Array;
+  age0: Uint8Array;
+  start: Int32Array;
+  /** Attributes (1..25, 0 = empty): civ * 3 + slot. */
+  attr: Uint8Array;
+  /** Goal (Goal), 1 once reached, and the tick it was reached. */
+  goal: Uint8Array;
+  goalDone: Uint8Array;
+  goalTick: Int32Array;
+  /** Value of the goal's measure at takeover (settlements, trade value, capital tier). */
+  goalBase: Float64Array;
+  /** Years in a row safe (Security), tick of the last won war (Glory window), tick of the last war lost. */
+  safeYears: Uint8Array;
+  lastWin: Int32Array;
+  /** Peace counter: years without war. */
+  calmYears: Uint16Array;
+  /** Experience counters and tick of the latest event per kind: civ * EVENTS + kind. */
+  events: Uint16Array;
+  eventTick: Int32Array;
+  /** Last year's values for the diffs (settlements, partners, pacts). */
+  lastSettlements: Int32Array;
+  lastDeals: Int32Array;
+  lastPacts: Int32Array;
+  /** The lever set, people x LEVERS. */
+  lev: Float32Array;
+  /** Satisfaction part "Leader" of the people (capped). */
+  sat: Float32Array;
+  /** Trade value (goods x price, both peoples of a delivery) of the running year and the last year. */
+  tradeValue: Float64Array;
+  tradeLast: Float64Array;
+  /** Wars the people declared in the running year (a measure), uprisings suffered likewise. */
+  declared: Uint16Array;
+  uprisings: Uint16Array;
+  /** Measures: tools only. */
+  all: Float64Array;
+  attrM: Float64Array;
+  /** The same per goal (index Goal; a reached goal counts under goal + 5). */
+  goalM: Float64Array;
+  /** Districts conquered as the attacker of a war that was won (Glory goal), this term. */
+  conquests: Uint16Array;
+  /** Samples of ended terms. */
+  records: TermRecord[];
+  /** Tallies for the tool. */
+  stats: {
+    started: number;
+    dynasties: number;
+    died: number;
+    inherited: number;
+    inheritChances: number;
+    capSat: number;
+    capRatio: number;
+    capChance: number;
+    capYears: number;
+    secondFromExperience: number;
+    thirdFromExperience: number;
+    attrDrawn: Int32Array;
+    goalsChosen: Int32Array;
+    goalsDone: Int32Array;
+    /** Violations of an exclusion pair (must stay 0). */
+    exclusionBreaks: number;
+    /** Active-goal years and how often each part of a completion condition held: see leaderRules.ts goalReached. */
+    parts: Int32Array;
+  };
+};
+
+export function createLeaders(seed: number): Leaders {
+  const lev = new Float32Array(LEADER_CIVS * LEVERS);
+  for (let c = 0; c < LEADER_CIVS; c++) setIdentity(lev, c);
+  return {
+    rng: createRng(deriveSeed(seed, 'leader')),
+    has: new Uint8Array(LEADER_CIVS),
+    counter: new Uint8Array(LEADER_CIVS),
+    age0: new Uint8Array(LEADER_CIVS),
+    start: new Int32Array(LEADER_CIVS),
+    attr: new Uint8Array(LEADER_CIVS * 3),
+    goal: new Uint8Array(LEADER_CIVS),
+    goalDone: new Uint8Array(LEADER_CIVS),
+    goalTick: new Int32Array(LEADER_CIVS),
+    goalBase: new Float64Array(LEADER_CIVS),
+    safeYears: new Uint8Array(LEADER_CIVS),
+    lastWin: new Int32Array(LEADER_CIVS).fill(-1),
+    calmYears: new Uint16Array(LEADER_CIVS),
+    events: new Uint16Array(LEADER_CIVS * EVENTS),
+    eventTick: new Int32Array(LEADER_CIVS * EVENTS),
+    lastSettlements: new Int32Array(LEADER_CIVS),
+    lastDeals: new Int32Array(LEADER_CIVS),
+    lastPacts: new Int32Array(LEADER_CIVS),
+    lev,
+    sat: new Float32Array(LEADER_CIVS),
+    tradeValue: new Float64Array(LEADER_CIVS),
+    tradeLast: new Float64Array(LEADER_CIVS),
+    declared: new Uint16Array(LEADER_CIVS),
+    conquests: new Uint16Array(LEADER_CIVS),
+    uprisings: new Uint16Array(LEADER_CIVS),
+    all: new Float64Array(MEASURES),
+    attrM: new Float64Array(26 * MEASURES),
+    goalM: new Float64Array(10 * MEASURES),
+    records: [],
+    stats: {
+      started: 0,
+      dynasties: 0,
+      died: 0,
+      inherited: 0,
+      inheritChances: 0,
+      capSat: 0,
+      capRatio: 0,
+      capChance: 0,
+      capYears: 0,
+      secondFromExperience: 0,
+      thirdFromExperience: 0,
+      attrDrawn: new Int32Array(26),
+      goalsChosen: new Int32Array(5),
+      goalsDone: new Int32Array(5),
+      exclusionBreaks: 0,
+      parts: new Int32Array(12),
+    },
+  };
+}
+
+/** Writes the neutral lever set of people `civ`. */
+export function setIdentity(lev: Float32Array, civ: number): void {
+  const o = civ * LEVERS;
+  for (let k = 0; k < LEVERS; k++) lev[o + k] = LEVER_KIND[k];
+}
+
+/** A people with a reused id starts over: no leader, the neutral lever set (leaderRules.ts: resetLeaderCiv closes the old term first). */
+export function clearLeader(sim: Simulation, civ: number): void {
+  const s = sim.leaders;
+  s.has[civ] = 0;
+  s.sat[civ] = 0;
+  setIdentity(s.lev, civ);
+}
+
+/** An experience of the leader of `civ` (war won, uprising ...); counted only while it has one. */
+export function leaderEvent(sim: Simulation, civ: number, kind: number): void {
+  const s = sim.leaders;
+  if (civ <= 0 || civ >= LEADER_CIVS || s.has[civ] === 0) return;
+  s.events[civ * EVENTS + kind]++;
+  s.eventTick[civ * EVENTS + kind] = sim.tick;
+  if (kind === Ev.WarWon) s.lastWin[civ] = sim.tick;
+}
+
+/** Lever `k` of people `civ`. */
+export function lever(sim: Simulation, civ: number, k: number): number {
+  return sim.leaders.lev[civ * LEVERS + k];
+}
+
+/** Yearly chance that `civ` declares a war when it has a target: `base` (WAR.chance) with the leader's shifts, capped (Pacifist: never). */
+export function warChance(sim: Simulation, civ: number, base: number): number {
+  const lev = sim.leaders.lev;
+  const o = civ * LEVERS;
+  if (lev[o + L.neverWar] > 0) return 0;
+  const add = lev[o + L.warChance];
+  const mul = lev[o + L.warChanceMul];
+  if (add === 0 && mul === 1) return base;
+  return Math.max(0, Math.min(LEADER.capWarChance, (base + add) * mul));
+}
+
+/** Strength ratio `a` needs over `t` to declare war: `base` (WAR.ratio) with the leader's shifts, at least LEADER.capRatioMin. */
+export function warRatio(sim: Simulation, a: number, busy: boolean, base: number): number {
+  const lev = sim.leaders.lev;
+  const o = a * LEVERS;
+  const dev = lev[o + L.ratio] + (busy ? lev[o + L.ratioBusy] : lev[o + L.ratioCalm]);
+  if (dev === 0) return base;
+  return Math.max(LEADER.capRatioMin, base + dev);
+}
+
+/** Share of the potential income a district's government buildings and soldiers may take in yearly upkeep (GOV_TUNING.incomeShare, the leader's shift). */
+export function incomeShare(sim: Simulation, civ: number): number {
+  return GOV_TUNING.incomeShare + sim.leaders.lev[civ * LEVERS + L.income];
+}
+
+/** Satisfaction the weakest settlement keeps above zero under the taxes (GOV_TUNING.margin, the leader's shift); `base` for the seat financing margin. */
+export function taxMargin(sim: Simulation, civ: number, base: number): number {
+  return base + sim.leaders.lev[civ * LEVERS + L.margin];
+}

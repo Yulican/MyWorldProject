@@ -4,6 +4,7 @@ import { PRICE, TradeGood } from './trade';
 import type { Simulation } from './simulation';
 import { PAIRS } from './diplomacy';
 import { foeStrength, ownStrength } from './pacts';
+import { L, LEVERS, incomeShare } from './leaders';
 
 // Soldiers without combat (war phase 1; "Design Documents/Requirement
 // Krieg.md", sections 2 and 10). Barracks, shooting ranges and stables (built
@@ -178,16 +179,22 @@ export function strengthSize(sim: Simulation, a: number, b: number, scale: numbe
   return Math.min(100, (scale * sb) / sa);
 }
 
+/** Money one soldier of people `civ` costs a year: MIL.sold, with its leader's pay factor (Drillmaster, Warmonger). */
+function soldOf(sim: Simulation, civ: number): number {
+  return MIL.sold * sim.leaders.lev[civ * LEVERS + L.sold];
+}
+
 /** Soldiers the district of `seat` can still house in new buildings within the income check (soldiers' pay is counted like upkeep). */
 export function districtRoom(sim: Simulation, seat: number): number {
   const gov = sim.government;
-  const budget = GOV_TUNING.incomeShare * gov.potential[seat] - gov.upkeep[seat];
-  return Math.floor(budget / MIL.sold) - sim.military.districtCap[seat];
+  const civ = sim.world.owner[seat];
+  const budget = incomeShare(sim, civ) * gov.potential[seat] - gov.upkeep[seat];
+  return Math.floor(budget / soldOf(sim, civ)) - sim.military.districtCap[seat];
 }
 
 /** The pay the district's military buildings commit per year (the government counts it in its income check). */
 export function districtPay(sim: Simulation, seat: number): number {
-  return sim.military.districtCap[seat] * MIL.sold;
+  return sim.military.districtCap[seat] * soldOf(sim, sim.world.owner[seat]);
 }
 
 /**
@@ -206,7 +213,8 @@ export function mayBuyStrategic(sim: Simulation, seller: number, buyer: number, 
 /** Whether the people feels threatened: some people's danger for it is at least MIL.threatDanger. */
 export function threatened(sim: Simulation, civ: number, pairs: number): boolean {
   const d = sim.diplomacy.danger;
-  for (let b = 1; b < pairs; b++) if (b !== civ && d[civ * pairs + b] >= MIL.threatDanger) return true;
+  const limit = MIL.threatDanger + sim.leaders.lev[civ * LEVERS + L.threat];
+  for (let b = 1; b < pairs; b++) if (b !== civ && d[civ * pairs + b] >= limit) return true;
   return false;
 }
 
@@ -237,7 +245,7 @@ export function armingWanted(sim: Simulation, seat: number): boolean {
   const civ = sim.world.owner[seat];
   if (civ === 0 || districtRoom(sim, seat) < MIL.capacity) return false;
   const m = sim.military;
-  return sim.government.treasury[seat] >= MIL.spareYears * MIL.capacity * MIL.sold || m.unhappy[seat] === 1 || (civ < m.threat.length && m.threat[civ] === 1);
+  return sim.government.treasury[seat] >= MIL.spareYears * MIL.capacity * soldOf(sim, civ) || m.unhappy[seat] === 1 || (civ < m.threat.length && m.threat[civ] === 1);
 }
 
 /** Whether the cell has a building (any state but empty or ruin) making `good`. */
@@ -384,7 +392,8 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
   for (let s = 0; s < n; s++) {
     const total = m.sums[s];
     if (total <= 0) continue;
-    const cost = total * MIL.sold;
+    const sold = soldOf(sim, owner[s]);
+    const cost = total * sold;
     if (gov.treasury[s] < cost) {
       const civ = owner[s];
       let lack = cost - gov.treasury[s];
@@ -406,9 +415,9 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       m.paid += cost;
       continue;
     }
-    const afford = Math.floor(gov.treasury[s] / MIL.sold);
-    gov.treasury[s] -= afford * MIL.sold;
-    m.paid += afford * MIL.sold;
+    const afford = Math.floor(gov.treasury[s] / sold);
+    gov.treasury[s] -= afford * sold;
+    m.paid += afford * sold;
     m.unpaidShare[s] = (total - afford) / total;
     m.rest[s] = total - afford;
   }
@@ -439,10 +448,14 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     const civ = owner[c];
     const d = gov.district[c];
     const here = soldiersAt(sim, c) - Math.min(sim.war.militia[c], m.soldiers[c * TROOP_TYPES + Troop.Melee]);
-    if (d >= 0) gov.reserve[d] += here * MIL.sold;
-    if (civ === 0) continue;
+    if (civ === 0) {
+      if (d >= 0) gov.reserve[d] += here * MIL.sold;
+      continue;
+    }
+    const sold = soldOf(sim, civ);
+    if (d >= 0) gov.reserve[d] += here * sold;
     m.civAfford[civ] -= here;
-    if (gov.traders[c] > 0) m.civAfford[civ] += Math.floor(gov.treasury[c] / MIL.sold);
+    if (gov.traders[c] > 0) m.civAfford[civ] += Math.floor(gov.treasury[c] / sold);
   }
   // Training: each building trains MIL.trainShare of its capacity a year, within the settlement's people and
   // adults and what the people's treasuries pay.
@@ -465,7 +478,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       m.soldiers[base + t] += add;
       m.train[c] += add;
       m.trained += add;
-      gov.reserve[dist] += add * MIL.sold;
+      gov.reserve[dist] += add * soldOf(sim, civ);
       room -= add;
     }
   }
@@ -499,7 +512,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       }
       m.covered[base + t] = covered ? 1 : 0;
       if (civ > 0) {
-        m.strength[civ] += count * (covered ? MIL.factor : 1);
+        m.strength[civ] += count * (covered ? MIL.factor : 1) * sim.leaders.lev[civ * LEVERS + L.strength];
         m.soldiersOf[civ * TROOP_TYPES + t] += count;
       }
     }
