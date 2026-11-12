@@ -48,7 +48,33 @@ const TAP_COOLDOWN_MS = 300;
 /** The map rests once it hasn't moved for this long (outdated tiles are redone then, see TileImages.setResting). */
 const REST_MS = 100;
 /** A benchmark swipe's frame record (UI thread): totals, the worst frame and when it ended after `t0`, what the UI drew in it. */
-const NO_BENCH_SWIPE = { active: false, frames: 0, timeMs: 0, worstMs: 0, t0: 0, worstEnd: 0, worstDraws: 0, worstSwaps: 0, draws: 0, swaps: 0 };
+const NO_BENCH_SWIPE = {
+  active: false,
+  frames: 0,
+  timeMs: 0,
+  worstMs: 0,
+  t0: 0,
+  worstEnd: 0,
+  worstDraws: 0,
+  worstSwaps: 0,
+  draws: 0,
+  swaps: 0,
+  // The UI runtime's own garbage collections (they stop the UI thread): totals at the swipe's start and at the last frame, and in the worst frame.
+  gc0: 0,
+  gcMs0: 0,
+  gc: 0,
+  gcMs: 0,
+  worstGc: 0,
+  worstGcMs: 0,
+  // How long after a frame's time its callback ran (the two clocks may differ by a constant: the shortest of the swipe is the base).
+  worstLate: 0,
+  minLate: 0,
+};
+/** Frames longer than this count as long for the benchmark's diagnostics (a frame is 16.7 ms). */
+const LONG_FRAME_MS = 20;
+/** A full collection of the UI runtime when the map comes to rest, at most this often (as worldStore does for the JS runtime). */
+const UI_GC_INTERVAL_MS = 6000;
+type HermesGlobals = { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> }; gc?: () => void };
 /** Memory for territory tile images (the terrain tiles have their own, see tileImages.ts). */
 const TERRITORY_BUDGET_BYTES = 40 * 1024 * 1024;
 /** Slower releases just stop; faster ones let the map glide on. */
@@ -231,6 +257,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
 
   // Benchmark swipes: frames are counted on the UI thread while one runs.
   const benchSwipe = useSharedValue({ ...NO_BENCH_SWIPE });
+  const lastUiGc = useSharedValue(0);
   // Times the swipe on its own: an animation of an offset that doesn't change
   // (dx = 0 for a north swipe) would end at once.
   const benchClock = useSharedValue(0);
@@ -238,17 +265,40 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   const onSwipeDone = useCallback((stats: SwipeStats) => swipeDone.current(stats), []);
   useFrameCallback((frame) => {
     'worklet';
+    const hermes = globalThis as HermesGlobals;
     if (moving.value && Date.now() - lastMoveAt.value >= REST_MS) {
       moving.value = false;
       scheduleOnRN(onRest, true);
+      // The worklets' garbage (pictures, rects, tile sets) is collected now, while nothing moves:
+      // a collection of this runtime stops the UI thread and would cost frames of a movement.
+      if (Date.now() - lastUiGc.value >= UI_GC_INTERVAL_MS && hermes.gc) {
+        lastUiGc.value = Date.now();
+        hermes.gc();
+      }
     }
     const dt = frame.timeSincePreviousFrame;
     if (!benchSwipe.value.active || dt === null) return;
     const draws = uiTileDraws.value;
     const swaps = uiArmySwaps.value;
+    // The runtime's collections so far, read only at the swipe's first frame and at long frames (reading allocates).
+    const first = benchSwipe.value.frames === 0;
+    const long = dt > LONG_FRAME_MS;
+    const stats = first || long ? hermes.HermesInternal?.getInstrumentedStats?.() : undefined;
+    const gc = stats?.js_numGCs ?? 0;
+    const gcMs = (stats?.js_gcTime ?? 0) * 1000;
+    const clock = (globalThis as { performance?: { now?: () => number } }).performance;
+    const late = clock?.now ? clock.now() - frame.timestamp : 0;
     benchSwipe.modify((b) => {
       'worklet';
-      if (b.frames === 0) b.t0 = frame.timestamp - dt;
+      if (first) {
+        b.t0 = frame.timestamp - dt;
+        b.gc0 = gc;
+        b.gcMs0 = gcMs;
+        b.gc = gc;
+        b.gcMs = gcMs;
+        b.minLate = late;
+      }
+      if (late < b.minLate) b.minLate = late;
       b.frames += 1;
       b.timeMs += dt;
       if (dt > b.worstMs) {
@@ -256,9 +306,17 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
         b.worstEnd = frame.timestamp - b.t0;
         b.worstDraws = draws - b.draws;
         b.worstSwaps = swaps - b.swaps;
+        // Collections since the swipe began or its last long frame, whichever is later.
+        b.worstGc = long ? gc - b.gc : 0;
+        b.worstGcMs = long ? gcMs - b.gcMs : 0;
+        b.worstLate = late;
       }
       b.draws = draws;
       b.swaps = swaps;
+      if (long) {
+        b.gc = gc;
+        b.gcMs = gcMs;
+      }
       return b;
     }, false);
   });
@@ -302,6 +360,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
             benchClock.value = withTiming(1, timing, () => {
               const b = benchSwipe.value;
               benchSwipe.value = { ...b, active: false };
+              const end = (globalThis as HermesGlobals).HermesInternal?.getInstrumentedStats?.();
               scheduleOnRN(onSwipeDone, {
                 frames: b.frames,
                 timeMs: b.timeMs,
@@ -310,6 +369,11 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
                 worstEndMs: b.worstEnd,
                 worstTileDraws: b.worstDraws,
                 worstArmySwaps: b.worstSwaps,
+                uiGcCount: (end?.js_numGCs ?? b.gc0) - b.gc0,
+                uiGcMs: (end?.js_gcTime ?? 0) * 1000 - (end ? b.gcMs0 : 0),
+                worstUiGcCount: b.worstGc,
+                worstUiGcMs: b.worstGcMs,
+                worstCallbackLateMs: b.worstLate - b.minLate,
               });
             });
           });

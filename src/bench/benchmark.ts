@@ -106,6 +106,13 @@ export type SwipeStats = {
   /** UI-thread work in the worst frame: tile pictures recorded, army pictures swapped in. */
   worstTileDraws?: number;
   worstArmySwaps?: number;
+  /** Garbage collections of the UI runtime (the worklets' own heap; they stop the UI thread) in the swipe and in its worst frame, with their time. */
+  uiGcCount?: number;
+  uiGcMs?: number;
+  worstUiGcCount?: number;
+  worstUiGcMs?: number;
+  /** How much later than the swipe's promptest frame the worst frame's UI callback ran after the frame's time (large: the UI thread was busy before it; small: the wait was in rendering, after it). */
+  worstCallbackLateMs?: number;
 };
 
 export type SwipeResult = {

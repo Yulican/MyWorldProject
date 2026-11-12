@@ -90,6 +90,9 @@ export function useBenchmark(controller: { current: MapController | null }) {
         for (const [k, v] of Object.entries({ ...perfEvents, ...gcStats() })) {
           events[k] = Math.round((v - before[k as keyof typeof before]) * 10) / 10;
         }
+        // The UI runtime's own collections during the swipe (counted on the UI thread).
+        events.uiGcCount = stats.uiGcCount ?? 0;
+        events.uiGcMs = Math.round((stats.uiGcMs ?? 0) * 10) / 10;
         const evaluated = evaluateSwipe(stats);
         const result = {
           world,
@@ -167,6 +170,10 @@ function worstFrameWork(swipeStart: number, stats: SwipeStats): string {
     parts.push(...workBetween(swipeStart + stats.worstStartMs - 8, swipeStart + stats.worstEndMs + 24));
     parts.push(`at ${stats.worstStartMs.toFixed(0)}-${stats.worstEndMs.toFixed(0)} ms of the swipe`);
   }
-  parts.push(`UI: ${stats.worstTileDraws ?? 0} tile pictures, ${stats.worstArmySwaps ?? 0} army pictures`);
+  parts.push(
+    `UI: ${stats.worstTileDraws ?? 0} tile pictures, ${stats.worstArmySwaps ?? 0} army pictures, ` +
+      `${stats.worstUiGcCount ?? 0} UI-runtime GC ${(stats.worstUiGcMs ?? 0).toFixed(1)}ms (since the last long frame), ` +
+      `UI callback ${(stats.worstCallbackLateMs ?? 0).toFixed(0)}ms later than the swipe's promptest`,
+  );
   return parts.join('; ');
 }
