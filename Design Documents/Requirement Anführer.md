@@ -1,0 +1,200 @@
+# Requirement: Anführer
+
+Stand: **vom Nutzer entschieden (Attribute, Ziele, Nachfolge, Anzeige), noch nicht simuliert, noch nicht umgesetzt** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind vorläufige Startwerte**; `sim-analyst` kalibriert sie über mindestens 12 Welten (Abschnitt 11), erst danach gelten sie. Was der Nutzer noch bestätigen soll, steht in Abschnitt 12 („Zu bestätigen“). Spieltexte sind Englisch („Leader“).
+
+Baut auf Krieg (`Requirement Krieg.md`), Diplomatie (`Requirement Diplomatie.md`), Zentralregierung (`Requirement Zentralregierung.md`), Zufriedenheit (`Requirement Zufriedenheit.md`) und Handel (`Requirement Handel.md`) auf. Eines der letzten Features für Version 1.0.
+
+## 1. Ziel
+
+Jedes Volk wird von einem **Anführer** regiert. Er regiert, bis er stirbt, hat Attribute und ein Ziel und prägt das Verhalten seines Volks **stark**: Er verschiebt die Schwellen und Wahrscheinlichkeiten, nach denen das Volk heute automatisch entscheidet (Krieg, Bündnisse, Grenzen, Handel, Bau, Steuern, Siedeln, Aufstände, Andacht zum Gott). Völker mit gleicher Lage verhalten sich dadurch verschieden, und ein Herrscherwechsel kann das Verhalten eines Volks kippen. Der starke Einfluss ist gewollt.
+
+Es gibt keine Sturz-Mechanik: kein Putsch, keine Absetzung, auch nicht bei Aufständen. Ein Eingriff des Gottes auf Anführer kommt **nicht in 1.0** (Abschnitt 10, „Später“).
+
+## 2. Der Anführer
+
+| Eigenschaft | Regel |
+|---|---|
+| Name | Dynastie-Stammname des Volks plus Zähler (Abschnitt 6), z. B. „Aron“, „Aron II.“, „Aron III.“ |
+| Alter bei Amtsantritt | gleichverteilt 20 bis 40 Jahre |
+| Amtszeit | bis zum Tod; endet das Volk (kein Gebiet mehr), endet die Amtszeit |
+| Tod | jährlich gewürfelt: unter 55 Jahren nie; ab 55 Jahren Wahrscheinlichkeit 2 % + 1,5 Prozentpunkte je Jahr über 55, höchstens 50 % (Startwert; erwartetes Sterbealter ≈ 63, Amtszeit im Mittel gut 30 Jahre; kalibrieren (Simulation)) |
+| Attribute | 1 bei Amtsantritt, das 2. nach 10 Regierungsjahren, das 3. bei Abschluss des Ziels; höchstens 3 (Abschnitt 4) |
+| Ziel | 1 bei Amtsantritt, fest, **kein Zielwechsel** (Abschnitt 5) |
+
+- Der Tod fällt in den jährlichen Schritt des Volks; der Nachfolger tritt im selben Jahr an (Abschnitt 6).
+- Eigener Zufallsgenerator „leader“ (deterministisch pro Seed, ohne die Folgen anderer Systeme zu verschieben).
+
+## 3. Wirkung auf Hebel, Deckel, Kombination
+
+Jedes Attribut und die Zielwirkung ändern bestehende Hebel (Abschnitte 4 und 5). Regeln für mehrere Wirkungen auf denselben Hebel:
+
+- **Schwellen und Wahrscheinlichkeiten:** Die Abweichungen vom Grundwert werden **addiert** (z. B. Kriegswurf 10 % + 15 Punkte + 5 Punkte).
+- **Prozentfaktoren** (Stärke, Sold, Zoll, Unterhalt): **multipliziert**.
+- **Deckel (entschieden):**
+  - Summe aller Zufriedenheitswirkungen von Attributen und Ziel: **höchstens ±8** (Teilwert „Leader“, Abschnitt 7). Teilwerte, die Zufriedenheit nur über Steuern ändern („Taxes“), zählen mit.
+  - 2×-Schwelle der Kriegserklärung (Krieg §6) **nie unter 1,2×**.
+  - Eigener Kriegswurf **nie über 30 %** pro Jahr, nie unter 0 %.
+- **Vorrang:** „erklärt nie selbst Krieg“ (Pacifist) schlägt jede Erhöhung des Kriegswurfs.
+- Wirkung gilt für das ganze Volk (alle Bezirke und Siedlungen), solange der Anführer lebt.
+
+## 4. Attribute (25)
+
+Alle Zahlen sind **Startwerte (kalibrieren (Simulation))**. Grundwerte: Kriegswurf 10 %, 2×-Schwelle, Aufgabe bei 40 % der Gegnerstärke, Erschöpfung 10 Jahre, Grenze öffnen Vertrauen ≥ 50 und Gefahr ≤ 40, schließen Vertrauen < 35 oder Gefahr > 60, Pakt Vertrauen ≥ 40, Bündnis ≥ 80, Handelsabkommen ≥ 60, Sicherheitsabstand der Steuern 5, Einkommensprüfung 40 %, Wachstumsbau ab 80 % Kapazität, Andacht 0,02 × Kultur „Devout“.
+
+„Schließt aus“: Ein Anführer bekommt nie zwei Attribute eines Ausschlusspaars (auch nicht über Erbe oder Erlebtes).
+
+**Krieg** (`Requirement Krieg.md`, Abschnitte 2 und 6)
+
+| Nr. | Name | Beschreibung | Wirkung | Schließt aus |
+|---|---|---|---|---|
+| 1 | Warmonger | Kriegstreiber | Kriegswurf 10 → 25 %, 2×-Schwelle → 1,3×; Soldatenunterhalt +20 % | 2, 3 |
+| 2 | Pacifist | Friedfertig | erklärt nie selbst Krieg; Grenze öffnen schon ab Vertrauen 40; Aufgabe schon bei 55 % | 1, 4 |
+| 3 | Cautious Strategist | Vorsichtiger Stratege | erklärt nur ab 3× Stärke, dafür Kriegswurf 20 % | 1 |
+| 4 | Stubborn | Starrsinnig | Aufgabe erst bei < 15 %, Erschöpfung 10 → 15 Jahre; Zufriedenheit −3 solange das Volk im Krieg ist | 2, 5 |
+| 5 | Craven | Zaghaft | Aufgabe schon bei 60 %; Gefahr durch andere zählt ×0,8 | 4 |
+| 6 | Drillmaster | Ausbilder | Soldatenstärke +25 %, Sold +30 % | – |
+
+**Diplomatie** (`Requirement Diplomatie.md`, Abschnitte 1 und 2; `Requirement Krieg.md`, Abschnitt 7)
+
+| Nr. | Name | Beschreibung | Wirkung | Schließt aus |
+|---|---|---|---|---|
+| 7 | Silver Tongue | Redegewandt | Vertrauen zu allen Völkern dauerhaft +10; Startvertrauen bei Kontakt 20 → 35 | 8 |
+| 8 | Xenophobe | Fremdenfeind | öffnet Grenzen erst ab Vertrauen ≥ 70, schließt bei < 50; eigener Zoll auf Durchreisende ×2 | 7 |
+| 9 | Oathkeeper | Eidtreu | Bündnis ab Vertrauen 60 (statt 80), Pakt ab 25 (statt 40); tritt jedem Krieg eines Verbündeten auf dessen Seite bei, auch ohne Stärkeprüfung der Angreiferseite | – |
+| 10 | Opportunist | Gelegenheitsjäger | 2×-Schwelle → 1,2× gegen Völker, die im Krieg oder in einer Rebellion sind; gegen alle anderen 2,5× | – |
+| 11 | Grudge-bearer | Nachtragend | Vertrauensereignisse klingen in 30 statt 10 Jahren ab; Kriegsmalus des Vertrauens −30 → −50; Waffenstillstand nach eigenen Kriegen 20 → 30 Jahre | – |
+
+**Wirtschaft** (`Requirement Zentralregierung.md`, Abschnitte 4 und 5; `Requirement Handel.md`; `Requirement Diplomatie.md`, Abschnitt 3)
+
+| Nr. | Name | Beschreibung | Wirkung | Schließt aus |
+|---|---|---|---|---|
+| 12 | Merchant Prince | Handelsfürst | Handelsabkommen ab Vertrauen 40 (statt 60); Zoll, den das Volk zahlt, −50 %; Einkommensprüfung 40 → 50 % | – |
+| 13 | Generous | Großzügig | Sicherheitsabstand der Steuern 5 → 12; Zufriedenheit +4 | 14 |
+| 14 | Tax Hawk | Steuerjäger | Sicherheitsabstand 5 → 0; Einkommensprüfung 40 → 55 %; Zufriedenheit −3 | 13 |
+| 15 | Builder | Bauherr | Wachstumsbau ab 60 % Kapazität (statt 80 %); Unterhalt der Regierungsgebäude +20 % | 16 |
+| 16 | Frugal | Sparsam | Einkommensprüfung 40 → 25 %; Unterhalt der Regierungsgebäude −25 %; Wachstumsbau erst ab 90 % | 15 |
+| 17 | Prospector | Schürfer | Sondervorkommen und strategische Güter zählen beim Siedeln ×2 und im Kriegsnutzen (Krieg §6) ×4 insgesamt | – |
+
+**Siedeln**
+
+| Nr. | Name | Beschreibung | Wirkung | Schließt aus |
+|---|---|---|---|---|
+| 18 | Pioneer | Pionier | Wegkosten im Siedlungsscore −50 %; neue Siedlungsversuche +30 %; Zufriedenheit −2 | 19 |
+| 19 | Homebody | Heimatverbunden | Wegkosten im Siedlungsscore ×2; Zufriedenheit +3 | 18 |
+
+**Ordnung** (`Requirement Zufriedenheit.md`, `Requirement Krieg.md`, Abschnitt 8: Rebellionsprüfung)
+
+Die Rebellionsschwelle ist der Faktor, den die Stärke der Rebellen im Vergleich zum Mutterland überschreiten muss (Grundwert 1×).
+
+| Nr. | Name | Beschreibung | Wirkung | Schließt aus |
+|---|---|---|---|---|
+| 20 | Beloved | Geliebt | Zufriedenheit +5 | 21 |
+| 21 | Tyrant | Tyrann | Zufriedenheit −6; Rebellionsschwelle 2× | 20, 23 |
+| 22 | Iron Fist | Eiserne Faust | Rebellionsschwelle 1,5×; Zufriedenheit −2; Sold +10 % | 23 |
+| 23 | Weak Hand | Schwache Hand | Rebellionsschwelle 0,6×; Zufriedenheit +3 | 21, 22 |
+
+**Gott**
+
+| Nr. | Name | Beschreibung | Wirkung | Schließt aus |
+|---|---|---|---|---|
+| 24 | Devout | Fromm | Andacht zum Gott +0,05 (zusätzlich zu 0,02 × Kultur „Devout“); Zufriedenheit +1 | 25 |
+| 25 | Skeptic | Skeptisch | Andacht −0,03; Sicherheitsabstand der Steuern −2 | 24 |
+
+Ausschlusspaare insgesamt: 1/2, 1/3, 2/4, 4/5, 7/8, 13/14, 15/16, 18/19, 20/21, 21/23, 22/23, 24/25. Zusätzlich schließen **Pacifist und das Ziel Glory** sowie **Homebody und das Ziel Expansion** einander aus (Abschnitt 5).
+
+### Wie Attribute dazukommen
+
+- **1. Attribut (Amtsantritt):** 50 % eines der Attribute des Vorgängers (zufällig unter seinen Attributen), sonst Zufall unter allen. Das erste Volk, ein neuer Stamm oder ein Rebellenvolk hat keinen Vorgänger: Zufall.
+- **2. Attribut (nach 10 Regierungsjahren) und 3. Attribut (bei Abschluss des Ziels):** zu **60 % aus Erlebtem**, zu 40 % Zufall unter allen Attributen. Ausgeschlossene Attribute (Ausschlusspaare, Ausschluss durch das Ziel) und schon vorhandene werden nie gezogen.
+- **Erlebtes:** Gezählt werden die Ereignisse der laufenden Amtszeit. Gewählt wird die Ereignisart mit den meisten Ereignissen (Gleichstand: das jüngste); das Attribut kommt gleichverteilt aus deren Liste. Gibt es kein Erlebtes oder ist die Liste ausgeschöpft, wird zufällig gezogen.
+
+| Erlebnis (in der Amtszeit) | Attribute |
+|---|---|
+| Krieg gewonnen (Besetzung, Eroberung oder Gegner gibt auf) | Warmonger, Drillmaster, Opportunist, Stubborn |
+| Krieg verloren oder Sitz belagert/Bezirk verloren | Pacifist, Cautious Strategist, Craven, Grudge-bearer |
+| Aufstand im eigenen Reich (Rebellion erklärt oder Volk durch Aufstand entstanden) | Iron Fist, Weak Hand, Beloved, Tyrant |
+| Hunger oder Not (eine Siedlung mit fehlender Nahrung/Wasser, Zufriedenheit < 0) | Frugal, Tax Hawk, Generous, Homebody |
+| Handelserfolg (neues Handels- oder Freihandelsabkommen) | Merchant Prince, Builder, Prospector, Silver Tongue |
+| Bündnis oder Pakt geschlossen oder Kriegsbeitritt als Verbündeter | Oathkeeper, Silver Tongue, Opportunist |
+| Grenze gegen das Volk geschlossen oder Vertrauen stark gefallen (Gefahr > 60) | Xenophobe, Grudge-bearer, Cautious Strategist |
+| Neue Siedlungen gegründet (ab 2) | Pioneer, Builder, Prospector |
+| Lange Friedenszeit (10 Jahre ohne Krieg) | Pacifist, Merchant Prince, Beloved, Generous |
+
+Devout und Skeptic kommen nur über Zufall oder Erbe.
+
+## 5. Ziele (4)
+
+Jeder Anführer bekommt bei Amtsantritt **ein** Ziel. Es bleibt bis zu seinem Tod; es gibt keinen Zielwechsel. Solange das Ziel **aktiv** ist, wirkt es wie unten. Bei **Abschluss** (die Bedingung ist jährlich geprüft) bleibt die Wirkung zu **50 %** bestehen (die Abweichung vom Grundwert halbiert), und der Anführer bekommt sein 3. Attribut (Abschnitt 4). Stirbt er **vor** Abschluss, verfällt das Ziel ohne Folgen; der Nachfolger bekommt ein eigenes Ziel (Abschnitt 6).
+
+Abschlussbedingungen sind **relativ zum Stand bei Amtsantritt** gemessen (kleine und große Völker können sie erreichen). Ziel für die Kalibrierung: etwa ein Drittel bis die Hälfte der Anführer schafft sie in ca. 15 bis 30 Regierungsjahren.
+
+| Ziel | Bedeutung | Wirkung solange aktiv (Startwerte) | Abschlussbedingung (Startwerte) |
+|---|---|---|---|
+| **Expansion** | Land und Siedlungen gewinnen | Siedlungsscore +25 %; Einwohner zählen im Kriegsnutzen ×1,5; Wachstumsbau ab 70 % Kapazität | Zahl der Siedlungen (auch eroberte) ≥ 1,5 × Zahl bei Amtsantritt, mindestens +2 |
+| **Wealth** | Reichtum und Handel | Handelsabkommen ab Vertrauen 50; Einkommensprüfung +10 Punkte; Regierungshändler und Handelsgebäude zuerst | jährlicher Handelswert (Binnen- und Außenhandel zusammen) ≥ 1,8 × Wert bei Amtsantritt und mindestens 2 Handelspartner (Völker mit Handels- oder Freihandelsabkommen) |
+| **Security** | Sicherheit | eigener Kriegswurf ×0,5; Pakt ab Vertrauen 30; Militärbau ab Gefahr 35 (statt 50); Stärke +10 % | 5 Jahre in Folge Gefahr ≤ 40 von allen Nachbarvölkern, kein Siedlungsverlust in dieser Zeit und mindestens ein Pakt oder Bündnis |
+| **Glory** | Ruhm | Kriegswurf ×1,5; 2×-Schwelle → 1,5×; Hauptstadt wird zuerst ausgebaut; Zufriedenheit +2 für 10 Jahre nach einem gewonnenen Krieg | ein Krieg als Angreifer gewonnen mit Eroberung eines Bezirks, oder die Hauptstadt steigt eine Stadtstufe auf (`cityTier`, Regionale Rohstoffe §11) |
+
+Ausschlüsse: **Security** ist für Völker ohne Nachbarvolk (keine gemeinsame Grenze, Krieg §6) nicht wählbar. **Glory** ist mit dem Attribut Pacifist, **Expansion** mit Homebody unvereinbar (weder beim Wählen des Ziels noch beim Ziehen des Attributs).
+
+Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Schwelle ≥ 1,2×, Kriegswurf ≤ 30 %).
+
+## 6. Nachfolge, Dynastie, neues Volk
+
+- **Dynastie:** Jedes Volk hat einen **Stammnamen** (aus der Namensliste der Kultur). Der erste Anführer heißt „Aron“, der nächste „Aron II.“, dann „Aron III.“ usw. Der Zähler gehört zum Volk.
+- **Stirbt der Anführer:** Der Nachfolger tritt im selben Jahr an: gleicher Stammname, Zähler +1, Alter 20 bis 40, **1 Attribut** (50 % eines der Attribute des Vorgängers, sonst Zufall, Abschnitt 4), neues **Ziel** (Abschnitt unten). Der Vorgänger-Fortschritt (Zehnjahresuhr, 2. und 3. Attribut, Zielfortschritt) beginnt neu.
+- **Neues Volk** (Aufstand, neuer Stamm, abgeschnittenes Gebiet, Rebellenvolk): **neuer Stamm** (neuer Stammname, Zähler 1), erster Anführer mit zufälligem Attribut und Ziel nach Lage. Bei einem Rebellenvolk gilt das auch für jedes der Völker, die aus den Gruppen entstehen.
+- **Eroberung:** Der Anführer des Verlierers bleibt. Verliert ein Volk seine letzten Bezirke (es gibt das Volk nicht mehr), endet die Amtszeit ohne Nachfolger. Wird die ID eines Volks wiederverwendet (`resetWarCiv`), beginnt ein neuer Stamm.
+- **Zielwahl** (bei jedem Amtsantritt, nach der Lage des Volks, mit Zufallsanteil): zu **60 %** gewichtet nach Lage, zu 40 % gleichverteilt unter den wählbaren Zielen. Gewichte (Startwerte, Grundgewicht 1):
+
+| Ziel | Gewicht |
+|---|---|
+| Expansion | ×2, wenn freies, erreichbares Siedelland vorhanden ist (Kapazität mindestens 20 % des heutigen Volks) |
+| Wealth | ×2, wenn das Volk mindestens 2 Handelszentren/Häfen oder ein Handelsabkommen mit einem anderen Volk hat |
+| Security | ×3, wenn ein Nachbarvolk Gefahr ≥ 50 hat (sonst ×1; nicht wählbar ohne Nachbarn) |
+| Glory | ×2, wenn die eigene Stärke ≥ 1,5 × der Stärke eines Nachbarn ist |
+
+## 7. Wirkung auf Zufriedenheit
+
+- Neuer Teilwert **„Leader“** in der Zufriedenheit jeder Siedlung: Summe der Zufriedenheitswirkungen des Anführers (Abschnitt 4 und 5), begrenzt auf ±8. Er erscheint in der Hexfeld-Info neben den anderen Teilwerten.
+- Ein Anführerwechsel ändert den Zielwert; der tatsächliche Wert folgt träge (25 % des Abstands pro Jahr, `Requirement Zufriedenheit.md`, Abschnitt 1).
+
+## 8. Anzeige
+
+- **Peoples-Panel:** eigenes Untermenü „Leader ›“ (wie „War ›“, „Diplomacy ›“, „Government ›“). Es zeigt: Name (mit Zähler), Alter, Regierungsjahre, jedes Attribut mit Beschreibung und **Wirkung in Zahlen**, das Ziel mit Wirkung in Zahlen (aktiv oder zur Hälfte nach Abschluss) und den **Zielfortschritt** (Stand/Ziel, z. B. „Settlements 7 / 9“). Für das 2. Attribut: Jahre bis zum Eintreffen.
+- **Chronik** (`Requirement Zufriedenheit.md`, Abschnitt 5): Einträge „Leader takes office“ (Name, Volk), „Leader died“ (Alter, Regierungsjahre), „Leader gains trait“ (Attribut), „Goal reached“ (Ziel). Mit „Go to“ auf die Hauptstadt. Alle stehen **still in der Liste ohne Dialog** (Entscheidung offen, Abschnitt 12).
+- Karte: nichts Neues.
+- Gott-Eingriff: nicht in 1.0.
+
+## 9. Datenhaltung
+
+- Je Volk flache Typed Arrays: 3 Attribut-Slots (`Uint8Array`, 0 = leer), Ziel (`Uint8Array`), Ziel-Ausgangswert und Zielfortschritt (`Int32Array`), Alter bei Amtsantritt und Amtsbeginn (Jahr), Stammname-Index und Zähler. Keine Objekte im Kern.
+- Aus Attributen und Ziel wird bei jeder Änderung (Amtsantritt, 2. Attribut, Abschluss) ein **Hebelsatz je Volk** (`Float32Array`, Volk × Hebel) einmal berechnet; die Entscheidungen lesen nur diesen Satz, durchsuchen nie die Attribute. Das ist auch die Schnittstelle für die spätere C++-Portierung.
+- Zählung für Erlebtes: kleiner Zähler je Volk und Ereignisart, beim Amtsantritt auf 0.
+- Neu zu erfassen für die Ziele: jährlicher Handelswert je Volk (heute nicht erfasst), Zahl der Jahre in Folge mit Gefahr ≤ 40, Zahl der Siedlungen bei Amtsantritt.
+
+## 10. Später (nicht in 1.0)
+
+- Eingriff des Gottes auf Anführer (Segen, Fluch, früherer Tod, Ziel eingeben); gehört zu den Gacha-Fähigkeiten im Game-Design-Dokument.
+- Anführer anderer Völker erst bei Kontakt sichtbar machen.
+- Sturz, Putsch, Regentschaft, Anführer, die auf Verträge reagieren.
+
+## 11. Performance, Benchmark, Simulation
+
+- Rechenaufwand: eine Prüfung je Volk und Jahr (Tod, 10-Jahres-Uhr, Zielfortschritt), nur ein paar Dutzend Operationen; keine Kartenänderung, kein neuer Benchmark nötig. Die Szenarien `unrest`, `war` und `diplomacy` bleiben, können sich durch neue Zufallsfolgen ändern; Setups (`stirUnrest`, `declareWars`) prüfen.
+- **Simulation (`sim-analyst`, 12 Welten, 300 Jahre, gegen den Stand ohne Anführer):** Zahl der Kriege, Bündnisblöcke, Rebellionen, Zahl der Völker, Außenhandel, Siedlungswachstum; Abschlussquote der Ziele (Ziel: ⅓ bis ½ in 15 bis 30 Jahren), Amtszeiten, Verteilung der Attribute; extreme Kombinationen (Warmonger + Glory + Opportunist) dürfen das Spiel nicht sprengen (Deckel prüfen). Tool geplant: `tools/leaderStats.ts`.
+- Zufallsgenerator „leader“ je Seed.
+
+## 12. Zu bestätigen (vom Designer festgelegt, Nutzer bitte prüfen)
+
+- Zuordnung Erlebnis → Attribute (Tabelle in Abschnitt 4) und die Regel „häufigstes Erlebnis der Amtszeit“.
+- Sterbekurve (2 % + 1,5 Punkte je Jahr ab 55, höchstens 50 %).
+- Zielwahl-Gewichte (60 % nach Lage, Faktoren ×2/×3) und Abschlussbedingungen aller vier Ziele.
+- Gegenseitige Ausschlüsse Pacifist ↔ Glory und Homebody ↔ Expansion.
+- Chronik-Einträge ohne Dialog.
+- Bedeutung „zur Hälfte“ nach Abschluss: Abweichung vom Grundwert halbiert (nicht Wahrscheinlichkeit halbiert).
+- Nachfolger beim Aufstand/neuen Volk: kein Erbe, zufälliges 1. Attribut.
+
+## 13. Abhängigkeiten
+
+Ändern sich mit diesem Requirement: `Requirement Krieg.md` (§6 Kriegswurf und 2×-Schwelle, Aufgabe, Erschöpfung; §7 Pakt-/Bündnisschwellen, Beitritt; §8 Rebellionsschwelle), `Requirement Diplomatie.md` (Schwellen für Grenzen, Pakte, Abkommen, Zoll), `Requirement Zentralregierung.md` (Sicherheitsabstand, Einkommensprüfung, Bauliste), `Requirement Zufriedenheit.md` (neuer Teilwert „Leader“, Chronik), `Requirement Handel.md` (Handelsabkommen, Handelswert), Game-Design-Dokument (Völker, Gott-Eingriff später).

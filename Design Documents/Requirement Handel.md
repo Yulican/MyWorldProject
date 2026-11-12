@@ -3,6 +3,7 @@
 Stand: vom Nutzer freigegeben, Entscheidungen aus Abschnitt 10 eingearbeitet. Grundlage: Diskussion mit dem Nutzer; baut auf
 dem Gebäude-Feature und der Zufriedenheit (`Requirement Zufriedenheit.md`)
 auf. Zahlen sind Startwerte aus dem Prototyp (Abschnitt 9).
+Anführer (`Requirement Anführer.md`) verschieben Handelsabkommen-Schwellen und Zoll; das Ziel „Wealth“ misst den jährlichen Handelswert.
 
 ## 1. Ziel
 

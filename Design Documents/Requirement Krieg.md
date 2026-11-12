@@ -4,6 +4,8 @@ Stand: **Phase 0 und 1 umgesetzt, Phase 2 (Schlacht) umgesetzt, Phasen 3 bis 5 v
 
 Baut auf Diplomatie (`Requirement Diplomatie.md`, Stufe 2), Zufriedenheit (`Requirement Zufriedenheit.md`), Zentralregierung (`Requirement Zentralregierung.md`), regionalen Rohstoffen (`Requirement Regionale Rohstoffe.md`, strategische Güter) und Handel auf.
 
+**Änderung durch Anführer (`Requirement Anführer.md`, entschieden, Zahlen vorläufig):** Jedes Volk wird von einem Anführer mit Attributen und Ziel regiert. Er verschiebt die Hebel dieses Dokuments: Kriegswurf (§6, Grundwert 10 %, höchstens 30 %), 2×-Schwelle (§6, nie unter 1,2×), Aufgabeschwelle und Erschöpfung (§6), Pakt- und Bündnisschwellen sowie Kriegsbeitritt (§7), Rebellionsschwelle (§8), Soldatenstärke und Sold (§2). Die Zahlen in diesem Dokument sind die Grundwerte.
+
 ## 1. Ziel
 
 Völker rüsten auf, bedrohen einander, erklären Kriege um Regierungssitze und Bezirke, schließen Bündnisse. Aufstände laufen künftig ebenfalls als Krieg ab. Gebäude, Güter und Geld des Volks bekommen damit einen militärischen Zweck.
