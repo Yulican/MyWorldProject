@@ -1,6 +1,6 @@
 # Requirement: Anführer
 
-Stand: **vom Nutzer entschieden (Attribute, Ziele, Nachfolge, Anzeige), noch nicht simuliert, noch nicht umgesetzt** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind vorläufige Startwerte**; `sim-analyst` kalibriert sie über mindestens 12 Welten (Abschnitt 11), erst danach gelten sie. Was der Nutzer noch bestätigen soll, steht in Abschnitt 12 („Zu bestätigen“). Spieltexte sind Englisch („Leader“).
+Stand: **vom Nutzer entschieden und bestätigt (Attribute, Ziele, Nachfolge, Anzeige, alle Punkte aus Abschnitt 12), noch nicht simuliert, noch nicht umgesetzt** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind vorläufige Startwerte**; `sim-analyst` kalibriert sie über mindestens 12 Welten (Abschnitt 11), erst danach gelten sie. Abschnitt 12 hält die bestätigten Festlegungen fest. Spieltexte sind Englisch („Leader“).
 
 Baut auf Krieg (`Requirement Krieg.md`), Diplomatie (`Requirement Diplomatie.md`), Zentralregierung (`Requirement Zentralregierung.md`), Zufriedenheit (`Requirement Zufriedenheit.md`) und Handel (`Requirement Handel.md`) auf. Eines der letzten Features für Version 1.0.
 
@@ -162,7 +162,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 ## 8. Anzeige
 
 - **Peoples-Panel:** eigenes Untermenü „Leader ›“ (wie „War ›“, „Diplomacy ›“, „Government ›“). Es zeigt: Name (mit Zähler), Alter, Regierungsjahre, jedes Attribut mit Beschreibung und **Wirkung in Zahlen**, das Ziel mit Wirkung in Zahlen (aktiv oder zur Hälfte nach Abschluss) und den **Zielfortschritt** (Stand/Ziel, z. B. „Settlements 7 / 9“). Für das 2. Attribut: Jahre bis zum Eintreffen.
-- **Chronik** (`Requirement Zufriedenheit.md`, Abschnitt 5): Einträge „Leader takes office“ (Name, Volk), „Leader died“ (Alter, Regierungsjahre), „Leader gains trait“ (Attribut), „Goal reached“ (Ziel). Mit „Go to“ auf die Hauptstadt. Alle stehen **still in der Liste ohne Dialog** (Entscheidung offen, Abschnitt 12).
+- **Chronik** (`Requirement Zufriedenheit.md`, Abschnitt 5): Einträge „Leader takes office“ (Name, Volk), „Leader died“ (Alter, Regierungsjahre), „Leader gains trait“ (Attribut), „Goal reached“ (Ziel). Mit „Go to“ auf die Hauptstadt. Alle stehen **still in der Liste ohne Dialog** (bestätigt).
 - Karte: nichts Neues.
 - Gott-Eingriff: nicht in 1.0.
 
@@ -185,15 +185,20 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 - **Simulation (`sim-analyst`, 12 Welten, 300 Jahre, gegen den Stand ohne Anführer):** Zahl der Kriege, Bündnisblöcke, Rebellionen, Zahl der Völker, Außenhandel, Siedlungswachstum; Abschlussquote der Ziele (Ziel: ⅓ bis ½ in 15 bis 30 Jahren), Amtszeiten, Verteilung der Attribute; extreme Kombinationen (Warmonger + Glory + Opportunist) dürfen das Spiel nicht sprengen (Deckel prüfen). Tool geplant: `tools/leaderStats.ts`.
 - Zufallsgenerator „leader“ je Seed.
 
-## 12. Zu bestätigen (vom Designer festgelegt, Nutzer bitte prüfen)
+## 12. Bestätigte Festlegungen
 
-- Zuordnung Erlebnis → Attribute (Tabelle in Abschnitt 4) und die Regel „häufigstes Erlebnis der Amtszeit“.
-- Sterbekurve (2 % + 1,5 Punkte je Jahr ab 55, höchstens 50 %).
-- Zielwahl-Gewichte (60 % nach Lage, Faktoren ×2/×3) und Abschlussbedingungen aller vier Ziele.
-- Gegenseitige Ausschlüsse Pacifist ↔ Glory und Homebody ↔ Expansion.
-- Chronik-Einträge ohne Dialog.
-- Bedeutung „zur Hälfte“ nach Abschluss: Abweichung vom Grundwert halbiert (nicht Wahrscheinlichkeit halbiert).
-- Nachfolger beim Aufstand/neuen Volk: kein Erbe, zufälliges 1. Attribut.
+Der Nutzer hat alle folgenden Punkte bestätigt; sie stehen in den Regelabschnitten. Die Zahlen bleiben bis zur Simulation (Abschnitt 11) **vorläufig**.
+
+- Zuordnung Erlebnis → Attribute (Abschnitt 4) und die Regel „häufigste Erlebnisart der Amtszeit, Gleichstand: die jüngste“.
+- Sterbekurve (Abschnitt 2): nie vor 55, dann 2 % + 1,5 Punkte je Jahr, höchstens 50 %.
+- Zielwahl-Gewichte (60 % nach Lage, Faktoren ×2/×3, 40 % gleichverteilt) und Abschlussbedingungen aller vier Ziele (Abschnitte 5 und 6).
+- Gegenseitige Ausschlüsse Pacifist ↔ Glory und Homebody ↔ Expansion (Abschnitt 5).
+- Chronik-Einträge ohne Dialog (Abschnitt 8).
+- „Zur Hälfte“ nach Abschluss: die Abweichung vom Grundwert wird halbiert (Abschnitt 5).
+- Neues Volk (Aufstand, Stamm, Rebellen): neuer Stamm, zufälliges 1. Attribut, kein Erbe; Eroberung ändert den Anführer nicht (Abschnitt 6).
+- Deckel und Kombination der Wirkungen (Abschnitt 3).
+- Nachfolger beginnt Zehnjahresuhr und Zielfortschritt neu (Abschnitt 6).
+- Game-Design-Dokument (Abschnitt 5, Zivilisationen) enthält den Absatz „Anführer“.
 
 ## 13. Abhängigkeiten
 
