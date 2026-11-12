@@ -75,6 +75,15 @@ export const mapArmies = {
  * Shorter than the benchmark's settle time (useBenchmark WORLD_SETTLE_MS).
  */
 const OLD_WORLD_GC_DELAY_MS = 800;
+/**
+ * A full garbage collection also runs when the map comes to rest, at most
+ * this often. Left to the collector, the garbage of a minute of play (tile
+ * images, pictures, the simulation's lists) is freed in one collection of
+ * 40+ ms whenever it decides to, also in the middle of a movement, where it
+ * costs a frame (the war benchmark: one swipe late in a world). Collected
+ * every few seconds while nothing moves, it stays small and costs no frame.
+ */
+const REST_GC_INTERVAL_MS = 6000;
 
 export type GameState = {
   sim: Simulation | null;
@@ -230,7 +239,9 @@ export function acknowledgeChronicle() {
 /** The map started moving (true) or rests again (false): long tick parts and snapshots wait while it moves. */
 export function setMapMoving(moving: boolean) {
   mapMoving = moving;
-  if (!moving) heldSince = 0;
+  if (moving) return;
+  heldSince = 0;
+  collectAtRest();
 }
 
 /** Whether work expected to take `ms` (or a snapshot, Infinity) should wait for the map to rest; starts the hold. */
@@ -306,8 +317,22 @@ function collectOldWorld() {
   if (gcTimer !== null) clearTimeout(gcTimer);
   gcTimer = setTimeout(() => {
     gcTimer = null;
+    lastFullGc = performance.now();
     (globalThis as { gc?: () => void }).gc?.();
   }, OLD_WORLD_GC_DELAY_MS);
+}
+
+let lastFullGc = 0;
+
+/** The map came to rest: a full collection now, if the last one is REST_GC_INTERVAL_MS ago (Hermes; elsewhere a no-op). */
+function collectAtRest() {
+  const now = performance.now();
+  if (now - lastFullGc < REST_GC_INTERVAL_MS) return;
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (!gc) return;
+  lastFullGc = now;
+  gc();
+  logWork('GC at rest (forced)', now, performance.now() - now);
 }
 
 function startClock() {
