@@ -111,6 +111,11 @@ if (withEvents.length > 0) {
     for (const s of failing) {
       lines.push(`| ${s.world + 1} | ${s.direction} | ${s.fps.toFixed(1)} | ${s.worstMs.toFixed(1)} | ` + keys.map((k) => s.events[k]).join(' | ') + ' |');
     }
+    // What ran around each failing swipe's worst frame (useBenchmark: worstFrameWork).
+    lines.push('', '### Worst frame of each failing swipe: what ran around it', '', '| World | Direction | Worst ms | JS work (ms), when, UI pictures |', '|---|---|---|---|');
+    for (const s of failing) {
+      lines.push(`| ${s.world + 1} | ${s.direction} | ${s.worstMs.toFixed(1)} | ${(s.worstFrame ?? 'not recorded').replace(/\|/g, '/')} |`);
+    }
   }
 }
 const text = lines.join('\n') + '\n';

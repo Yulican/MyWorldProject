@@ -1,4 +1,5 @@
 import type { SkImage } from '@shopify/react-native-skia';
+import { logWork } from '../state/perfStats';
 import type { TileRef } from './viewport';
 
 /** JS time spent rendering tiles before yielding, so view updates aren't held up. */
@@ -62,7 +63,13 @@ export class TileImages {
     private onReady: () => void,
     /** Memory for this layer's images; least recently drawn tiles out of view are freed beyond it. */
     private budgetBytes: number = BUDGET_BYTES,
-  ) {}
+    /** The layer's name in the benchmark's work log. */
+    name = 'tiles',
+  ) {
+    this.renderLabel = `tile ${name}`;
+  }
+
+  private renderLabel: string;
 
   /** The image of a tile at a tier, or at any other tier as a stand-in. */
   get(chunk: number, tier: number): SkImage | null {
@@ -156,7 +163,9 @@ export class TileImages {
       this.queue.shift();
       const signature = this.signature ? this.signature(r.chunk) : 0;
       const before = Date.now();
+      const t0 = performance.now();
       const image = this.render(r.chunk, this.tierScales[r.tier]);
+      logWork(this.renderLabel, t0, performance.now() - t0);
       this.tileMs = Math.max(Date.now() - before, this.tileMs * 0.9);
       const bytes = image ? image.width() * image.height() * 4 : 0;
       this.entries.set(k, { image, bytes, usedAt: Date.now(), stale: false, unchecked: false, signature });

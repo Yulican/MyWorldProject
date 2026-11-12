@@ -53,7 +53,7 @@ import {
   mayPass,
   PAIRS,
   measureDistances,
-  updateTransitHubs,
+  updateTransitHubsStep,
   noteEmigration,
   payToll,
   resetCivRelations,
@@ -302,11 +302,15 @@ export const TickPart = {
   Plan: 4,
   /** Government traders, armies on their way, battles and sieges. */
   Armies: 8,
-  /** Distances, transit hubs, the year's totals. */
+  /** Distances. */
   Finish: 5,
+  /** Transit hubs (a few per part), the year's totals. */
+  Hubs: 9,
 } as const;
 /** Number of TickPart values (for tables by part). */
-export const TICK_PARTS = 9;
+export const TICK_PARTS = 10;
+/** TickPart names by value (perf diagnostics). */
+export const TICK_PART_NAMES = ['Start', 'Economy', 'RefreshLand', 'RefreshPeople', 'Plan', 'Finish', 'RefreshMood', 'Snapshot', 'Armies', 'Hubs'] as const;
 export type TickPart = (typeof TickPart)[keyof typeof TickPart];
 
 /** Advances the world by one week (or finishes the week stepSimulationPart has started). */
@@ -427,7 +431,16 @@ export function stepSimulationPart(sim: Simulation): boolean {
     }
     case TickPart.Finish: {
       measureDistances(sim, sim.world.owner);
-      updateTransitHubs(sim);
+      sim.part = TickPart.Hubs;
+      return false;
+    }
+    case TickPart.Hubs: {
+      const next = updateTransitHubsStep(sim, sim.planStep);
+      if (next >= 0) {
+        sim.planStep = next;
+        return false;
+      }
+      sim.planStep = 0;
       if (weekOfYear === 0) closeYear(sim);
       sim.part = TickPart.Start;
       return true;

@@ -3,6 +3,7 @@ import {
   MAX_ARMIES,
   TICKS_PER_YEAR,
   TICK_PARTS,
+  TICK_PART_NAMES,
   createSimulation,
   generateWorld,
   randomSeed,
@@ -13,7 +14,7 @@ import {
   type World,
 } from '../sim';
 import type { ExtraArmies } from '../bench/armyDecoys';
-import { countEvent, recordSimWork } from './perfStats';
+import { countEvent, logWork, recordSimWork, workLogging } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
 // simulation state lives outside React, components subscribe to what they
@@ -281,6 +282,23 @@ function startClock() {
  */
 const partMs = new Float64Array(TICK_PARTS * TICKS_PER_YEAR);
 const partKey = (sim: Simulation) => sim.part * TICKS_PER_YEAR + (sim.tick % TICKS_PER_YEAR);
+/** Which parts (by key) have run, and the longest recent run of each kind of part (any week), to estimate a part that hasn't run yet. */
+const partSeen = new Uint8Array(TICK_PARTS * TICKS_PER_YEAR);
+const partTypeMs = new Float64Array(TICK_PARTS).fill(-1);
+
+/**
+ * The expected time of the next part: its own longest recent run, or for a
+ * part that hasn't run yet the longest recent run of its kind, or for a kind
+ * that hasn't run yet more than MOVING_PART_MS (it waits while the map moves).
+ */
+function expectedMs(key: number, part: number): number {
+  if (partSeen[key]) return partMs[key];
+  return partTypeMs[part] >= 0 ? partTypeMs[part] : MOVING_PART_MS + 1;
+}
+
+/** "sim Plan@47#3": a tick part by name, week of the year and step (benchmark diagnostics). */
+const partLabel = (sim: Simulation) =>
+  `sim ${TICK_PART_NAMES[sim.part]}@${sim.tick % TICKS_PER_YEAR}${sim.planStep > 0 ? `#${sim.planStep}` : ''}`;
 
 /**
  * Runs as many ticks as the speed asks for, within the frame budget, part
@@ -308,12 +326,14 @@ function runFrame(now: number) {
     (sim.gameOver || (now - lastNotify >= NOTIFY_INTERVAL_MS && !holdForMap(now, Infinity)))
   ) {
     heldSince = 0;
+    const t0 = performance.now();
     syncSnapshot(sim);
     lastNotify = now;
     lastArmyNotify = now;
     countEvent('snapshots');
     pendingTicks += ticksPerSecond * seconds;
     publish({});
+    logWork('snapshot', t0, performance.now() - t0);
     if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
     return;
   }
@@ -321,7 +341,9 @@ function runFrame(now: number) {
   if (betweenTicks && (sim.war.version !== syncedWar || (extraArmies && sim.tick !== syncedTick)) && now - lastArmyNotify >= ARMY_INTERVAL_MS) {
     lastArmyNotify = now;
     pendingTicks += ticksPerSecond * seconds;
+    const t0 = performance.now();
     syncArmies(sim);
+    logWork('army sync', t0, performance.now() - t0);
     if (!sim.gameOver && ticksPerSecond > 0) frame = requestAnimationFrame(runFrame);
     return;
   }
@@ -341,13 +363,19 @@ function runFrame(now: number) {
     }
     const key = partKey(sim);
     const partStart = performance.now();
-    if (parts > 0 && partStart - start + partMs[key] > budget) break;
-    if (holdForMap(now, partMs[key])) break;
-    if (partMs[key] > MOVING_PART_MS) heldSince = 0;
+    const part = sim.part;
+    const expected = expectedMs(key, part);
+    if (parts > 0 && partStart - start + expected > budget) break;
+    if (holdForMap(now, expected)) break;
+    if (expected > MOVING_PART_MS) heldSince = 0;
     if (sim.part === TickPart.Start) pendingTicks--;
+    const label = workLogging() ? partLabel(sim) : '';
     const done = stepSimulationPart(sim);
     const ms = performance.now() - partStart;
+    logWork(label, partStart, ms);
     partMs[key] = Math.max(ms, partMs[key] * 0.9);
+    partSeen[key] = 1;
+    partTypeMs[part] = Math.max(ms, partTypeMs[part] * 0.99);
     parts++;
     if (done) ticks++;
   }

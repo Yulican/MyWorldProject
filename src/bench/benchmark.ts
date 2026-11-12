@@ -96,7 +96,17 @@ export function swipePlan(): Swipe[] {
 }
 
 /** Frames measured during one swipe. */
-export type SwipeStats = { frames: number; timeMs: number; worstMs: number };
+export type SwipeStats = {
+  frames: number;
+  timeMs: number;
+  worstMs: number;
+  /** When the worst frame began and ended, in ms after the swipe's first frame began (UI thread clock). */
+  worstStartMs?: number;
+  worstEndMs?: number;
+  /** UI-thread work in the worst frame: tile pictures recorded, army pictures swapped in. */
+  worstTileDraws?: number;
+  worstArmySwaps?: number;
+};
 
 export type SwipeResult = {
   world: number;
@@ -107,6 +117,8 @@ export type SwipeResult = {
   pass: boolean;
   /** What else happened in the app during the swipe (see perfStats.perfEvents), to find what costs frames. */
   events?: Record<string, number>;
+  /** What ran around the worst frame: JS work by label with its ms (perfStats.logWork) and the UI thread's tile and army pictures. */
+  worstFrame?: string;
 };
 
 export function evaluateSwipe(stats: SwipeStats): { fps: number; worstMs: number; pass: boolean } {

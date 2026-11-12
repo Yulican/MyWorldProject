@@ -54,6 +54,7 @@ export {
   stepSimulation,
   stepSimulationPart,
   TICK_PARTS,
+  TICK_PART_NAMES,
   TickPart,
   type ChronicleEntry,
   type Simulation,

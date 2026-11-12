@@ -428,13 +428,43 @@ const reachTouched: number[] = [];
  * export hub.
  */
 export function updateTransitHubs(sim: Simulation): void {
+  for (let step = 0; step >= 0; step = updateTransitHubsStep(sim, step));
+}
+
+/** Transit hubs searched per step of updateTransitHubsStep (each searches up to 3 merchants' ways). */
+export const TRANSIT_HUBS_PER_STEP = 4;
+
+/**
+ * updateTransitHubs in steps, so the game clock can spread it over frames
+ * (with free trade everywhere a people has a partner in every other): step 0
+ * clears this week's rows, every step then finds TRANSIT_HUBS_PER_STEP hubs,
+ * in people and partner order. Returns the next step, -1 after the last; the
+ * steps in a row give exactly the same hubs (a hub's search doesn't read the
+ * transit hubs).
+ */
+export function updateTransitHubsStep(sim: Simulation, step: number): number {
   const dip = sim.diplomacy;
   const week = sim.tick % TICKS_PER_YEAR;
-  for (let a = week === 0 ? TICKS_PER_YEAR : week; a < sim.civs.length; a += TICKS_PER_YEAR) {
-    if (!sim.civs[a]) continue;
-    for (let b = 1; b <= dip.maxId; b++) dip.transitHub[pair(a, b)] = -1;
-    for (const b of dip.partners[a] ?? []) dip.transitHub[pair(a, b)] = exportHub(sim, a, b, 0);
+  const first = week === 0 ? TICKS_PER_YEAR : week;
+  if (step === 0) {
+    for (let a = first; a < sim.civs.length; a += TICKS_PER_YEAR) {
+      if (sim.civs[a]) for (let b = 1; b <= dip.maxId; b++) dip.transitHub[pair(a, b)] = -1;
+    }
   }
+  const from = step * TRANSIT_HUBS_PER_STEP;
+  const to = from + TRANSIT_HUBS_PER_STEP;
+  let i = 0;
+  for (let a = first; a < sim.civs.length; a += TICKS_PER_YEAR) {
+    if (!sim.civs[a]) continue;
+    const partners = dip.partners[a];
+    if (!partners) continue;
+    for (let j = 0; j < partners.length; j++, i++) {
+      if (i < from) continue;
+      if (i >= to) return step + 1;
+      dip.transitHub[pair(a, partners[j])] = exportHub(sim, a, partners[j], 0);
+    }
+  }
+  return -1;
 }
 
 export function measureDistances(sim: Simulation, owner: Uint8Array): void {
@@ -494,15 +524,15 @@ export function measureDistances(sim: Simulation, owner: Uint8Array): void {
 export type Record = (text: string, cell: number) => void;
 
 /**
- * Yearly, in three steps so the game clock can spread it over frames (step
- * 0, 1, 2 in a row return 1, 2, -1; the default runs all at once): who meets
- * whom, peaceful neighborhood, trust and danger, borders, free trade and
- * migration; then the running trade agreements; then new ones. Every people
- * decides on its borders and agreements, in id order. Trade
- * every people decides on its borders and agreements, in id order. Trade
- * agreements that ran out are renewed or end; deliveries are judged every
- * PERIOD_YEARS (see there). `trade` holds what each people asks for and
- * spares in total (civ * goods + good).
+ * Yearly, in steps so the game clock can spread it over frames (steps 0,
+ * 1, 2, ... in a row each return the next, -1 after the last; the default,
+ * -1, runs all at once): who meets whom, peaceful neighborhood, trust and
+ * danger, borders, free trade and migration; then the running trade
+ * agreements; then new ones, one buyer per step. Every people decides on its
+ * borders and agreements, in id order. Trade agreements that ran out are
+ * renewed or end; deliveries are judged every PERIOD_YEARS (see there).
+ * `trade` holds what each people asks for and spares in total (civ * goods +
+ * good).
  */
 export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Record, step = -1): number {
   const dip = sim.diplomacy;
@@ -701,7 +731,11 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     }
     return hub;
   };
-  for (const a of living) {
+  // New agreements: one buyer per step (step 2 + i: the i-th living people), all at once without steps.
+  const firstBuyer = step < 0 ? 0 : step - 2;
+  const endBuyer = step < 0 ? living.length : Math.min(living.length, firstBuyer + 1);
+  for (let ia = firstBuyer; ia < endBuyer; ia++) {
+    const a = living[ia];
     for (const b of living) {
       if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
@@ -762,6 +796,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       }
     }
   }
+  if (endBuyer < living.length) return step + 1;
   rebuildPartners(dip);
   refreshRelations(sim, living);
   // Export hubs and what is owed changed: trade.ts marks them anew.

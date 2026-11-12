@@ -23,11 +23,12 @@ import {
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
-import { countEvent, recordMapBuild } from '../state/perfStats';
+import { countEvent, logWork, recordMapBuild } from '../state/perfStats';
 import { setMapMoving } from '../state/worldStore';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { ArmySprites, buildArmyPicture, type ArmyMarkers } from './armyLayer';
 import { MapPerfMeter } from './MapPerfMeter';
+import { uiArmySwaps, uiTileDraws } from './uiCounters';
 import { SELECTION_COLOR } from './palette';
 import {
   buildTerritoryOverview,
@@ -46,6 +47,8 @@ const START_SCALE = 1;
 const TAP_COOLDOWN_MS = 300;
 /** The map rests once it hasn't moved for this long (outdated tiles are redone then, see TileImages.setResting). */
 const REST_MS = 100;
+/** A benchmark swipe's frame record (UI thread): totals, the worst frame and when it ended after `t0`, what the UI drew in it. */
+const NO_BENCH_SWIPE = { active: false, frames: 0, timeMs: 0, worstMs: 0, t0: 0, worstEnd: 0, worstDraws: 0, worstSwaps: 0, draws: 0, swaps: 0 };
 /** Memory for territory tile images (the terrain tiles have their own, see tileImages.ts). */
 const TERRITORY_BUDGET_BYTES = 40 * 1024 * 1024;
 /** Slower releases just stop; faster ones let the map glide on. */
@@ -220,7 +223,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   );
 
   // Benchmark swipes: frames are counted on the UI thread while one runs.
-  const benchSwipe = useSharedValue({ active: false, frames: 0, timeMs: 0, worstMs: 0 });
+  const benchSwipe = useSharedValue({ ...NO_BENCH_SWIPE });
   // Times the swipe on its own: an animation of an offset that doesn't change
   // (dx = 0 for a north swipe) would end at once.
   const benchClock = useSharedValue(0);
@@ -234,11 +237,21 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
     }
     const dt = frame.timeSincePreviousFrame;
     if (!benchSwipe.value.active || dt === null) return;
+    const draws = uiTileDraws.value;
+    const swaps = uiArmySwaps.value;
     benchSwipe.modify((b) => {
       'worklet';
+      if (b.frames === 0) b.t0 = frame.timestamp - dt;
       b.frames += 1;
       b.timeMs += dt;
-      if (dt > b.worstMs) b.worstMs = dt;
+      if (dt > b.worstMs) {
+        b.worstMs = dt;
+        b.worstEnd = frame.timestamp - b.t0;
+        b.worstDraws = draws - b.draws;
+        b.worstSwaps = swaps - b.swaps;
+      }
+      b.draws = draws;
+      b.swaps = swaps;
       return b;
     }, false);
   });
@@ -272,7 +285,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
           swipeDone.current = resolve;
           scheduleOnUI(() => {
             'worklet';
-            benchSwipe.value = { active: true, frames: 0, timeMs: 0, worstMs: 0 };
+            benchSwipe.value = { ...NO_BENCH_SWIPE, active: true, draws: uiTileDraws.value, swaps: uiArmySwaps.value };
             // Ignore the system's reduce-motion setting (off on CI emulators),
             // which would otherwise end the swipe at once.
             const timing = { duration: durationMs, easing: Easing.linear, reduceMotion: ReduceMotion.Never };
@@ -282,7 +295,15 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
             benchClock.value = withTiming(1, timing, () => {
               const b = benchSwipe.value;
               benchSwipe.value = { ...b, active: false };
-              scheduleOnRN(onSwipeDone, { frames: b.frames, timeMs: b.timeMs, worstMs: b.worstMs });
+              scheduleOnRN(onSwipeDone, {
+                frames: b.frames,
+                timeMs: b.timeMs,
+                worstMs: b.worstMs,
+                worstStartMs: b.worstEnd - b.worstMs,
+                worstEndMs: b.worstEnd,
+                worstTileDraws: b.worstDraws,
+                worstArmySwaps: b.worstSwaps,
+              });
             });
           });
         }),
@@ -458,6 +479,8 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
         null,
         scales,
         onReady,
+        undefined,
+        'terrain',
       ),
     [world, layers, scales, onReady],
   );
@@ -473,6 +496,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
         onReady,
         // Out-of-view tiles are kept through snapshots (see TileImages.invalidate): a smaller budget than the terrain's.
         TERRITORY_BUDGET_BYTES,
+        'territory',
       ),
     [world, layers, scales, onReady, territory],
   );
@@ -532,8 +556,10 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
       const version = territory.getVersion();
       if (version === seen) return;
       seen = version;
+      const t0 = performance.now();
       territoryTiles.invalidate();
       listener.current(current.current);
+      logWork('tile check (snapshot)', t0, performance.now() - t0);
     });
   }, [territory, territoryTiles, listener]);
 
@@ -542,6 +568,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
   /** Records the tile picture for a view and image set (UI thread). */
   const draw = (v: ViewTiles, set: TileSet) => {
     'worklet';
+    uiTileDraws.value += 1;
     picture.value = createPicture((canvas) => {
       const paint = Skia.Paint();
       if (!v.detail) {
@@ -618,10 +645,13 @@ const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { worl
       const version = armies.getVersion();
       if (version === seen) return;
       seen = version;
+      const t0 = performance.now();
       const next = buildArmyPicture(world, armies.markers, civColor, mapWidth, sprites);
+      logWork('army picture', t0, performance.now() - t0);
       countEvent('armyPictures');
       scheduleOnUI((p: SkPicture) => {
         'worklet';
+        uiArmySwaps.value += 1;
         picture.value = p;
       }, next);
     };
