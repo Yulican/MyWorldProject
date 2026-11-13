@@ -1,6 +1,6 @@
 # Requirement: Anführer
 
-Stand: **vom Nutzer entschieden und bestätigt (Attribute, Ziele, Nachfolge, Anzeige, alle Punkte aus Abschnitt 12), simuliert (Runde 3, Abschnitt 11a), noch nicht umgesetzt** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind in Runde 3 gemessen (24 Welten, Abschnitt 11a); Feinschliff bei der Implementierung.** Abschnitt 12 hält die bestätigten Festlegungen fest. Spieltexte sind Englisch („Leader“).
+Stand: **vom Nutzer entschieden und bestätigt (Attribute, Ziele, Nachfolge, Anzeige, alle Punkte aus Abschnitt 12), simuliert (Runde 3, Abschnitt 11a), im Kern und in der App umgesetzt (Abschnitt 11b)** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind in Runde 3 gemessen (24 Welten, Abschnitt 11a); Feinschliff bei der Implementierung.** Abschnitt 12 hält die bestätigten Festlegungen fest. Spieltexte sind Englisch („Leader“).
 
 Baut auf Krieg (`Requirement Krieg.md`), Diplomatie (`Requirement Diplomatie.md`), Zentralregierung (`Requirement Zentralregierung.md`), Zufriedenheit (`Requirement Zufriedenheit.md`) und Handel (`Requirement Handel.md`) auf. Eines der letzten Features für Version 1.0.
 
@@ -14,7 +14,7 @@ Es gibt keine Sturz-Mechanik: kein Putsch, keine Absetzung, auch nicht bei Aufst
 
 | Eigenschaft | Regel |
 |---|---|
-| Name | Dynastie-Stammname des Volks plus Zähler (Abschnitt 6), z. B. „Aron“, „Aron II.“, „Aron III.“ |
+| Name | Dynastie-Stammname des Volks plus Zähler (Abschnitt 6), z. B. „Aron“, „Aron II“, „Aron III“ (römischer Zähler ohne Punkt) |
 | Alter bei Amtsantritt | gleichverteilt 20 bis 40 Jahre |
 | Amtszeit | bis zum Tod; endet das Volk (kein Gebiet mehr), endet die Amtszeit |
 | Tod | jährlich gewürfelt: unter 55 Jahren nie; ab 55 Jahren Wahrscheinlichkeit 2 % + 1,5 Prozentpunkte je Jahr über 55, höchstens 50 % (Startwert; erwartetes Sterbealter ≈ 63, Amtszeit im Mittel gut 30 Jahre; kalibrieren (Simulation)) |
@@ -51,7 +51,7 @@ Alle Zahlen sind **in Runde 3 gemessen (Abschnitt 11a), Feinschliff bei der Impl
 | 2 | Pacifist | Friedfertig | erklärt nie selbst Krieg; Grenze öffnen schon ab Vertrauen 40; Aufgabe schon bei 55 % | 1, 4 |
 | 3 | Cautious Strategist | Vorsichtiger Stratege | erklärt nur ab 3× Stärke; Kriegswurf ×0,8 (8 %, unter dem Grundwert); Schlachtverluste −25 %; Zufriedenheit +1 | 1 |
 | 4 | Stubborn | Starrsinnig | gibt nie auf (statt bei 40 %); Besetzung eines seiner Sitze braucht ×1,5 Belagerungszeit (104 → 156 Wochen); Zufriedenheit −3 solange das Volk im Krieg ist | 2, 5 |
-| 5 | Craven | Zaghaft | schickt nur 25 % statt 70 % seiner Soldaten ins Heer; Sold −30 %; gibt schon bei 60 % auf. Zweischneidig: billig, verliert aber Belagerungen | 4 |
+| 5 | Craven | Zaghaft | schickt nur 25 % statt 70 % seiner Soldaten ins Heer; Sold −15 %; gibt schon bei 60 % auf. Zweischneidig: billig, verliert aber Belagerungen | 4 |
 | 6 | Drillmaster | Ausbilder | Soldatenstärke +25 %, Sold +30 % | – |
 
 **Diplomatie** (`Requirement Diplomatie.md`, Abschnitte 1 und 2; `Requirement Krieg.md`, Abschnitt 7)
@@ -71,16 +71,16 @@ Alle Zahlen sind **in Runde 3 gemessen (Abschnitt 11a), Feinschliff bei der Impl
 | 12 | Merchant Prince | Handelsfürst | Händlerlast ×2 (40 → 80), Fahrtweite +20 %; Handelszentrum schon ab Fahrtwert 8 (statt 15); Händlerverluste ×0,5; Zoll, den das Volk zahlt, −50 %; Menge eines Handelsabkommens höchstens 20 → 30; Einkommensprüfung 40 → 50 % (der Vertrauens-Hebel entfällt: Vertrauen bindet selten) | 8 |
 | 13 | Generous | Großzügig | Sicherheitsabstand der Steuern 5 → 12; Zufriedenheit +4 | 14 |
 | 14 | Tax Hawk | Steuerjäger | Sicherheitsabstand 5 → 0; Einkommensprüfung 40 → 55 %; Zufriedenheit −3 | 13 |
-| 15 | Builder | Bauherr | Baukosten −30 %, Bauzeit −30 %; Wachstumsbau der Siedlung schon ab 40 % (statt 50 %); Unterhalt der Regierungsgebäude +20 % (Wirkung wird nachgemessen) | 16 |
+| 15 | Builder | Bauherr | Baukosten −30 %, Bauzeit −30 % (auch Regierungsgebäude); Wachstumsbau der Siedlung schon ab 40 % (statt 50 %); Baukosten und Bauzeit gelten auch für Regierungsgebäude. Der Regierungsunterhalt +20 % entfällt (bremste so stark, dass Builder negativ wirkte) | 16 |
 | 16 | Frugal | Sparsam | Unterhalt aller Gebäude (Siedlungen und Regierung) −30 %; Einkommensprüfung 40 → 25 %; Wachstumsbau der Siedlung erst ab 60 % (statt 50 %); Reserve der Siedlungen 2 → 4 Jahre | 15 |
-| 17 | Prospector | Schürfer | Förderung aus Minen und Sondervorkommen (Eisen, Feuerstein, Gold, Salz …) +50 %; Sondervorkommen zählen im Kriegsnutzen ×2 (Krieg §6; nicht ×4) | – |
+| 17 | Prospector | Schürfer | Förderung aus Minen und Sondervorkommen (Eisen, Feuerstein, Gold, Salz …) +50 %; Sondervorkommen zählen im Kriegsnutzen ×2 zusätzlich zur ohnehin doppelten Zählung (Krieg §6), also das Vierfache eines normalen Vorkommens | – |
 
 **Siedeln**
 
 | Nr. | Name | Beschreibung | Wirkung | Schließt aus |
 |---|---|---|---|---|
-| 18 | Pioneer | Pionier | Überlast-Faktor 1,0 → 0,97 (Siedler ziehen früher los), Wegkosten ×0,7; Zufriedenheit −2 | 19 |
-| 19 | Homebody | Heimatverbunden | Wegkosten ×1,5; Zufriedenheit +3 (Faktor 1,0 bleibt) | 18 |
+| 18 | Pioneer | Pionier | Überlast-Faktor 1,0 → 0,97 (Siedler ziehen früher los), Wegkosten ×0,85; Zufriedenheit −2 | 19 |
+| 19 | Homebody | Heimatverbunden | Wegkosten ×1,25; Zufriedenheit +3 (Faktor 1,0 bleibt) | 18 |
 
 **Ordnung** (`Requirement Zufriedenheit.md`, `Requirement Krieg.md`, Abschnitt 8: Rebellionsprüfung)
 
@@ -98,7 +98,7 @@ Die Rebellionsschwelle ist der Faktor, den die Stärke der Rebellen im Vergleich
 | Nr. | Name | Beschreibung | Wirkung | Schließt aus |
 |---|---|---|---|---|
 | 24 | Devout | Fromm | Zufriedenheit +3 und Geburtenrate +5 % für jedes Volk; zusätzlich Andacht zum Gott +0,05 (zu 0,02 × Kultur „Devout“) im Volk des Spielers | – |
-| 25 | Road Builder | Straßenbauer | Fahrtweite der Händler +30 % (Straßen kosten im Spiel nichts, darum kein Straßenkosten-Hebel) (Wegsuche 26 → 34 Reisekosten); Anbindungs-Teilwert der Zufriedenheit +3 | – |
+| 25 | Road Builder | Straßenbauer | Fahrtweite der Händler +30 % (Straßen kosten im Spiel nichts, darum kein Straßenkosten-Hebel) (Wegsuche 26 → 34 Reisekosten); Anbindungs-Teilwert der Zufriedenheit +3 (läuft über den Anbindungs-Teilwert und zählt zum ±8-Deckel) | – |
 
 Ausschlusspaare insgesamt: 1/2, 1/3, 2/4, 4/5, 7/8, 13/14, 15/16, 18/19, 20/21, 21/23, 22/23, 8/12 (Xenophobe ↔ Merchant Prince), 2/11 (Pacifist ↔ Grudge-bearer). Zusätzlich schließen **Pacifist und das Ziel Glory** sowie **Homebody und das Ziel Expansion** einander aus (Abschnitt 5).
 
@@ -124,14 +124,14 @@ Devout kommt nur über Zufall oder Erbe. Seine Andacht wirkt nur beim Volk des S
 
 ## 5. Ziele (4)
 
-Jeder Anführer bekommt bei Amtsantritt **ein** Ziel. Es bleibt bis zu seinem Tod; es gibt keinen Zielwechsel. Solange das Ziel **aktiv** ist, wirkt es wie unten. Bei **Abschluss** (die Bedingung ist jährlich geprüft) bleibt die Wirkung zu **50 %** bestehen (die Abweichung vom Grundwert halbiert), und der Anführer bekommt sein 3. Attribut (Abschnitt 4). Stirbt er **vor** Abschluss, verfällt das Ziel ohne Folgen; der Nachfolger bekommt ein eigenes Ziel (Abschnitt 6).
+Jeder Anführer bekommt bei Amtsantritt **ein** Ziel. Es bleibt bis zu seinem Tod; es gibt keinen Zielwechsel. Solange das Ziel **aktiv** ist, wirkt es wie unten. Bei **Abschluss** (die Bedingung ist jährlich geprüft) bleibt die Wirkung zu **50 %** bestehen (bei Zahlenwirkungen wird die Abweichung vom Grundwert halbiert; die Ja/Nein-Wirkungen „Handelsgebäude zuerst“ (Wealth) und „Hauptstadt zuerst“ (Glory) bleiben voll bestehen), und der Anführer bekommt sein 3. Attribut (Abschnitt 4). Stirbt er **vor** Abschluss, verfällt das Ziel ohne Folgen; der Nachfolger bekommt ein eigenes Ziel (Abschnitt 6).
 
 Abschlussbedingungen sind **relativ zum Stand bei Amtsantritt** gemessen (kleine und große Völker können sie erreichen). Ziel für die Kalibrierung: etwa ein Drittel bis die Hälfte der Anführer schafft sie in ca. 15 bis 30 Regierungsjahren.
 
 | Ziel | Bedeutung | Wirkung solange aktiv (Startwerte) | Abschlussbedingung (Startwerte) |
 |---|---|---|---|
 | **Expansion** | Land und Siedlungen gewinnen | Überlast-Faktor 1,0 → 0,98; Einwohner zählen im Kriegsnutzen ×1,5; Wachstumsbau der Siedlung ab 40 % (statt 50 %) | Zahl der Siedlungen (auch eroberte) ≥ 1,5 × Zahl bei Amtsantritt, mindestens +2 |
-| **Wealth** | Reichtum und Handel | Handelsabkommen 5 Vertrauen früher (55/45/40 → 50/40/35); Einkommensprüfung +10 Punkte; Regierungshändler und Handelsgebäude zuerst | jährlicher Handelswert (Binnen- und Außenhandel zusammen) ≥ 1,5 × Schnitt der letzten 5 Jahre vor Amtsantritt, die Basis mit Mindestwert 15–20 (**genauer Wert wird vom `sim-engineer` zwischen 15 und 20 gemessen**); keine Handelspartner-Bedingung |
+| **Wealth** | Reichtum und Handel | Handelsabkommen 5 Vertrauen früher (55/45/40 → 50/40/35); Einkommensprüfung +10 Punkte; Handelsgebäude der Siedlungen zuerst (Regierungshändler zuerst: nicht umgesetzt) | jährlicher Handelswert (Binnen- und Außenhandel zusammen) ≥ 1,5 × Schnitt der letzten 5 Jahre vor Amtsantritt, die Basis mit Mindestwert 15 (gemessen: 32–34 % Abschluss, mit 20 nur 28–30 %); keine Handelspartner-Bedingung |
 | **Security** | Sicherheit | eigener Kriegswurf ×0,5; Pakt ab Vertrauen 30; Militärbau ab Gefahr 35 (statt 50); Stärke +10 % | 5 Jahre in Folge Gefahr ≤ 40 von allen Nachbarvölkern, kein Siedlungsverlust in dieser Zeit und mindestens ein Pakt oder Bündnis |
 | **Glory** | Ruhm | Kriegswurf ×2; 2×-Schwelle → 1,2×; Hauptstadt wird zuerst ausgebaut; Zufriedenheit +2 für 10 Jahre nach einem gewonnenen Krieg | ein Krieg als Angreifer gewonnen (auch ohne eroberten Bezirk), oder die Hauptstadt steigt eine Stadtstufe auf (`cityTier`, Regionale Rohstoffe §11) |
 
@@ -141,7 +141,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 
 ## 6. Nachfolge, Dynastie, neues Volk
 
-- **Dynastie:** Jedes Volk hat einen **Stammnamen** (aus der Namensliste der Kultur). Der erste Anführer heißt „Aron“, der nächste „Aron II.“, dann „Aron III.“ usw. Der Zähler gehört zum Volk.
+- **Dynastie:** Jedes Volk hat einen **Stammnamen** (vorerst aus einer festen Liste von 64 Namen für alle Völker, keine Namensliste je Kultur). Der erste Anführer heißt „Aron“, der nächste „Aron II“, dann „Aron III“ usw. Der Zähler gehört zum Volk.
 - **Stirbt der Anführer:** Der Nachfolger tritt im selben Jahr an: gleicher Stammname, Zähler +1, Alter 20 bis 40, **1 Attribut** (50 % eines der Attribute des Vorgängers, sonst Zufall, Abschnitt 4), neues **Ziel** (Abschnitt unten). Der Vorgänger-Fortschritt (Zehnjahresuhr, 2. und 3. Attribut, Zielfortschritt) beginnt neu.
 - **Neues Volk** (Aufstand, neuer Stamm, abgeschnittenes Gebiet, Rebellenvolk): **neuer Stamm** (neuer Stammname, Zähler 1), erster Anführer mit zufälligem Attribut und Ziel nach Lage. Bei einem Rebellenvolk gilt das auch für jedes der Völker, die aus den Gruppen entstehen.
 - **Eroberung:** Der Anführer des Verlierers bleibt. Verliert ein Volk seine letzten Bezirke (es gibt das Volk nicht mehr), endet die Amtszeit ohne Nachfolger. Wird die ID eines Volks wiederverwendet (`resetWarCiv`), beginnt ein neuer Stamm.
@@ -204,6 +204,29 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 - Security wird nur von 2–8 % der Anführer gewählt (so gewollt).
 - Entschieden nach Runde 2 und 3: Wealth (Abschluss bei ≥ 1,5 × Schnitt der letzten 5 Jahre, Basis mindestens 15–20, keine Handelspartner-Bedingung); Warmonger Kriegswurf 40 %, Deckel 40 %, Glory Kriegswurf ×2 und Schwelle 1,2×; Devout Geburtenrate +5 %; Builder ab 40 %; Craven 25 % der Soldaten; Merchant Prince Händlerlast ×2 und Fahrtweite +20 %; Pioneer 0,97; Road Builder ohne Straßenkosten-Hebel.
 
+## 11b. Umsetzung und Nachmessung
+
+Im Kern (`society/leaders.ts`) und in der App umgesetzt. Nachmessung der Implementierung, 24 Welten, ohne → mit Anführern (**gemessen vor den Änderungen an Builder, Pioneer, Homebody und Craven**):
+
+| Kennzahl | Jahr 300 | Jahr 500 |
+|---|---|---|
+| Siedlungen | 89 → 131 | 242 → 309 |
+| Kriege | 0,42 → 0,50 | 4,7 → 8,5 |
+| Bündnisse | 0,17 → 0,46 | 3,8 → 7,8 |
+| Aufstände | 0,58 → 0,71 | 1,9 → 3,3 |
+| Zufriedenheit | 13,8 → 14,0 | 13,2 → 13,4 |
+| Spiel vorbei | 0 | 0 |
+
+26 % der Anführer erreichen ihr Ziel, 16 % bekommen ein 3. Attribut.
+
+Festlegungen der Umsetzung (Nutzer):
+- Builder ohne Regierungsunterhalt +20 %; Pioneer Wegkosten ×0,85; Homebody ×1,25; Craven Sold −15 %; Prospector Kriegsnutzen vierfach; Wealth-Basis mindestens 15; „zur Hälfte“ nur für Zahlenwirkungen.
+- Stammnamen: feste Liste von 64 Namen für alle Völker, Schreibweise „Aron II“.
+- Road Builder +3 über den Anbindungs-Teilwert, zählt zum Deckel ±8; der Deckel gilt für „Leader“ plus Anbindung (Steuer-Teilwerte zählen nicht mit).
+- Ein neues Volk bekommt seinen Anführer am nächsten Jahresende.
+- Anzeige: Untermenü „Leader ›“ im Peoples-Panel (Knopfzeile Leader, Government, Diplomacy, War unter dem Titel).
+- Kein eigenes Benchmark-Szenario, weil das Feature nichts auf die Karte zeichnet.
+
 ## 12. Bestätigte Festlegungen
 
 Der Nutzer hat alle folgenden Punkte bestätigt; sie stehen in den Regelabschnitten. Die Zahlen sind in Runde 3 gemessen (Abschnitt 11a), Feinschliff bei der Implementierung.
@@ -213,7 +236,7 @@ Der Nutzer hat alle folgenden Punkte bestätigt; sie stehen in den Regelabschnit
 - Zielwahl-Gewichte (60 % nach Lage, Faktoren ×2/×3, 40 % gleichverteilt) und Abschlussbedingungen aller vier Ziele (Abschnitte 5 und 6).
 - Gegenseitige Ausschlüsse Pacifist ↔ Glory und Homebody ↔ Expansion (Abschnitt 5).
 - Chronik-Einträge ohne Dialog (Abschnitt 8).
-- „Zur Hälfte“ nach Abschluss: die Abweichung vom Grundwert wird halbiert (Abschnitt 5).
+- „Zur Hälfte“ nach Abschluss: Zahlenwirkungen werden halbiert, Ja/Nein-Wirkungen bleiben voll (Abschnitt 5).
 - Neues Volk (Aufstand, Stamm, Rebellen): neuer Stamm, zufälliges 1. Attribut, kein Erbe; Eroberung ändert den Anführer nicht (Abschnitt 6).
 - Deckel und Kombination der Wirkungen (Abschnitt 3).
 - Nachfolger beginnt Zehnjahresuhr und Zielfortschritt neu (Abschnitt 6).

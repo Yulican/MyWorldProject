@@ -46,6 +46,6 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | `Requirement Handel.md` | internal trade, merchants, goods, prices |
 | `Requirement Diplomatie.md` | trust, borders, foreign trade |
 | `Requirement Zentralregierung.md` | seats of government, goods tax, government buildings and traders |
-| `Requirement Anführer.md` | leaders: attributes, goals, succession, panel "Leader ›" (decided, numbers provisional, not simulated) |
+| `Requirement Anführer.md` | leaders: attributes, goals, succession, panel "Leader ›" (implemented; numbers measured in round 3, fine tuning left to implementation) |
 | `Requirement Krieg.md` | war: soldiers, strategic goods, battles, sieges, alliances, rebel wars (draft, 5 phases) |
 | `sim-prototyp/` | old standalone load prototype, placeholder rules |
