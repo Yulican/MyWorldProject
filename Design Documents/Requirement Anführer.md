@@ -47,11 +47,11 @@ Alle Zahlen sind **Startwerte (kalibrieren (Simulation))**. Grundwerte: Kriegswu
 
 | Nr. | Name | Beschreibung | Wirkung | Schließt aus |
 |---|---|---|---|---|
-| 1 | Warmonger | Kriegstreiber | Kriegswurf 10 → 25 % (**wird angehoben, Richtung 30 %; Zahlen und Deckel misst `sim-analyst`, offen**), 2×-Schwelle → 1,3× (wirkt kaum); Soldatenunterhalt +20 % (senkte die Soldatenzahl, offen) | 2, 3 |
+| 1 | Warmonger | Kriegstreiber | Kriegswurf 10 → Richtung 30 % (**Zahl und Deckel offen, misst `sim-analyst`**); Soldatenanteil höchstens 10 → 15 % der Einwohner, Ausbildungsanteil 25 → 35 %, Anteil der Soldaten im Heer 70 → 85 %; Sold normal; Zufriedenheit −2 (Kriegsmüdigkeit). Die 2×-Schwelle bleibt unverändert (wirkte kaum) | 2, 3 |
 | 2 | Pacifist | Friedfertig | erklärt nie selbst Krieg; Grenze öffnen schon ab Vertrauen 40; Aufgabe schon bei 55 % | 1, 4 |
-| 3 | Cautious Strategist | Vorsichtiger Stratege | erklärt nur ab 3× Stärke, dafür Kriegswurf 20 % | 1 |
-| 4 | Stubborn | Starrsinnig | Aufgabe erst bei < 15 %, Erschöpfung 10 → 15 Jahre; Zufriedenheit −3 solange das Volk im Krieg ist | 2, 5 |
-| 5 | Craven | Zaghaft | Aufgabe schon bei 60 %; Gefahr durch andere zählt ×0,8 | 4 |
+| 3 | Cautious Strategist | Vorsichtiger Stratege | erklärt nur ab 3× Stärke; Kriegswurf ×0,8 (8 %, unter dem Grundwert); Schlachtverluste −25 %; Zufriedenheit +1 | 1 |
+| 4 | Stubborn | Starrsinnig | gibt nie auf (statt bei 40 %); Besetzung eines seiner Sitze braucht ×1,5 Belagerungszeit (104 → 156 Wochen); Zufriedenheit −3 solange das Volk im Krieg ist | 2, 5 |
+| 5 | Craven | Zaghaft | schickt nur 40 % statt 70 % seiner Soldaten ins Heer; Sold −30 %; gibt schon bei 60 % auf. Zweischneidig: billig, verliert aber Belagerungen | 4 |
 | 6 | Drillmaster | Ausbilder | Soldatenstärke +25 %, Sold +30 % | – |
 
 **Diplomatie** (`Requirement Diplomatie.md`, Abschnitte 1 und 2; `Requirement Krieg.md`, Abschnitt 7)
@@ -59,21 +59,21 @@ Alle Zahlen sind **Startwerte (kalibrieren (Simulation))**. Grundwerte: Kriegswu
 | Nr. | Name | Beschreibung | Wirkung | Schließt aus |
 |---|---|---|---|---|
 | 7 | Silver Tongue | Redegewandt | Vertrauen zu allen Völkern dauerhaft +10; Startvertrauen bei Kontakt 20 → 25 (nach der ersten Simulation etwa halbiert, sonst Bündnisse ~40×) | 8 |
-| 8 | Xenophobe | Fremdenfeind | öffnet Grenzen erst ab Vertrauen ≥ 70, schließt bei < 50; eigener Zoll auf Durchreisende ×2 | 7 |
+| 8 | Xenophobe | Fremdenfeind | schließt Grenzen schon bei Gefahr > 45 (statt 60) und öffnet nur bei Gefahr ≤ 25 (statt 40); Zoll auf Fremde ×3; Verteidigungsbonus +25 % im eigenen Land | 7, 12 |
 | 9 | Oathkeeper | Eidtreu | Bündnis ab Vertrauen 65 (statt 80, −15), Pakt ab 30 (statt 40, −10); tritt jedem Krieg eines Verbündeten auf dessen Seite bei, auch ohne Stärkeprüfung der Angreiferseite | – |
 | 10 | Opportunist | Gelegenheitsjäger | 2×-Schwelle → 1,2× gegen Völker, die im Krieg oder in einer Rebellion sind; gegen alle anderen 2,5× | – |
-| 11 | Grudge-bearer | Nachtragend | Vertrauensereignisse klingen in 30 statt 10 Jahren ab; Kriegsmalus des Vertrauens −30 → −50; Waffenstillstand nach eigenen Kriegen 20 → 30 Jahre | – |
+| 11 | Grudge-bearer | Nachtragend | „Rache“: Kriegswurf ×2 und 2×-Schwelle 1,2× gegen Völker, die es in den letzten 30 Jahren besiegt oder besetzt haben; Waffenstillstand nach eigenen Kriegen 20 → 10 Jahre; Kriegsmalus des Vertrauens −30 → −60 | 2 |
 
 **Wirtschaft** (`Requirement Zentralregierung.md`, Abschnitte 4 und 5; `Requirement Handel.md`; `Requirement Diplomatie.md`, Abschnitt 3)
 
 | Nr. | Name | Beschreibung | Wirkung | Schließt aus |
 |---|---|---|---|---|
-| 12 | Merchant Prince | Handelsfürst | Handelsabkommen ab 15 Vertrauen früher (Freihandel 55 → 40, Handelsabkommen 45 → 30, Tausch 40 → 25); Zoll, den das Volk zahlt, −50 %; Einkommensprüfung 40 → 50 % (**Wirkung gering gemessen, offen: Anpassung oder Ersatz**) | – |
+| 12 | Merchant Prince | Handelsfürst | Händlerlast 40 → 60; Handelszentrum schon ab Fahrtwert 8 (statt 15); Händlerverluste ×0,5; Zoll, den das Volk zahlt, −50 %; Menge eines Handelsabkommens höchstens 20 → 30; Einkommensprüfung 40 → 50 % (der Vertrauens-Hebel entfällt: Vertrauen bindet selten) | 8 |
 | 13 | Generous | Großzügig | Sicherheitsabstand der Steuern 5 → 12; Zufriedenheit +4 | 14 |
 | 14 | Tax Hawk | Steuerjäger | Sicherheitsabstand 5 → 0; Einkommensprüfung 40 → 55 %; Zufriedenheit −3 | 13 |
-| 15 | Builder | Bauherr | Wachstumsbau der Siedlung schon ab 30 % Kapazität (statt 50 %); Unterhalt der Regierungsgebäude +20 % | 16 |
-| 16 | Frugal | Sparsam | Einkommensprüfung 40 → 25 %; Unterhalt der Regierungsgebäude −25 %; Wachstumsbau der Siedlung erst ab 60 % (statt 50 %) | 15 |
-| 17 | Prospector | Schürfer | Sondervorkommen und strategische Güter zählen beim Siedeln ×2 und im Kriegsnutzen (Krieg §6) ×4 insgesamt | – |
+| 15 | Builder | Bauherr | Baukosten −30 %, Bauzeit −30 %; Wachstumsbau der Siedlung schon ab 30 % (statt 50 %); Unterhalt der Regierungsgebäude +20 % | 16 |
+| 16 | Frugal | Sparsam | Unterhalt aller Gebäude (Siedlungen und Regierung) −30 %; Einkommensprüfung 40 → 25 %; Wachstumsbau der Siedlung erst ab 60 % (statt 50 %); Reserve der Siedlungen 2 → 4 Jahre | 15 |
+| 17 | Prospector | Schürfer | Förderung aus Minen und Sondervorkommen (Eisen, Feuerstein, Gold, Salz …) +50 %; Sondervorkommen zählen im Kriegsnutzen ×2 (Krieg §6; nicht ×4) | – |
 
 **Siedeln**
 
@@ -93,14 +93,14 @@ Die Rebellionsschwelle ist der Faktor, den die Stärke der Rebellen im Vergleich
 | 22 | Iron Fist | Eiserne Faust | Rebellionsschwelle 1,5×; Zufriedenheit −2; Sold +10 % | 23 |
 | 23 | Weak Hand | Schwache Hand | Rebellionsschwelle 0,6×; Zufriedenheit +3 | 21, 22 |
 
-**Gott**
+**Gott und Wege**
 
 | Nr. | Name | Beschreibung | Wirkung | Schließt aus |
 |---|---|---|---|---|
-| 24 | Devout | Fromm | Andacht zum Gott +0,05 (zusätzlich zu 0,02 × Kultur „Devout“); Zufriedenheit +1 | 25 |
-| 25 | Skeptic | Skeptisch | **vorerst ausgebaut (später):** Andacht −0,03 beendete in der Simulation 29 % der Welten (Spielende), und der Spieler kann derzeit nichts dagegen tun. Slot 25 wird durch einen Ersatz gefüllt (offen) | – |
+| 24 | Devout | Fromm | Zufriedenheit +3 und Geburtenrate +10 % für jedes Volk; zusätzlich Andacht zum Gott +0,05 (zu 0,02 × Kultur „Devout“) im Volk des Spielers | – |
+| 25 | Road Builder | Straßenbauer | Straßenkosten −50 %; Fahrtweite der Händler +30 % (Wegsuche 26 → 34 Reisekosten); Anbindungs-Teilwert der Zufriedenheit +3 | – |
 
-Ausschlusspaare insgesamt: 1/2, 1/3, 2/4, 4/5, 7/8, 13/14, 15/16, 18/19, 20/21, 21/23, 22/23 (24/25 entfällt vorerst mit Skeptic). Zusätzlich schließen **Pacifist und das Ziel Glory** sowie **Homebody und das Ziel Expansion** einander aus (Abschnitt 5).
+Ausschlusspaare insgesamt: 1/2, 1/3, 2/4, 4/5, 7/8, 13/14, 15/16, 18/19, 20/21, 21/23, 22/23, 8/12 (Xenophobe ↔ Merchant Prince), 2/11 (Pacifist ↔ Grudge-bearer). Zusätzlich schließen **Pacifist und das Ziel Glory** sowie **Homebody und das Ziel Expansion** einander aus (Abschnitt 5).
 
 ### Wie Attribute dazukommen
 
@@ -114,13 +114,13 @@ Ausschlusspaare insgesamt: 1/2, 1/3, 2/4, 4/5, 7/8, 13/14, 15/16, 18/19, 20/21, 
 | Krieg verloren oder Sitz belagert/Bezirk verloren | Pacifist, Cautious Strategist, Craven, Grudge-bearer |
 | Aufstand im eigenen Reich (Rebellion erklärt oder Volk durch Aufstand entstanden) | Iron Fist, Weak Hand, Beloved, Tyrant |
 | Hunger oder Not (eine Siedlung mit fehlender Nahrung/Wasser, Zufriedenheit < 0) | Frugal, Tax Hawk, Generous, Homebody |
-| Handelserfolg (neues Handels- oder Freihandelsabkommen) | Merchant Prince, Builder, Prospector, Silver Tongue |
+| Handelserfolg (neues Handels- oder Freihandelsabkommen) | Merchant Prince, Builder, Prospector, Silver Tongue, Road Builder |
 | Bündnis oder Pakt geschlossen oder Kriegsbeitritt als Verbündeter | Oathkeeper, Silver Tongue, Opportunist |
 | Grenze gegen das Volk geschlossen oder Vertrauen stark gefallen (Gefahr > 60) | Xenophobe, Grudge-bearer, Cautious Strategist |
-| Neue Siedlungen gegründet (ab 2) | Pioneer, Builder, Prospector |
+| Neue Siedlungen gegründet (ab 2) | Pioneer, Builder, Prospector, Road Builder |
 | Lange Friedenszeit (10 Jahre ohne Krieg) | Pacifist, Merchant Prince, Beloved, Generous |
 
-Devout (und der Ersatz für Slot 25) kommen nur über Zufall oder Erbe. Devout wirkt nur beim Volk des Spielers.
+Devout kommt nur über Zufall oder Erbe. Seine Andacht wirkt nur beim Volk des Spielers; Zufriedenheit und Geburtenrate wirken in jedem Volk.
 
 ## 5. Ziele (4)
 
@@ -170,6 +170,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 
 - Je Volk flache Typed Arrays: 3 Attribut-Slots (`Uint8Array`, 0 = leer), Ziel (`Uint8Array`), Ziel-Ausgangswert und Zielfortschritt (`Int32Array`), Alter bei Amtsantritt und Amtsbeginn (Jahr), Stammname-Index und Zähler. Keine Objekte im Kern.
 - Aus Attributen und Ziel wird bei jeder Änderung (Amtsantritt, 2. Attribut, Abschluss) ein **Hebelsatz je Volk** (`Float32Array`, Volk × Hebel) einmal berechnet; die Entscheidungen lesen nur diesen Satz, durchsuchen nie die Attribute. Das ist auch die Schnittstelle für die spätere C++-Portierung.
+- **Hebel, die je Volk einstellbar sein müssen** (heute teils Modul-Konstanten, die der Kern je Volk lesen muss): Kriegswurf, 2×-Schwelle (allgemein und gegen Völker mit Krieg/Rebellion bzw. gegen frühere Sieger), Aufgabeschwelle, Erschöpfungsjahre, Belagerungszeit bis zur Besetzung (`occupyWeeks`), Anteil der Soldaten im Heer (`sendShare`), Soldatenanteil, Ausbildungsanteil, Sold, Stärkefaktor, Schlachtverluste (Verteidigungs- und Verlustfaktor), Verteidigungsbonus im eigenen Land, Waffenstillstandsjahre, Vertrauensverlust nach Krieg; Vertrauen zu allen, Startvertrauen, Pakt- und Bündnisschwelle, Handelsabkommen-Schwellen, Grenzschwellen (Gefahr öffnen/schließen), Gefahr-Faktor, Zoll (gezahlt und verlangt); Händlerlast (`MERCHANT_LOAD`), Mindestwert Handelszentrum (`CENTER_MIN_VALUE`), Händlerverluste (`LOSS_*`), Fahrtweite (`MAX_TRIP_COST`), Menge je Handelsabkommen, Straßenkosten; Sicherheitsabstand, Einkommensprüfung, Siedlungs-Baugrenze (`buildFrom`), Baukosten, Bauzeit, Unterhalt (Regierung und alle Gebäude), Reserve der Siedlungen; Überlast-Faktor des Siedelns, Wegkosten des Siedelns; Förderung der Sondervorkommen, Kriegsnutzen-Faktor; Rebellionsschwelle; Zufriedenheit (Teilwert „Leader“), Anbindungs-Teilwert, Geburtenrate, Andacht (nur Spielervolk).
 - Zählung für Erlebtes: kleiner Zähler je Volk und Ereignisart, beim Amtsantritt auf 0.
 - Neu zu erfassen für die Ziele: jährlicher Handelswert je Volk (heute nicht erfasst), Zahl der Jahre in Folge mit Gefahr ≤ 40, Zahl der Siedlungen bei Amtsantritt.
 
@@ -207,10 +208,10 @@ Entschieden (Nutzer); Zahlen weiter vorläufig.
 - **Grundwerte korrigiert** (Abschnitt 4): Handelsabkommen 55/45/40 statt 60, Wachstumsbau der Siedlung ab 50 % statt 80 %. Wirkungen sind Verschiebungen gegenüber dem tatsächlichen Grundwert.
 - **Siedeln:** „Siedlungsscore“ ändert nur die Rangfolge im Volk und war wirkungslos. Der Hebel ist die **Überlast-Schwelle** (Siedler ziehen los, sobald Bevölkerung > Kapazität × Faktor). Pioneer Faktor 0,95 und Wegkosten ×0,7; Homebody Wegkosten ×1,5; Ziel Expansion Faktor 0,98. (Vorher dominierte das Siedeln: Pioneer 213 gegen Homebody 39 Siedlungen.)
 - **Diplomatie etwa halbiert** (schaukelte sich auf, ~40× Bündnisse): Silver Tongue Vertrauen +10, Startvertrauen +5; Oathkeeper Bündnis −15, Pakt −10; Merchant Prince Handelsabkommen −15; Wealth −5.
-- **Skeptic vorerst ausgebaut (später),** bis mehr Features im Spiel sind: Andacht −0,03 beendete 29 % der Welten, der Spieler kann dagegen derzeit nichts tun. Slot 25 wird durch einen Ersatz gefüllt (offen).
+- **Skeptic ausgebaut (später),** bis mehr Features im Spiel sind: Andacht −0,03 beendete 29 % der Welten, der Spieler kann dagegen derzeit nichts tun. Slot 25 ist jetzt **Road Builder**. Ein Hebel auf den Glauben mit negativem Vorzeichen kommt erst wieder, wenn der Spieler dagegen etwas tun kann.
 - **Wealth:** Bedingung „≥ 2 Handelspartner“ entfällt; Faktor 1,5 gegen den Schnitt mehrerer Jahre wird getestet (offen).
 - **Kriegshebel** werden angehoben (Warmonger Kriegswurf Richtung 30 %); genaue Zahlen und Deckel misst `sim-analyst` (offen).
-- **Ohne messbare Wirkung** (Merchant Prince, Xenophobe, Stubborn, Craven, Grudge-bearer, Prospector, Devout, Builder, Frugal; Warmonger-Stärkeschwelle): werden angepasst oder ersetzt (Vorschläge offen).
+- **Ersetzte Attribute** (Nutzer: „die neuen Attribute passen“, Abschnitt 4): Merchant Prince, Xenophobe, Stubborn, Craven, Grudge-bearer, Prospector, Devout, Builder, Frugal, Warmonger, Cautious Strategist wirken jetzt auf Hebel, die in der Simulation wirklich binden (Händlerlast und Fahrtwert statt Vertrauen, Gefahr statt Vertrauen bei Grenzen, Belagerungszeit und Heergröße statt Aufgabeschwellen, Förderung statt Siedeln, Baukosten und Unterhalt). Neue Ausschlüsse: Merchant Prince ↔ Xenophobe, Grudge-bearer ↔ Pacifist. Kriegswurf von Warmonger und Faktor von Wealth bleiben offen, bis `sim-analyst` berichtet. Alle Zahlen vorläufig bis zur nächsten Messrunde.
 
 ## 13. Abhängigkeiten
 
