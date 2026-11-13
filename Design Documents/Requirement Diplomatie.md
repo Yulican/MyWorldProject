@@ -7,7 +7,7 @@ Spieltexte sind Englisch.
 Baut auf dem internen Handel auf (`Requirement Handel.md`): Geld pro
 Siedlung, Händler, Wege.
 
-**Änderung durch Anführer (`Requirement Anführer.md`, entschieden, Zahlen vorläufig):** Der Anführer eines Volks verschiebt die Schwellen dieses Dokuments (Grenzen öffnen und schließen, Startvertrauen, Vertrauen zu allen, Zoll, Abkommensschwellen, Abklingzeit der Ereignisse). Die Zahlen hier sind die Grundwerte.
+**Änderung durch Anführer (`Requirement Anführer.md`, entschieden, in Runde 3 gemessen):** Der Anführer eines Volks verschiebt die Schwellen dieses Dokuments (Grenzen öffnen und schließen, Startvertrauen, Vertrauen zu allen, Zoll, Abkommensschwellen, Abklingzeit der Ereignisse). Die Zahlen hier sind die Grundwerte.
 
 Stufen:
 - **Stufe 1 (dieses Dokument):** Beziehungen, Grenzen, Zoll, Außenhandel

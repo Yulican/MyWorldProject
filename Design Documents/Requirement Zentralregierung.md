@@ -7,7 +7,7 @@ Zufriedenheit (`Requirement Zufriedenheit.md`), Handel
 (`Requirement Handel.md`) und regionalen Rohstoffen
 (`Requirement Regionale Rohstoffe.md`) auf.
 
-**Änderung durch Anführer (`Requirement Anführer.md`, entschieden, Zahlen vorläufig):** Der Anführer des Volks verschiebt Sicherheitsabstand der Steuern (Abschnitt 4), Einkommensprüfung (40 %) und Wachstumsschwelle (80 %) der Bauliste (Abschnitt 5) sowie die Soldkosten. Die Zahlen hier sind die Grundwerte.
+**Änderung durch Anführer (`Requirement Anführer.md`, entschieden, in Runde 3 gemessen):** Der Anführer des Volks verschiebt Sicherheitsabstand der Steuern (Abschnitt 4), Einkommensprüfung (40 %) und Wachstumsschwelle (80 %) der Bauliste (Abschnitt 5) sowie die Soldkosten. Die Zahlen hier sind die Grundwerte.
 
 ## 1. Ziel
 
