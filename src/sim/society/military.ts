@@ -466,13 +466,14 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     if (people === 0 || dist < 0 || civ === 0) continue;
     const base = c * TROOP_TYPES;
     if (m.cap[base] === 0 && m.cap[base + 1] === 0 && m.cap[base + 2] === 0) continue;
-    let room = Math.min(Math.floor(MIL.maxPopShare * people) - soldiersAt(sim, c), Math.floor(MIL.maxAdultShare * sim.cellAdults[c]));
+    const lv = sim.leaders.lev;
+    let room = Math.min(Math.floor((MIL.maxPopShare + lv[civ * LEVERS + L.popShare]) * people) - soldiersAt(sim, c), Math.floor(MIL.maxAdultShare * sim.cellAdults[c]));
     for (let t = 0; t < TROOP_TYPES && room > 0; t++) {
       const cap = m.cap[base + t];
       if (cap === 0 || m.soldiers[base + t] >= cap) continue;
       // Stables need horses at hand.
       if (t === Troop.Shock && eco.luxury[c * STORED_COUNT + TROOP_GOOD[t]] < 1) continue;
-      const add = Math.min(cap - m.soldiers[base + t], Math.ceil(MIL.trainShare * cap), room, Math.floor(m.civAfford[civ]));
+      const add = Math.min(cap - m.soldiers[base + t], Math.ceil((MIL.trainShare + lv[civ * LEVERS + L.trainShare]) * cap), room, Math.floor(m.civAfford[civ]));
       if (add <= 0) continue;
       m.civAfford[civ] -= add;
       m.soldiers[base + t] += add;

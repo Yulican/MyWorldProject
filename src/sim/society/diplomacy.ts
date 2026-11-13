@@ -599,12 +599,12 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         if (a === b || !dip.known[pair(a, b)]) continue;
         // Borders: open to those we trust and don't fear; close when that ends.
         const k = pair(a, b);
-        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST + lev[a * LEVERS + L.openTrust] && danger(a, b) <= OPEN_DANGER && sim.war.foe[k] === 0) {
+        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST + lev[a * LEVERS + L.openTrust] && danger(a, b) <= OPEN_DANGER + lev[a * LEVERS + L.openDanger] && sim.war.foe[k] === 0) {
           dip.open[k] = 1;
           dip.bordersVersion++;
           addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
           record(`The ${name(a)} opened their borders to the ${name(b)}.`, capital(a), false);
-        } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST + lev[a * LEVERS + L.closeTrust] || danger(a, b) > CLOSE_DANGER)) {
+        } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST + lev[a * LEVERS + L.closeTrust] || danger(a, b) > CLOSE_DANGER + lev[a * LEVERS + L.closeDanger])) {
           closeBorders(sim, a, b, record);
         }
       }

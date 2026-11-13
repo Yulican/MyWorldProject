@@ -64,6 +64,8 @@ export const LEADER = {
   /** Attribute and goal effects scaled by these (1 = the table; 0.5 = half the deviation from the base; 0 = no effect). */
   attrScale: 1,
   goalScale: 1,
+  /** Years a defeat is remembered (Grudge-bearer). */
+  revengeYears: 30,
   /** Experiments: every new leader starts with this attribute (1..25, 0 = off), so one attribute can be compared with another on the same worlds. */
   forceAttr: 0,
 };
@@ -108,12 +110,30 @@ export const L = {
   sat: 35,
   satWar: 36,
   satGlory: 37,
+  sendShare: 38,
+  popShare: 39,
+  trainShare: 40,
+  occupy: 41,
+  lossTaken: 42,
+  defExtra: 43,
+  openDanger: 44,
+  closeDanger: 45,
+  birth: 46,
+  buildCost: 47,
+  buildTime: 48,
+  upkeepAll: 49,
+  harvest: 50,
+  load: 51,
+  centerMin: 52,
+  lossTrade: 53,
+  tripRange: 54,
+  revenge: 55,
 } as const;
-export const LEVERS = 38;
+export const LEVERS = 56;
 export const LEVER_NAMES = Object.keys(L) as (keyof typeof L)[];
 /** 1 for the multiplicative levers. */
 export const LEVER_KIND = new Uint8Array(LEVERS);
-for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop]) LEVER_KIND[k] = 1;
+for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge]) LEVER_KIND[k] = 1;
 
 /** Experiments: levers (L index) whose effect is switched off, to see which lever causes a difference (tools only; empty in the game). */
 export const MUTE = new Set<number>();
@@ -189,6 +209,8 @@ export type Leaders = {
   attrM: Float64Array;
   /** The same per goal (index Goal; a reached goal counts under goal + 5). */
   goalM: Float64Array;
+  /** Tick + 1 at which people b last beat or occupied a seat of people a: a * LEADER_CIVS + b (Grudge-bearer's revenge). */
+  beaten: Int32Array;
   /** Districts conquered as the attacker of a war that was won (Glory goal), this term. */
   conquests: Uint16Array;
   /** Samples of ended terms. */
@@ -211,6 +233,8 @@ export type Leaders = {
     goalsDone: Int32Array;
     /** Violations of an exclusion pair (must stay 0). */
     exclusionBreaks: number;
+    /** Wars declared on a people that had beaten the attacker within LEADER.revengeYears. */
+    revengeWars: number;
     /** Active-goal years and how often each part of a completion condition held: see leaderRules.ts goalReached. */
     parts: Int32Array;
   };
@@ -246,6 +270,7 @@ export function createLeaders(seed: number): Leaders {
     tradeCount: new Uint32Array(LEADER_CIVS),
     declared: new Uint16Array(LEADER_CIVS),
     conquests: new Uint16Array(LEADER_CIVS),
+    beaten: new Int32Array(LEADER_CIVS * LEADER_CIVS),
     uprisings: new Uint16Array(LEADER_CIVS),
     all: new Float64Array(MEASURES),
     attrM: new Float64Array(26 * MEASURES),
@@ -267,6 +292,7 @@ export function createLeaders(seed: number): Leaders {
       goalsChosen: new Int32Array(5),
       goalsDone: new Int32Array(5),
       exclusionBreaks: 0,
+      revengeWars: 0,
       parts: new Int32Array(12),
     },
   };
@@ -301,20 +327,21 @@ export function lever(sim: Simulation, civ: number, k: number): number {
 }
 
 /** Yearly chance that `civ` declares a war when it has a target: `base` (WAR.chance) with the leader's shifts, capped (Pacifist: never). */
-export function warChance(sim: Simulation, civ: number, base: number): number {
+export function warChance(sim: Simulation, civ: number, base: number, revenge = false): number {
   const lev = sim.leaders.lev;
   const o = civ * LEVERS;
   if (lev[o + L.neverWar] > 0) return 0;
   const add = lev[o + L.warChance];
-  const mul = lev[o + L.warChanceMul];
+  const mul = lev[o + L.warChanceMul] * (revenge ? lev[o + L.revenge] : 1);
   if (add === 0 && mul === 1) return base;
   return Math.max(0, Math.min(LEADER.capWarChance, (base + add) * mul));
 }
 
 /** Strength ratio `a` needs over `t` to declare war: `base` (WAR.ratio) with the leader's shifts, at least LEADER.capRatioMin. */
-export function warRatio(sim: Simulation, a: number, busy: boolean, base: number): number {
+export function warRatio(sim: Simulation, a: number, busy: boolean, base: number, revenge = false): number {
   const lev = sim.leaders.lev;
   const o = a * LEVERS;
+  if (revenge && lev[o + L.revenge] > 1) return LEADER.capRatioMin;
   const dev = lev[o + L.ratio] + (busy ? lev[o + L.ratioBusy] : lev[o + L.ratioCalm]);
   if (dev === 0) return base;
   return Math.max(LEADER.capRatioMin, base + dev);
@@ -328,4 +355,15 @@ export function incomeShare(sim: Simulation, civ: number): number {
 /** Satisfaction the weakest settlement keeps above zero under the taxes (GOV_TUNING.margin, the leader's shift); `base` for the seat financing margin. */
 export function taxMargin(sim: Simulation, civ: number, base: number): number {
   return base + sim.leaders.lev[civ * LEVERS + L.margin];
+}
+
+/** Whether people `b` beat or occupied a seat of people `a` within LEADER.revengeYears (the memory of a Grudge-bearer). */
+export function beatenBy(sim: Simulation, a: number, b: number): boolean {
+  const t = sim.leaders.beaten[a * LEADER_CIVS + b];
+  return t > 0 && sim.tick - (t - 1) <= LEADER.revengeYears * 52;
+}
+
+/** People `winner` beat or occupied a seat of `loser`. */
+export function leaderBeaten(sim: Simulation, loser: number, winner: number): void {
+  if (loser > 0 && winner > 0 && loser < LEADER_CIVS && winner < LEADER_CIVS) sim.leaders.beaten[loser * LEADER_CIVS + winner] = sim.tick + 1;
 }

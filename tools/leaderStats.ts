@@ -70,6 +70,12 @@ function worldRow(sim: Simulation): Row {
     if (pop >= 50) towns++;
     if (pop >= 150) cities++;
   }
+  let standing = 0;
+  for (let i = 0; i < sim.economy.state.length; i++) if (sim.economy.state[i] === 2) standing++;
+  let treasury = 0;
+  for (let c = 0; c < w.cellCount; c++) treasury += sim.government.treasury[c];
+  let roads = 0;
+  for (let c = 0; c < w.cellCount; c++) if (w.roads[c] !== 0) roads++;
   const living = sim.civs.filter(Boolean).map((c) => c!.id);
   let open = 0;
   let known = 0;
@@ -130,6 +136,12 @@ function worldRow(sim: Simulation): Row {
     'satisfaction mean': satSum / Math.max(1, settlements),
     'unhappy (<0) %': (100 * satNeg) / Math.max(1, settlements),
     'game over (nobody prays, worlds)': sim.gameOver ? 1 : 0,
+    'wars on an earlier victor (revenge)': sim.leaders.stats.revengeWars,
+    'buildings standing': standing,
+    'government treasuries (sum)': treasury,
+    'hexes with roads': roads,
+    'iron+flint mined (units)': sim.military.goodsMined,
+    'gold mined': sim.military.goldMined,
   };
 }
 
@@ -266,7 +278,7 @@ function line(label: string, m: number[]): string {
   const y = Math.max(1, m[M.years]);
   const cells = [
     String(Math.round(m[M.years])).padStart(7),
-    ((100 * m[M.declared]) / y).toFixed(1).padStart(7),
+    ((100 * m[M.declared]) / y).toFixed(2).padStart(7),
     ((100 * m[M.war]) / y).toFixed(1).padStart(7),
     ((100 * m[M.open]) / y).toFixed(1).padStart(7),
     (m[M.deals] / y).toFixed(2).padStart(6),
@@ -292,7 +304,7 @@ for (const run of brief ? [] : runs) {
     console.log(line(`${GOALS[g]} (reached)`, measuresOf(run, (s) => s.goalM, (g + 5) * MEASURES)));
   }
   console.log('\nOpposite pairs (the same measure, ratio first/second):');
-  const pairs: [number, number][] = [[1, 2], [18, 19], [7, 8], [13, 14], [15, 16], [20, 21], [22, 23], [24, 25], [4, 5]];
+  const pairs: [number, number][] = [[1, 2], [18, 19], [7, 8], [13, 14], [15, 16], [20, 21], [22, 23], [4, 5]];
   for (const [a, b] of pairs) {
     const ma = measuresOf(run, (s) => s.attrM, a * MEASURES);
     const mb = measuresOf(run, (s) => s.attrM, b * MEASURES);

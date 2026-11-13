@@ -17,32 +17,31 @@ export type Effect = [lever: number, value: number];
 /** The 25 attributes, index 1..25 (Requirement section 4); effects are deviations from the base values. */
 export const ATTRS: { name: string; fx: Effect[] }[] = [
   { name: '', fx: [] },
-  { name: 'Warmonger', fx: [[L.warChance, 0.2], [L.ratio, -0.7], [L.sold, 1.2]] },
+  { name: 'Warmonger', fx: [[L.warChance, 0.2], [L.sendShare, 0.15], [L.popShare, 0.05], [L.trainShare, 0.1], [L.sat, -2]] },
   { name: 'Pacifist', fx: [[L.neverWar, 1], [L.openTrust, -10], [L.giveUp, 0.15]] },
-  { name: 'Cautious Strategist', fx: [[L.ratio, 1], [L.warChance, 0.1]] },
-  { name: 'Stubborn', fx: [[L.giveUp, -0.25], [L.exhaust, 5], [L.satWar, -3]] },
-  { name: 'Craven', fx: [[L.giveUp, 0.2], [L.dangerMul, 0.8]] },
+  { name: 'Cautious Strategist', fx: [[L.ratio, 1], [L.warChanceMul, 0.8], [L.lossTaken, 0.75], [L.sat, 1]] },
+  { name: 'Stubborn', fx: [[L.giveUp, -0.4], [L.occupy, 1.5], [L.satWar, -3]] },
+  { name: 'Craven', fx: [[L.sendShare, -0.3], [L.sold, 0.7], [L.giveUp, 0.2]] },
   { name: 'Drillmaster', fx: [[L.strength, 1.25], [L.sold, 1.3]] },
   { name: 'Silver Tongue', fx: [[L.trust, 10], [L.trustBase, 5]] },
-  { name: 'Xenophobe', fx: [[L.openTrust, 20], [L.closeTrust, 15], [L.tollAsk, 2]] },
+  { name: 'Xenophobe', fx: [[L.openDanger, -15], [L.closeDanger, -15], [L.tollAsk, 3], [L.defExtra, 0.25]] },
   { name: 'Oathkeeper', fx: [[L.allyTrust, -15], [L.pactTrust, -10], [L.oath, 1]] },
   { name: 'Opportunist', fx: [[L.ratioBusy, -0.8], [L.ratioCalm, 0.5]] },
-  { name: 'Grudge-bearer', fx: [[L.moodYears, 20], [L.warTrust, -20], [L.truce, 10]] },
-  { name: 'Merchant Prince', fx: [[L.tradeTrust, -15], [L.tollPay, 0.5], [L.income, 0.1]] },
+  { name: 'Grudge-bearer', fx: [[L.revenge, 2], [L.truce, -10], [L.warTrust, -30]] },
+  { name: 'Merchant Prince', fx: [[L.load, 1.5], [L.centerMin, 0.533], [L.lossTrade, 0.5], [L.tollPay, 0.5], [L.income, 0.1]] },
   { name: 'Generous', fx: [[L.margin, 7], [L.sat, 4]] },
   { name: 'Tax Hawk', fx: [[L.margin, -5], [L.income, 0.15], [L.sat, -3]] },
-  { name: 'Builder', fx: [[L.buildFrom, -0.2], [L.govUpkeep, 1.2]] },
-  { name: 'Frugal', fx: [[L.income, -0.15], [L.govUpkeep, 0.75], [L.buildFrom, 0.1]] },
-  { name: 'Prospector', fx: [[L.resMul, 2]] },
+  { name: 'Builder', fx: [[L.buildCost, 0.7], [L.buildTime, 0.7], [L.buildFrom, -0.2], [L.govUpkeep, 1.2]] },
+  { name: 'Frugal', fx: [[L.upkeepAll, 0.7], [L.income, -0.15], [L.buildFrom, 0.1]] },
+  { name: 'Prospector', fx: [[L.harvest, 1.5]] },
   { name: 'Pioneer', fx: [[L.travel, 0.7], [L.settleOver, 0.95], [L.sat, -2]] },
   { name: 'Homebody', fx: [[L.travel, 1.5], [L.sat, 3]] },
   { name: 'Beloved', fx: [[L.sat, 5]] },
   { name: 'Tyrant', fx: [[L.sat, -6], [L.rebel, 2]] },
   { name: 'Iron Fist', fx: [[L.rebel, 1.5], [L.sat, -2], [L.sold, 1.1]] },
   { name: 'Weak Hand', fx: [[L.rebel, 0.6], [L.sat, 3]] },
-  { name: 'Devout', fx: [[L.devotion, 0.05], [L.sat, 1]] },
-  // Removed for now (the player cannot counter it; a replacement is being designed): never drawn, no effect, the slot stays free.
-  { name: 'Skeptic', fx: [] },
+  { name: 'Devout', fx: [[L.sat, 3], [L.birth, 1.1], [L.devotion, 0.05]] },
+  { name: 'Road Builder', fx: [[L.tripRange, 1.3], [L.sat, 3]] },
 ];
 export const ATTR_COUNT = 25;
 
@@ -56,15 +55,14 @@ export const GOAL_FX: Effect[][] = [
 ];
 
 /** Pairs that exclude each other (Requirement section 4), and attribute / goal pairs (section 5). */
-const EXCLUDE_PAIRS = [[1, 2], [1, 3], [2, 4], [4, 5], [7, 8], [13, 14], [15, 16], [18, 19], [20, 21], [21, 23], [22, 23], [24, 25]];
+const EXCLUDE_PAIRS = [[1, 2], [1, 3], [2, 4], [4, 5], [7, 8], [13, 14], [15, 16], [18, 19], [20, 21], [21, 23], [22, 23], [8, 12], [2, 11]];
 const excludes = new Uint8Array(26 * 26);
 for (const [a, b] of EXCLUDE_PAIRS) {
   excludes[a * 26 + b] = 1;
   excludes[b * 26 + a] = 1;
 }
-/** Attributes taken out of the game for now (never drawn or inherited). */
+/** Attributes taken out of the game (never drawn or inherited); none at the moment. */
 const REMOVED = new Uint8Array(26);
-REMOVED[25] = 1;
 const PACIFIST = 2;
 const HOMEBODY = 19;
 /** Whether attribute `a` may not go with goal `g`. */
@@ -78,10 +76,10 @@ const FROM_EXPERIENCE: readonly (readonly number[])[] = [
   [2, 3, 5, 11],
   [22, 23, 20, 21],
   [16, 14, 13, 19],
-  [12, 15, 17, 7],
+  [12, 15, 17, 7, 25],
   [9, 7, 10],
   [8, 11, 3],
-  [18, 15, 17],
+  [18, 15, 17, 25],
   [2, 12, 20, 13],
 ];
 

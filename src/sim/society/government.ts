@@ -197,7 +197,7 @@ function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_
     if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
     sum += upkeepOf(economy.type[s], m);
   }
-  return sum * years * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.govUpkeep];
+  return sum * years * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.govUpkeep] * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.upkeepAll];
 }
 
 /** A chronicle entry at a hex (simulation.ts: record); see diplomacy.ts: Record. */
@@ -462,7 +462,7 @@ export function updateGovernmentUpkeep(sim: Simulation, owner: Uint8Array): void
       if (economy.state[s] !== SlotState.Standing) continue;
       const t = economy.type[s];
       const w = c * MATERIAL_COUNT;
-      const cheaper = sim.leaders.lev[sim.world.owner[c] * LEVERS + L.govUpkeep];
+      const cheaper = sim.leaders.lev[sim.world.owner[c] * LEVERS + L.govUpkeep] * sim.leaders.lev[sim.world.owner[c] * LEVERS + L.upkeepAll];
       if (gov.stock[w] >= upkeepOf(t, 0) * cheaper && gov.stock[w + 1] >= upkeepOf(t, 1) * cheaper) {
         gov.stock[w] -= upkeepOf(t, 0) * cheaper;
         gov.stock[w + 1] -= upkeepOf(t, 1) * cheaper;
