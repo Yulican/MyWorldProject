@@ -1228,6 +1228,8 @@ function joinMember(sim: Simulation, s: number, p: number, side: number): void {
   if (worldRoom(w) < 1 || countArmies(w, p) >= WAR.maxArmies) w.stats.joinNoRoom++;
   addMember(sim, s, p, side);
   w.stats.joins++;
+  // An experience of its leader ("joined a war as an ally").
+  leaderEvent(sim, p, Ev.Pact);
   const main = side === 0 ? w.wAtt[s] : w.wDef[s];
   record(sim, `The ${sim.civs[p]!.name} joined the ${sim.civs[main]!.name} in the war against the ${sim.civs[side === 0 ? w.wDef[s] : w.wAtt[s]]!.name}.`, w.wGoal[s]);
 }
@@ -2132,6 +2134,8 @@ function startSiege(sim: Simulation, s: number): void {
   for (const kind of SIEGE_KINDS) mods.push({ kind, label: SUPPLY_LABEL, amount: -0.5, percent: true });
   sim.supplyModifiers.set(goal, mods);
   updateCellSupply(sim, goal);
+  // An experience of the besieged people's leader ("seat besieged").
+  leaderEvent(sim, sim.world.owner[goal], Ev.WarLost);
   record(sim, `The ${sim.civs[w.wAtt[s]]!.name} besieged a seat of government of the ${sim.civs[w.wDef[s]]!.name}.`, goal);
 }
 
@@ -2667,6 +2671,8 @@ export function endWar(sim: Simulation, s: number, type: number): void {
   }
   // Experiences of the leaders: the side that gave up lost (the winner conquered a district when the defender gave up).
   if (type === EndType.GaveUp) {
+    // A war won as the attacker (the goal Glory), with or without a district to take.
+    if (sim.leaders.has[att]) sim.leaders.wonAttack[att]++;
     leaderEvent(sim, att, Ev.WarWon);
     leaderEvent(sim, def, Ev.WarLost);
     leaderBeaten(sim, def, att);

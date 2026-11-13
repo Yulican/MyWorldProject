@@ -31,6 +31,7 @@ import {
 import { DIRECTION_COUNT } from '../hex';
 import { hasRoad } from '../world/roads';
 import { TICKS_PER_YEAR, createSimulation, livingCivilizations, splitCutOffLand, stepSimulation, type Simulation } from './simulation';
+import { dismissLeaders } from './leaderRules';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TradeGood, addStock, exportHub, plannedTrip, stockOf, updateTradeNeeds } from './trade';
 
 function runYears(sim: Simulation, years: number): void {
@@ -50,6 +51,8 @@ function metWorld(): { sim: Simulation; a: number; b: number } {
   const [a, b] = livingCivilizations(sim)
     .filter((c) => met.text.includes(c.name))
     .map((c) => c.id);
+  // The base rules of diplomacy: without the shifts of the two peoples' leaders.
+  dismissLeaders(sim);
   return { sim, a, b };
 }
 

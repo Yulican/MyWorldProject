@@ -288,8 +288,10 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   for (let m = 0; m < MATERIAL_COUNT; m++) {
     const stock = economy.stock[cell * MATERIAL_COUNT + m];
     const goal = economy.goal[cell * MATERIAL_COUNT + m];
-    const upkeep = upkeepOf(economy, cell, m);
-    const reserve = Math.max(RESERVE_MIN, RESERVE_YEARS * upkeep);
+    const upkeep = upkeepOf(economy, cell, m) * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.upkeepAll];
+    // A frugal leader's settlements keep more years of upkeep (lever reserve).
+    const reserveYears = RESERVE_YEARS * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.reserve];
+    const reserve = Math.max(RESERVE_MIN, reserveYears * upkeep);
     // Upkeep its own harvest doesn't cover (e.g. a seat the realm wants): a
     // supply route, it asks for RESERVE_YEARS of the shortfall.
     const good = m === 0 ? Good.Wood : Good.Stone;
@@ -307,7 +309,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
       if (order > 0) seatOrders |= 1 << m;
       continue;
     }
-    const shortfall = yearly * RESERVE_YEARS;
+    const shortfall = yearly * reserveYears;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
   }

@@ -216,7 +216,7 @@ export type Simulation = {
   government: Government;
   /** Soldiers and strengths (see military.ts). */
   military: Military;
-  /** Leaders of the peoples: the lever set the decisions read (see leaders.ts; neutral unless LEADER.enabled). */
+  /** Leaders of the peoples: their state and the lever set the decisions read (see leaders.ts). */
   leaders: Leaders;
   /** Wars, armies and sieges (see war.ts). */
   war: WarState;

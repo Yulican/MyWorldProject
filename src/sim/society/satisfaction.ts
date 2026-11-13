@@ -164,7 +164,8 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
         : Number.isFinite(cost)
           ? `Travel ${cost.toFixed(1)} to a seat of government`
           : 'No road to a seat of government',
-    value: connectionValue(cost),
+    // A Road Builder's people feel closer to their seat (the leader's share of the connection part).
+    value: connectionValue(cost) + (civ ? sim.leaders.conn[civ.id] : 0),
   });
   const served = comfortServed(sim.economy, cell);
   if (served > 0) terms.push({ label: `Comfort for ${Math.min(served, people)} of ${people}`, value: comfortValue(served, people) });
@@ -209,7 +210,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   sum += sim.war.siegeValue[cell] + conqueredValue(sim, cell);
   if (civ) {
     for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
-    sum += sim.leaders.sat[civ.id];
+    sum += sim.leaders.sat[civ.id] + sim.leaders.conn[civ.id];
   }
   return clampSatisfaction(sum);
 }

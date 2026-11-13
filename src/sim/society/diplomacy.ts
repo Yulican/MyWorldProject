@@ -697,8 +697,8 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         // Renegotiated, from the hubs that suit best now.
         for (const l of t.legs) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
         const amounts = second
-          ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier))
-          : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
+          ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier), dealMax(sim, t.a, t.b))
+          : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good, dealMax(sim, t.a, t.b));
         const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
         if (!ok || !mutualTrade(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
           record(`The trade agreement for ${what} ran out.`, capital(first.buyer), false);
@@ -758,7 +758,8 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
-        const amount = agreedAmount(civWant, civSpare, goods, b, a, g);
+        const most = dealMax(sim, a, b);
+        const amount = agreedAmount(civWant, civSpare, goods, b, a, g, most);
         if (amount < AGREEMENT_MIN_AMOUNT) continue;
         const hub = hubFor(b, a);
         if (hub < 0) continue;
@@ -774,7 +775,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           let amounts0: [number, number] | null = null;
           for (let h = 0; h < goods; h++) {
             if (h === g || triedGoods & (1 << h) || !free(a, b, h)) continue;
-            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h, spareVia(dip, civWant, civSpare, a, h, b));
+            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h, spareVia(dip, civWant, civSpare, a, h, b), most);
             if (amounts && (!amounts0 || amounts[0] > amounts0[0])) {
               h0 = h;
               amounts0 = amounts;
@@ -784,7 +785,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           tried++;
           triedGoods |= 1 << h0;
           counterHub = hubFor(a, b);
-          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, spareVia(dip, civWant, civSpare, a, h0, b)) : null;
+          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, spareVia(dip, civWant, civSpare, a, h0, b), most) : null;
           if (balanced) {
             best = h0;
             bestAmounts = balanced;
@@ -825,12 +826,18 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
 
 const agreementKey = (supplier: number, buyer: number, good: number) => (supplier * PAIRS + buyer) * 64 + good;
 
+/** Most units a year of one good in an agreement between `a` and `b`: AGREEMENT_MAX_AMOUNT, more if one of them is led by a Merchant Prince (lever dealAmount). */
+function dealMax(sim: Simulation, a: number, b: number): number {
+  const lev = sim.leaders.lev;
+  return AGREEMENT_MAX_AMOUNT * Math.max(lev[a * LEVERS + L.dealAmount], lev[b * LEVERS + L.dealAmount]);
+}
+
 /** Units a year `supplier` can deliver of `good` to `buyer`: what the buyer lacks and the supplier spares, at most AGREEMENT_MAX_AMOUNT. */
-function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, supplier: number, buyer: number, good: number): number {
+function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, supplier: number, buyer: number, good: number, max = AGREEMENT_MAX_AMOUNT): number {
   if (supplier * goods + good >= want.length || buyer * goods + good >= want.length) return 0;
   const lacks = want[buyer * goods + good] - spare[buyer * goods + good];
   const extra = spare[supplier * goods + good] - want[supplier * goods + good];
-  return Math.min(lacks, extra, AGREEMENT_MAX_AMOUNT);
+  return Math.min(lacks, extra, max);
 }
 
 /**
@@ -861,11 +868,12 @@ export function exchangeAmounts(
   good: number,
   counter: number,
   fromThird = 0,
+  max = AGREEMENT_MAX_AMOUNT,
 ): [number, number] | null {
-  const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good);
+  const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good, max);
   // The supplier needs only to ask for the counter good somewhere (most
   // peoples lack the same luxuries and spare the same wood and stone).
-  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter] + fromThird, AGREEMENT_MAX_AMOUNT);
+  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter] + fromThird, max);
   if (there < AGREEMENT_MIN_AMOUNT || back < AGREEMENT_MIN_AMOUNT) return null;
   const value = Math.min(there * PRICE[good], back * PRICE[counter]);
   const a = value / PRICE[good];

@@ -1,4 +1,4 @@
-// Leaders (Requirement "Anführer", measuring prototype): the game without leaders against the game with them, over
+// Leaders (Requirement "Anführer"): the game without leaders (enabled=0, tools only) against the game with them, over
 // many worlds, and the leaders themselves (terms, goals, attributes, caps, how much opposite attributes differ).
 // Usage: npx tsx tools/leaderStats.ts [worlds=12] [years=300] [variant ...]
 //   A variant is "name:key=value,key=value" with numbers of LEADER (src/sim/society/leaders.ts: enabled, attrScale,
@@ -8,7 +8,7 @@
 //   worlds), mute=lever+lever (the named levers of leaders.ts: L have no effect, to find which one causes a difference).
 //   "a18.travel=0.7" / "g1.settleOver=0.95": change one effect of attribute 18 / goal 1 (lever names: leaders.ts L; attribute and goal numbers: leaderRules.ts).
 //   The word "brief" prints the world numbers as one line per variant (many variants) and skips the leader tables.
-//   Default variants: off (enabled=0, the game without leaders) and on (enabled=1, the Requirement's numbers).
+//   Default variants: off (enabled=0, the simulation without leaders) and on (enabled=1, the game).
 //   Same seeds in every variant; the leaders draw from their own random sequence ("leader").
 // Prints: 1. world numbers per variant (growth, trade, diplomacy, wars, uprisings, satisfaction, peoples);
 //   2. per variant with leaders: terms, goals and completion, attributes, caps; 3. per attribute: how the peoples that
@@ -151,14 +151,16 @@ const runs: Run[] = [];
 for (const spec of variants) {
   const [name, rest = ''] = spec.split(':');
   for (const [k, v] of Object.entries(tables)) Object.assign(v, defaults[k]);
-  MUTE.clear();
+  MUTE.fill(0);
+  // The tool keeps a sample of every term (the game does not).
+  LEADER.records = 1;
   resetEffects();
   for (const kv of rest.split(',').filter(Boolean)) {
     const [k, v] = kv.split('=');
     if (k === 'mute') {
       for (const n of v.split('+')) {
         if (!(n in L)) throw new Error(`unknown lever ${n}`);
-        MUTE.add(L[n as keyof typeof L]);
+        MUTE[L[n as keyof typeof L]] = 1;
       }
       continue;
     }
@@ -255,7 +257,7 @@ for (const run of brief ? [] : runs) {
     );
   }
   const part = (i: number) => sum((s) => s.parts[i]);
-  console.log(`why goals fail (share of active-goal years where the part held): Wealth value x${LEADER.wealthFactor} ${pct(part(1), part(0))}, Wealth partners >= ${LEADER.wealthPartners} ${pct(part(2), part(0))}; Security calm (danger <= ${LEADER.securityDanger}, no loss) ${pct(part(4), part(3))}, a pact ${pct(part(5), part(3))}; Glory conquest ${pct(part(7), part(6))}, capital tier up ${pct(part(8), part(6))}`);
+  console.log(`why goals fail (share of active-goal years where the part held): Wealth value x${LEADER.wealthFactor} ${pct(part(1), part(0))}, Wealth partners >= ${LEADER.wealthPartners} ${pct(part(2), part(0))}; Security calm (danger <= ${LEADER.securityDanger}, no loss) ${pct(part(4), part(3))}, a pact ${pct(part(5), part(3))}; Glory war won as attacker ${pct(part(7), part(6))} (with a conquered district ${pct(part(9), part(6))}), capital tier up ${pct(part(8), part(6))}`);
   const reached = terms.filter((t) => t.doneYears >= 0);
   console.log(`goal reached at all: ${pct(reached.length, terms.length)} of terms; of those within 15-30 years in office: ${pct(reached.filter((t) => t.doneYears >= 15 && t.doneYears <= 30).length, reached.length)}`);
   // Attribute frequency (held at the end of a term or now).

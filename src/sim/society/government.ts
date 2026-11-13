@@ -147,6 +147,15 @@ function upkeepOf(type: number, m: number): number {
   return (m === 0 ? b.upkeepWood : b.upkeepStone) * (type === SEAT_TYPE ? GOV_TUNING.seatUpkeep : 1);
 }
 
+/** What the leader of the people owning `cell` makes of its government buildings' upkeep (Builder more, Frugal less) and of their cost and building time (Builder less). */
+function upkeepFactor(sim: Simulation, cell: number): number {
+  const o = sim.world.owner[cell] * LEVERS;
+  return sim.leaders.lev[o + L.govUpkeep] * sim.leaders.lev[o + L.upkeepAll];
+}
+const costFactor = (sim: Simulation, cell: number) => sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.buildCost];
+/** Wood or stone a government building costs at `site`: costOf with the leader's building cost. */
+const costAt = (sim: Simulation, site: number, type: number, m: number) => costOf(type, m) * costFactor(sim, site);
+
 /** Yearly upkeep of a government building in money (at market prices). */
 const upkeepGold = (type: number) => upkeepOf(type, 0) * PRICE[0] + upkeepOf(type, 1) * PRICE[1];
 
@@ -183,9 +192,10 @@ function listDistricts(sim: Simulation): void {
 }
 
 /** Yearly upkeep in money of a seat's project (0 without one, or if `seatsOnly` and it is no seat). */
-function projectUpkeep(gov: Government, seat: number, seatsOnly: boolean): number {
+function projectUpkeep(sim: Simulation, seat: number, seatsOnly: boolean): number {
+  const gov = sim.government;
   const type = gov.projectType[seat];
-  return gov.projectSite[seat] >= 0 && (!seatsOnly || type === SEAT_TYPE) ? upkeepGold(type) : 0;
+  return gov.projectSite[seat] >= 0 && (!seatsOnly || type === SEAT_TYPE) ? upkeepGold(type) * upkeepFactor(sim, seat) : 0;
 }
 
 /** Wood or stone the government keeps at `cell` for its buildings' upkeep (`years` of it). */
@@ -197,7 +207,7 @@ function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_
     if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
     sum += upkeepOf(economy.type[s], m);
   }
-  return sum * years * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.govUpkeep] * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.upkeepAll];
+  return sum * years * upkeepFactor(sim, cell);
 }
 
 /** A chronicle entry at a hex (simulation.ts: record); see diplomacy.ts: Record. */
@@ -348,7 +358,7 @@ function sumDistricts(sim: Simulation, year: GovernmentYear): void {
     const site = gov.projectSite[s];
     if (site >= 0) {
       for (let m = 0; m < MATERIAL_COUNT; m++) {
-        goodsNeed[s * MATERIAL_COUNT + m] += Math.max(0, costOf(gov.projectType[s], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m]);
+        goodsNeed[s * MATERIAL_COUNT + m] += Math.max(0, costAt(sim, site, gov.projectType[s], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m]);
       }
     }
     for (let m = 0; m < MATERIAL_COUNT; m++) goodsNeed[s * MATERIAL_COUNT + m] = Math.max(0, goodsNeed[s * MATERIAL_COUNT + m] - gov.stock[s * MATERIAL_COUNT + m]);
@@ -462,7 +472,7 @@ export function updateGovernmentUpkeep(sim: Simulation, owner: Uint8Array): void
       if (economy.state[s] !== SlotState.Standing) continue;
       const t = economy.type[s];
       const w = c * MATERIAL_COUNT;
-      const cheaper = sim.leaders.lev[sim.world.owner[c] * LEVERS + L.govUpkeep] * sim.leaders.lev[sim.world.owner[c] * LEVERS + L.upkeepAll];
+      const cheaper = upkeepFactor(sim, c);
       if (gov.stock[w] >= upkeepOf(t, 0) * cheaper && gov.stock[w + 1] >= upkeepOf(t, 1) * cheaper) {
         gov.stock[w] -= upkeepOf(t, 0) * cheaper;
         gov.stock[w + 1] -= upkeepOf(t, 1) * cheaper;
@@ -501,8 +511,9 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
       const st = economy.state[s];
       if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
       const t = economy.type[s];
-      buildUpkeep[d] += upkeepGold(t);
-      if (t === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(t);
+      // What the buildings really cost a year under this leader: the budget checks count with it.
+      buildUpkeep[d] += upkeepGold(t) * upkeepFactor(sim, c);
+      if (t === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(t) * upkeepFactor(sim, c);
     }
   }
   for (let s = 0; s < n; s++) gov.upkeep[s] = buildUpkeep[s];
@@ -534,19 +545,20 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
         gov.projectSite[s] = -1; // lost or taken
       } else if (type === SEAT_TYPE && !sim.seatSite[site]) {
         gov.projectSite[s] = -1; // seat planning found a better site, or none is worth it
-      } else if (gov.stock[w] - upkeepReserve(sim, site, 0, keep) >= costOf(type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1, keep) >= costOf(type, 1)) {
-        gov.stock[w] -= costOf(type, 0);
-        gov.stock[w + 1] -= costOf(type, 1);
+      } else if (gov.stock[w] - upkeepReserve(sim, site, 0, keep) >= costAt(sim, site, type, 0) && gov.stock[w + 1] - upkeepReserve(sim, site, 1, keep) >= costAt(sim, site, type, 1)) {
+        gov.stock[w] -= costAt(sim, site, type, 0);
+        gov.stock[w + 1] -= costAt(sim, site, type, 1);
         economy.type[slot] = type;
         economy.state[slot] = SlotState.Construction;
-        economy.work[slot] = BUILDINGS[type].years;
+        // A Builder's government builds as fast and cheap as its settlements.
+        economy.work[slot] = BUILDINGS[type].years * sim.leaders.lev[owner[site] * LEVERS + L.buildTime];
         economy.unpaid[slot] = 0;
         sim.hasBuildings[site] = 1;
         gov.built++;
         const d = gov.district[site];
         if (d >= 0) {
-          buildUpkeep[d] += upkeepGold(type);
-          if (type === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(type);
+          buildUpkeep[d] += upkeepGold(type) * upkeepFactor(sim, site);
+          if (type === SEAT_TYPE) seatBuildUpkeep[d] += upkeepGold(type) * upkeepFactor(sim, site);
         }
         if (type === SEAT_TYPE) sim.seatSite[site] = 0;
         gov.projectSite[s] = -1;
@@ -591,12 +603,15 @@ function freeGovSlot(sim: Simulation, cell: number): number {
 function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolean {
   const gov = sim.government;
   const budget = incomeShare(sim, sim.world.owner[seat]) * gov.potential[seat];
-  const upkeep = buildUpkeep[seat] + projectUpkeep(gov, seat, false) + districtPay(sim, seat);
+  const upkeep = buildUpkeep[seat] + projectUpkeep(sim, seat, false) + districtPay(sim, seat);
   const civ = sim.world.owner[seat];
   let seatUpkeep = 0;
-  for (const s of civSeatList[civ] ?? []) seatUpkeep += seatBuildUpkeep[s] + projectUpkeep(gov, s, true);
+  for (const s of civSeatList[civ] ?? []) seatUpkeep += seatBuildUpkeep[s] + projectUpkeep(sim, s, true);
   const seatBudget = civBudget[civ];
-  const fits = (t: number) => (t === SEAT_TYPE ? seatUpkeep : upkeep) + upkeepGold(t) <= (t === SEAT_TYPE ? seatBudget : budget);
+  const dearer = upkeepFactor(sim, seat);
+  const fits = (t: number) => (t === SEAT_TYPE ? seatUpkeep : upkeep) + upkeepGold(t) * dearer <= (t === SEAT_TYPE ? seatBudget : budget);
+  // A leader after glory has the capital built up first (lever capitalFirst): its growth goes before any other growth.
+  const capital = sim.leaders.lev[civ * LEVERS + L.capitalFirst] > 0 ? (sim.civs[civ]?.capital ?? -1) : -1;
   let bestSite = -1;
   let bestSlot = -1;
   let bestType = -1;
@@ -639,7 +654,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
         if (!buildingFits(sim, c, t) || !fits(t)) continue;
         const gain = capacityWith(sim, c, t, -1) - sim.cellCapacity[c];
         if (gain < 1) continue;
-        const score = Math.min(MILITARY_SCORE - 1, (gain / Math.max(1, goldCost(t))) * 10);
+        const score = c === capital ? MILITARY_SCORE - 0.5 + Math.min(0.4, gain / 1000) : Math.min(MILITARY_SCORE - 1, (gain / Math.max(1, goldCost(t))) * 10);
         if (score > bestScore) [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, score];
       }
     }
@@ -747,7 +762,7 @@ export function advanceGovernment(sim: Simulation): void {
       const site = gov.projectSite[seat];
       if (need < 0 && site >= 0) {
         for (let m = 0; m < MATERIAL_COUNT && need < 0; m++) {
-          const lack = costOf(gov.projectType[seat], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
+          const lack = costAt(sim, site, gov.projectType[seat], m) + upkeepReserve(sim, site, m) - gov.stock[site * MATERIAL_COUNT + m] - gov.incoming[site * MATERIAL_COUNT + m];
           if (lack > 0) [need, needM, needAmount] = [site, m, lack];
         }
       }
@@ -870,7 +885,7 @@ export function governmentOf(sim: Simulation, civ: number): District[] {
       const t = economy.type[s];
       const state = st === SlotState.Standing ? 'standing' : st === SlotState.Ruin ? 'ruin' : 'building';
       d.buildings.push({ cell: c, name: BUILDINGS[t].name, state });
-      if (state !== 'ruin') d.upkeep += upkeepGold(t);
+      if (state !== 'ruin') d.upkeep += upkeepGold(t) * upkeepFactor(sim, c);
     }
   }
   for (const d of byCell.values()) {
@@ -883,8 +898,8 @@ export function governmentOf(sim: Simulation, civ: number): District[] {
       cell: site,
       wood: gov.stock[w] + gov.incoming[w],
       stone: gov.stock[w + 1] + gov.incoming[w + 1],
-      needWood: costOf(t, 0) + upkeepReserve(sim, site, 0, UPKEEP_RESERVE_YEARS - 1),
-      needStone: costOf(t, 1) + upkeepReserve(sim, site, 1, UPKEEP_RESERVE_YEARS - 1),
+      needWood: costAt(sim, site, t, 0) + upkeepReserve(sim, site, 0, UPKEEP_RESERVE_YEARS - 1),
+      needStone: costAt(sim, site, t, 1) + upkeepReserve(sim, site, 1, UPKEEP_RESERVE_YEARS - 1),
     };
   }
   return [...byCell.values()].sort((a, b) => Number(b.capital) - Number(a.capital) || b.people - a.people || a.seat - b.seat);

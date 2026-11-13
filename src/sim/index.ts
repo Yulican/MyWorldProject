@@ -41,6 +41,8 @@ export { ALLY, Pact } from './society/pacts';
 export { REBEL_CHECK, inRebellion, isDissatisfied, measureRebellion, startRebellion } from './society/rebellion';
 export { civPacts, formAlliance, pactBetween, type PactInfo } from './society/alliance';
 export { governmentOf, type District, type GovBuilding } from './society/government';
+export { leaderOf, leaderTrait, type LeaderGoal, type LeaderInfo, type LeaderProgress, type LeaderTrait } from './society/leaderInfo';
+export { leaderName } from './society/leaders';
 export { hexEconomy, type BuildingInfo, type HexEconomy, type HexGovernment, type HexTrade } from './society/economy';
 export { resourceCapacityTerms } from './world/features';
 export {

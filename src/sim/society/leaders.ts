@@ -2,25 +2,32 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { GOV_TUNING } from './taxes';
 import type { Simulation } from './simulation';
 
-// Leaders (measuring prototype, "Design Documents/Requirement Anführer.md"), the leaf part: the numbers,
-// the lever set per people, the state and the event counters. No imports besides types, so war.ts,
-// diplomacy.ts, military.ts and the rest can read the levers without import cycles at load time.
-// The yearly rules (death, succession, attributes, goals) are in leaderRules.ts.
+// Leaders ("Design Documents/Requirement Anführer.md"), the leaf part: the numbers, the lever set per
+// people, the state and the event counters. No imports besides types, so war.ts, diplomacy.ts,
+// military.ts and the rest can read the levers without import cycles at load time.
+// The yearly rules (death, succession, attributes, goals) are in leaderRules.ts, what the app shows of a
+// leader in leaderInfo.ts.
 //
 // How the rule acts on the simulation: every decision that a leader may shift reads ONE number from the
 // lever set of its people (`sim.leaders.lev`, people x LEVERS, Float32). Additive levers are 0 and
-// multiplicative ones 1 when nobody changes them, so with LEADER.enabled = 0 the table stays untouched and
-// the simulation is exactly the one without leaders.
+// multiplicative ones 1 when nobody changes them. The set of a people is computed once whenever its leader,
+// an attribute or the goal's state changes (leaderRules.ts: recompute); decisions never look at attributes.
+// With LEADER.enabled = 0 (tools only: the comparison "without leaders") the table stays neutral.
+// All state is flat typed arrays per people (index = people id); names are indices into LEADER_STEMS.
 
 /** Peoples the tables have room for (MAX_CIV_ID + 1). */
 export const LEADER_CIVS = 256;
 /** Years of trade value kept per people. */
 export const TRADE_HISTORY = 10;
 
-/** Tunable numbers (tools/leaderStats.ts changes them by name); the Requirement's starting values. */
+/** Tunable numbers (tools/leaderStats.ts changes them by name); the Requirement's values. */
 export const LEADER = {
-  /** 1 = peoples have leaders (the prototype); 0 = the game without them (baseline). */
-  enabled: 0,
+  /** 1 = the peoples of a new simulation have leaders (the game); 0 = without them (tools/leaderStats.ts: the comparison). */
+  enabled: 1,
+  /** 1 = keep a sample of every ended term (`records`; tools and tests only, the game keeps none). */
+  records: 0,
+  /** 1 = takeover, death, new attribute and reached goal go into the chronicle (silent entries). */
+  chronicle: 1,
   /** Age at takeover: ageMin + one of (ageMax - ageMin + 1); death: from deathFrom with deathBase + deathStep per year over it, at most deathMax. */
   ageMin: 20,
   ageMax: 40,
@@ -49,7 +56,7 @@ export const LEADER = {
   /** Years of trade value before takeover that make the start value (the mean). */
   wealthYears: 5,
   wealthPartners: 0,
-  wealthFloor: 10,
+  wealthFloor: 15,
   securityYears: 5,
   securityDanger: 40,
   gloryYears: 10,
@@ -60,7 +67,7 @@ export const LEADER = {
   /** Caps (Requirement section 3). */
   capSatisfaction: 8,
   capRatioMin: 1.2,
-  capWarChance: 0.3,
+  capWarChance: 0.4,
   /** Attribute and goal effects scaled by these (1 = the table; 0.5 = half the deviation from the base; 0 = no effect). */
   attrScale: 1,
   goalScale: 1,
@@ -128,20 +135,54 @@ export const L = {
   lossTrade: 53,
   tripRange: 54,
   revenge: 55,
+  dealAmount: 56,
+  reserve: 57,
+  connection: 58,
+  tradeFirst: 59,
+  capitalFirst: 60,
 } as const;
-export const LEVERS = 56;
+export const LEVERS = 61;
 export const LEVER_NAMES = Object.keys(L) as (keyof typeof L)[];
 /** 1 for the multiplicative levers. */
 export const LEVER_KIND = new Uint8Array(LEVERS);
-for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge]) LEVER_KIND[k] = 1;
+for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge, L.dealAmount, L.reserve]) LEVER_KIND[k] = 1;
 
-/** Experiments: levers (L index) whose effect is switched off, to see which lever causes a difference (tools only; empty in the game). */
-export const MUTE = new Set<number>();
+/** Experiments: 1 for levers (L index) whose effect is switched off, to see which lever causes a difference (tools only; all 0 in the game). */
+export const MUTE = new Uint8Array(LEVERS);
 
 /** Kinds of experience (Requirement section 4, "Erlebtes"). */
 export const Ev = { WarWon: 0, WarLost: 1, Uprising: 2, Hardship: 3, Trade: 4, Pact: 5, BorderClosed: 6, Settled: 7, Peace: 8 } as const;
 export const EVENTS = 9;
-export const EVENT_NAMES = ['war won', 'war lost', 'uprising', 'hardship', 'trade success', 'pact/alliance', 'border closed', 'new settlements', 'long peace'] as const;
+export const EVENT_NAMES = ['war won', 'war lost / seat besieged', 'uprising', 'hardship', 'trade success', 'pact/alliance/joined a war', 'border closed', 'new settlements', 'long peace'] as const;
+
+/**
+ * Dynasty names (Requirement section 6): a people's line is an index into this list, its leaders are
+ * "Aron", "Aron II", "Aron III" ... Append only (the index is state).
+ */
+export const LEADER_STEMS = [
+  'Aron', 'Belka', 'Corin', 'Dava', 'Eskil', 'Fenna', 'Garin', 'Hesta', 'Ivor', 'Jora', 'Kelan', 'Lysa',
+  'Marek', 'Nessa', 'Orin', 'Pela', 'Quen', 'Rhea', 'Soren', 'Tavi', 'Ulric', 'Vessa', 'Wynn', 'Xara',
+  'Yorin', 'Zela', 'Alder', 'Brina', 'Cael', 'Dessa', 'Emrik', 'Fala', 'Gerod', 'Hild', 'Ilan', 'Jessa',
+  'Koren', 'Lena', 'Malin', 'Nardo', 'Odila', 'Perrin', 'Rasmus', 'Sela', 'Toren', 'Una', 'Varek', 'Wilda',
+  'Ander', 'Bera', 'Cassim', 'Doran', 'Elva', 'Finn', 'Greta', 'Harun', 'Isolde', 'Joss', 'Kira', 'Loran',
+  'Mira', 'Nolan', 'Orla', 'Pavo',
+] as const;
+
+const ROMAN: readonly [number, string][] = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+/** The name of the `counter`-th leader of line `stem`: "Aron", "Aron II" ... (display only). */
+export function leaderName(stem: number, counter: number): string {
+  const base = LEADER_STEMS[stem % LEADER_STEMS.length];
+  if (counter <= 1) return base;
+  let n = counter;
+  let roman = '';
+  for (const [v, r] of ROMAN) {
+    while (n >= v) {
+      roman += r;
+      n -= v;
+    }
+  }
+  return `${base} ${roman}`;
+}
 
 export const GOALS = ['none', 'Expansion', 'Wealth', 'Security', 'Glory'] as const;
 export const Goal = { None: 0, Expansion: 1, Wealth: 2, Security: 3, Glory: 4 } as const;
@@ -165,10 +206,13 @@ export type TermRecord = {
 
 export type Leaders = {
   rng: Rng;
+  /** 1 = the peoples of this simulation have leaders (LEADER.enabled when it was created; dismissLeaders sets 0). */
+  enabled: number;
   /** 1 while the people has a leader. */
   has: Uint8Array;
-  /** Dynasty counter (1 = first of the line), age at takeover, tick of takeover. */
-  counter: Uint8Array;
+  /** Dynasty: the line's name (index into LEADER_STEMS) and its counter (1 = first of the line); age at takeover, tick of takeover. */
+  stem: Uint16Array;
+  counter: Uint16Array;
   age0: Uint8Array;
   start: Int32Array;
   /** Attributes (1..25, 0 = empty): civ * 3 + slot. */
@@ -191,10 +235,13 @@ export type Leaders = {
   lastSettlements: Int32Array;
   lastDeals: Int32Array;
   lastPacts: Int32Array;
+  /** Settlements at the last yearly pass (the Expansion goal's progress). */
+  settlements: Int32Array;
   /** The lever set, people x LEVERS. */
   lev: Float32Array;
-  /** Satisfaction part "Leader" of the people (capped). */
+  /** Satisfaction part "Leader" of the people and what its leader adds to the connection part; together capped at LEADER.capSatisfaction. */
   sat: Float32Array;
+  conn: Float32Array;
   /** Trade value (goods x price, both peoples of a delivery) of the running year and the last year. */
   tradeValue: Float64Array;
   tradeLast: Float64Array;
@@ -211,9 +258,10 @@ export type Leaders = {
   goalM: Float64Array;
   /** Tick + 1 at which people b last beat or occupied a seat of people a: a * LEADER_CIVS + b (Grudge-bearer's revenge). */
   beaten: Int32Array;
-  /** Districts conquered as the attacker of a war that was won (Glory goal), this term. */
+  /** Districts conquered as the attacker of a war that was won, and wars won as the attacker (Glory goal), this term. */
   conquests: Uint16Array;
-  /** Samples of ended terms. */
+  wonAttack: Uint16Array;
+  /** Samples of ended terms (only with LEADER.records). */
   records: TermRecord[];
   /** Tallies for the tool. */
   stats: {
@@ -245,8 +293,10 @@ export function createLeaders(seed: number): Leaders {
   for (let c = 0; c < LEADER_CIVS; c++) setIdentity(lev, c);
   return {
     rng: createRng(deriveSeed(seed, 'leader')),
+    enabled: LEADER.enabled,
     has: new Uint8Array(LEADER_CIVS),
-    counter: new Uint8Array(LEADER_CIVS),
+    stem: new Uint16Array(LEADER_CIVS),
+    counter: new Uint16Array(LEADER_CIVS),
     age0: new Uint8Array(LEADER_CIVS),
     start: new Int32Array(LEADER_CIVS),
     attr: new Uint8Array(LEADER_CIVS * 3),
@@ -262,14 +312,17 @@ export function createLeaders(seed: number): Leaders {
     lastSettlements: new Int32Array(LEADER_CIVS),
     lastDeals: new Int32Array(LEADER_CIVS),
     lastPacts: new Int32Array(LEADER_CIVS),
+    settlements: new Int32Array(LEADER_CIVS),
     lev,
     sat: new Float32Array(LEADER_CIVS),
+    conn: new Float32Array(LEADER_CIVS),
     tradeValue: new Float64Array(LEADER_CIVS),
     tradeLast: new Float64Array(LEADER_CIVS),
     tradeHist: new Float64Array(LEADER_CIVS * TRADE_HISTORY),
     tradeCount: new Uint32Array(LEADER_CIVS),
     declared: new Uint16Array(LEADER_CIVS),
     conquests: new Uint16Array(LEADER_CIVS),
+    wonAttack: new Uint16Array(LEADER_CIVS),
     beaten: new Int32Array(LEADER_CIVS * LEADER_CIVS),
     uprisings: new Uint16Array(LEADER_CIVS),
     all: new Float64Array(MEASURES),
@@ -309,6 +362,7 @@ export function clearLeader(sim: Simulation, civ: number): void {
   const s = sim.leaders;
   s.has[civ] = 0;
   s.sat[civ] = 0;
+  s.conn[civ] = 0;
   setIdentity(s.lev, civ);
 }
 

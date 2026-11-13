@@ -35,7 +35,8 @@ test('both tax terms: +5 at 0 %, 0 at 10 %, -10 at 50 %; the rate for a term is 
 
 test('every settlement belongs to the district of its nearest seat of government', () => {
   const sim = createSimulation(generateWorld({ seed: 3 }));
-  runYears(sim, 150);
+  // 170 years: with leaders this world has exactly 10 settlements after 150.
+  runYears(sim, 170);
   const owner = sim.world.owner;
   const seats = seatsOf(sim, owner);
   let settlements = 0;

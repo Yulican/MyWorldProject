@@ -219,7 +219,8 @@ function upkeepWith(sim: Simulation, cell: number, material: number, extraA: num
   }
   if (extraA >= 0) sum += upkeepOfType(extraA, material);
   if (extraB >= 0) sum += upkeepOfType(extraB, material);
-  return sum;
+  // What the people really pay (a frugal leader's less): the plans count with it.
+  return sum * leaderLever(sim, cell, L.upkeepAll);
 }
 
 const upkeepOfType = (type: number, material: number) => (material === Material.Wood ? BUILDINGS[type].upkeepWood : BUILDINGS[type].upkeepStone);
@@ -247,10 +248,10 @@ function netFast(sim: Simulation, cell: number, material: number, extraA: number
   if (cell !== netCell || (extraA >= 0 && BUILDINGS[extraA].good === good) || (extraB >= 0 && BUILDINGS[extraB].good === good)) {
     return netWith(sim, cell, material, extraA, extraB);
   }
-  let upkeep = netBase[2 + material];
-  if (extraA >= 0) upkeep += upkeepOfType(extraA, material);
-  if (extraB >= 0) upkeep += upkeepOfType(extraB, material);
-  return netBase[material] - upkeep;
+  let extra = 0;
+  if (extraA >= 0) extra += upkeepOfType(extraA, material);
+  if (extraB >= 0) extra += upkeepOfType(extraB, material);
+  return netBase[material] - netBase[2 + material] - extra * leaderLever(sim, cell, L.upkeepAll);
 }
 
 /** Yearly wood and stone left after upkeep, with up to two extra standing types. */
@@ -312,7 +313,11 @@ function runCellEconomy(sim: Simulation, c: number, yearEnd: boolean): boolean {
   if (people > 0) {
     economy.stock[stock + Material.Wood] += harvestWith(sim, c, Good.Wood, -1, -1) / STEPS_PER_YEAR;
     economy.stock[stock + Material.Stone] += harvestWith(sim, c, Good.Stone, -1, -1) / STEPS_PER_YEAR;
+    // Grain and water its buildings make count as supply (up to PROVISIONS_MAX): the hex's supply follows the stock.
+    const grain = Math.min(economy.provisions[c * 2], PROVISIONS_MAX);
+    const water = Math.min(economy.provisions[c * 2 + 1], PROVISIONS_MAX);
     harvestLuxury(sim, c, yearEnd);
+    if (Math.min(economy.provisions[c * 2], PROVISIONS_MAX) !== grain || Math.min(economy.provisions[c * 2 + 1], PROVISIONS_MAX) !== water) updateCellSupply(sim, c);
   }
   let busy = false;
   let supplyChanged = false;
@@ -364,7 +369,9 @@ function runCellEconomy(sim: Simulation, c: number, yearEnd: boolean): boolean {
     // Satisfaction comes first while a settlement is about to turn unhappy: a lost settlement costs many people.
     const moodFirst = sim.satisfaction[c] < SATISFACTION_FIRST_BELOW;
     // Seats of government are the government's (government.ts).
-    const started = !busy && (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c)));
+    // A leader after wealth has trade buildings built first (lever tradeFirst), before growth and comfort.
+    const tradeFirst = !busy && yearEnd && leaderLever(sim, c, L.tradeFirst) > 0 && planTrade(sim, c);
+    const started = tradeFirst || (!busy && (planDeposit(sim, c) || (moodFirst ? planSatisfaction(sim, c) || planBuilding(sim, c) : planBuilding(sim, c) || planSatisfaction(sim, c))));
     if (started || (!busy && yearEnd && planTrade(sim, c))) supplyChanged = true;
     if (sim.trade.merchants[c] > 0) {
       sendMerchants(sim, c);
@@ -467,13 +474,13 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
       }
       const p = BUILDINGS[ptype];
       if (!isMaterial(p.good)) continue;
-      const pshare = pslot >= 0 ? REPAIR_SHARE : 1;
+      const pshare = (pslot >= 0 ? REPAIR_SHARE : 1) * leaderLever(sim, cell, L.buildCost);
       if (wood < p.wood * pshare || stone < p.stone * pshare) continue;
       const netWood2 = netFast(sim, cell, Material.Wood, ptype, -1);
       const netStone2 = netFast(sim, cell, Material.Stone, ptype, -1);
       if (netWood2 < 0 || netStone2 < 0) continue;
       if (netFast(sim, cell, Material.Wood, ptype, type) < 0 || netFast(sim, cell, Material.Stone, ptype, type) < 0) continue;
-      const build = p.years * pshare;
+      const build = p.years * (pslot >= 0 ? REPAIR_SHARE : 1) * leaderLever(sim, cell, L.buildTime);
       const wait =
         build +
         Math.max(

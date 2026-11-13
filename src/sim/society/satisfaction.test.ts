@@ -30,6 +30,8 @@ import {
   stepSimulation,
   type Simulation,
 } from './simulation';
+import { dismissLeaders } from './leaderRules';
+import { TROOP_TYPES, Troop } from './military';
 import { SUPPLY_KINDS } from './supply';
 import { REBEL_CHECK, measureRebellion } from './rebellion';
 
@@ -236,6 +238,8 @@ test('dissatisfied settlements stronger than their mother rise up as new peoples
 test('a lone dissatisfied settlement weaker than its mother does not rise up but loses people', () => {
   const sim = createSimulation(generateWorld({ seed: 5 }));
   runYears(sim, 150);
+  // The base rule: without a leader's shift of the rebellion threshold (Weak Hand, Tyrant, Iron Fist).
+  dismissLeaders(sim);
   const owner = cellOwners(sim);
   // A small settlement: its militia (2.5 % of its people) is weaker than the mother.
   const civ = sim.civs[owner[sim.world.startCell]]!;
@@ -243,6 +247,10 @@ test('a lone dissatisfied settlement weaker than its mother does not rise up but
     (c) => owner[c] === civ.id && c !== civ.capital && sim.cellPop[c] > 40 && sim.cellPop[c] < 100,
   );
   assert.ok(lone !== undefined, 'found a small settlement');
+  // The mother has soldiers (in this world's history with leaders she has none by now) and the money to pay them.
+  sim.military.soldiers[civ.capital * TROOP_TYPES + Troop.Melee] = 20;
+  sim.military.strength[civ.id] = 20;
+  sim.government.treasury[civ.capital] += 1000;
   const peoples = livingCivilizations(sim).length;
   const groups = sim.migrations.groups;
   for (let q = 0; q < 16; q++) {
