@@ -1,13 +1,15 @@
 import { ArmyState, DIRECTION_COUNT, MAX_ARMIES, hexDistance, isWaterBiome, livingCivilizations, type Simulation } from '../sim';
 
 // Benchmark only (the "war" scenario, approved by the user): the game's caps
-// leave fewer than 32 armies on the map (one war per people, 1 + up to 3
-// armies per war), so the map is given extra army markers up to the world
-// cap of 32, the worst case it must draw. They exist only on the map
+// leave most worlds fewer than 32 armies on the map (one war per people, 1 +
+// up to 3 armies per war; 21 to 32 with leaders), so the map is given extra
+// army markers up to the world cap of 32, the worst case it must draw. They exist only on the map
 // (worldStore.mapArmies), never in the simulation, so no game rule changes.
-// A mix of what real armies do: marching between a people's seat and its
-// enemy's (one hex a week, back and forth, retreating on the way home),
-// besieging an enemy seat and gathering at home. Likewise siege frames: the
+// A mix of what real armies do: marching between a people's settlement and
+// its enemy's capital (one hex a week along a land route found once per
+// world, back and forth, retreating on the way home), besieging an enemy seat
+// and gathering at home. The first decoy always marches: worlds with leaders
+// field up to 32 real armies, so often only a few decoys are left to show. Likewise siege frames: the
 // alliance blocks break most real sieges, so real seats of peoples at war get
 // map-only frames up to SIEGE_FRAMES (they follow the wars with every map
 // snapshot and are part of the territory tiles' fingerprint like real ones).
@@ -27,10 +29,23 @@ export type ExtraArmies = {
  */
 export const SIEGE_FRAMES = 6;
 
-type Decoy = { civ: number; cell: number; home: number; away: number; kind: number; state: number };
+type Decoy = {
+  civ: number;
+  cell: number;
+  home: number;
+  away: number;
+  kind: number;
+  state: number;
+  /** Marching decoys: the land route from home (first) towards `away`, and where on it the decoy stands. */
+  route: Int32Array;
+  at: number;
+};
 
 /** Kinds by slot: two marching, one besieging, one gathering. */
 const KINDS = [0, 1, 0, 2] as const;
+/** A marcher whose enemy is beyond the sea walks this many hexes of its own coast instead. */
+const DETOUR = 12;
+const NO_ROUTE = new Int32Array(0);
 
 export function armyDecoys(): ExtraArmies {
   let forSim: Simulation | null = null;
@@ -60,7 +75,7 @@ export function armyDecoys(): ExtraArmies {
         tick = sim.tick;
       }
       // One step a simulated week.
-      for (; tick < sim.tick; tick++) for (const d of decoys) step(sim, d);
+      for (; tick < sim.tick; tick++) for (let i = 0; i < decoys.length; i++) step(decoys[i]);
       let k = from;
       for (let i = 0; i < decoys.length && k < MAX_ARMIES; i++) {
         const d = decoys[i];
@@ -75,7 +90,11 @@ export function armyDecoys(): ExtraArmies {
   };
 }
 
-/** MAX_ARMIES decoys over the living peoples in turn: home is a settled hex of theirs, away their enemy's capital (or the nearest other people's). */
+/**
+ * MAX_ARMIES decoys over the living peoples in turn: home is a settled hex of theirs, away their enemy's capital (or
+ * the nearest other people's). A marcher takes the first home (and, if its people has none, the first people) with a
+ * land route to walk.
+ */
 function makeDecoys(sim: Simulation): Decoy[] {
   const { world } = sim;
   const civs = livingCivilizations(sim).filter((c) => c.capital >= 0);
@@ -88,16 +107,12 @@ function makeDecoys(sim: Simulation): Decoy[] {
     if (!list) homes.set(o, (list = []));
     list.push(c);
   }
-  const decoys: Decoy[] = [];
-  for (let i = 0; i < MAX_ARMIES; i++) {
-    const civ = civs[i % civs.length];
-    const list = homes.get(civ.id) ?? [civ.capital];
-    const home = list[Math.floor(i / civs.length) % list.length];
-    let away = sim.civs[sim.war.enemy[civ.id]]?.capital ?? -1;
+  const awayFrom = (civ: number, home: number): number => {
+    let away = sim.civs[sim.war.enemy[civ]]?.capital ?? -1;
     if (away < 0) {
       let best = Infinity;
       for (const o of civs) {
-        if (o.id === civ.id) continue;
+        if (o.id === civ) continue;
         const d = hexDistance(world, home, o.capital);
         if (d < best) {
           best = d;
@@ -105,35 +120,94 @@ function makeDecoys(sim: Simulation): Decoy[] {
         }
       }
     }
-    if (away < 0) away = home;
+    return away < 0 ? home : away;
+  };
+  const search = { from: new Int32Array(world.cellCount), queue: new Int32Array(world.cellCount) };
+  const decoys: Decoy[] = [];
+  for (let i = 0; i < MAX_ARMIES; i++) {
     const kind = KINDS[i % KINDS.length];
+    let civ = civs[i % civs.length].id;
+    const list = homes.get(civ) ?? [sim.civs[civ]!.capital];
+    const first = Math.floor(i / civs.length) % list.length;
+    let home = list[first];
+    let away = awayFrom(civ, home);
+    let route: Int32Array = NO_ROUTE;
+    if (kind === 0) {
+      // The first home with a way to walk, of this people or else of the next ones.
+      for (let p = 0; p < civs.length && route.length < 2; p++) {
+        const id = civs[(i + p) % civs.length].id;
+        const own = homes.get(id) ?? [sim.civs[id]!.capital];
+        for (let h = 0; h < own.length && route.length < 2; h++) {
+          const cell = own[(first + h) % own.length];
+          const target = awayFrom(id, cell);
+          const found = landRoute(sim, cell, target, search);
+          if (found.length < 2) continue;
+          [civ, home, away, route] = [id, cell, target, found];
+        }
+      }
+    }
     // Besiegers stand on the enemy seat; the others start at home.
     const cell = kind === 1 ? away : home;
-    decoys.push({ civ: civ.id, cell, home, away, kind, state: kind === 2 ? ArmyState.Gathering : ArmyState.Marching });
+    decoys.push({ civ, cell, home, away, kind, state: kind === 2 ? ArmyState.Gathering : ArmyState.Marching, route, at: 0 });
   }
   return decoys;
 }
 
-/** A marching decoy steps one land hex towards its target: away while marching, home while retreating; then turns. */
-function step(sim: Simulation, d: Decoy): void {
-  if (d.kind !== 0) return;
+/**
+ * The shortest way over land from `home` to the hex nearest to `target` that can be reached (the target itself when
+ * no sea lies between); when that is `home`, the way to a hex DETOUR steps along its own land. One hex (no way) only
+ * on an island of one hex.
+ */
+function landRoute(sim: Simulation, home: number, target: number, search: { from: Int32Array; queue: Int32Array }): Int32Array {
   const { world } = sim;
-  const target = d.state === ArmyState.Retreating ? d.home : d.away;
-  let next = -1;
-  let best = hexDistance(world, d.cell, target);
-  for (let k = 0; k < DIRECTION_COUNT; k++) {
-    const nb = world.neighbors[d.cell * DIRECTION_COUNT + k];
-    if (nb < 0 || isWaterBiome(world.biome[nb])) continue;
-    const dist = hexDistance(world, nb, target);
-    if (dist < best) {
-      best = dist;
-      next = nb;
+  const { from, queue } = search;
+  from.fill(-1);
+  from[home] = home;
+  queue[0] = home;
+  let end = home;
+  let endDistance = hexDistance(world, home, target);
+  let detour = home;
+  let detourSteps = 0;
+  // Breadth first: `steps` hexes from home for the cells queue[levelStart..levelEnd).
+  let steps = 0;
+  let levelEnd = 1;
+  for (let head = 0, tail = 1; head < tail; head++) {
+    if (head === levelEnd) {
+      steps++;
+      levelEnd = tail;
+    }
+    const cell = queue[head];
+    const d = hexDistance(world, cell, target);
+    if (d < endDistance) {
+      endDistance = d;
+      end = cell;
+    }
+    if (steps <= DETOUR && steps > detourSteps) {
+      detourSteps = steps;
+      detour = cell;
+    }
+    for (let k = 0; k < DIRECTION_COUNT; k++) {
+      const nb = world.neighbors[cell * DIRECTION_COUNT + k];
+      if (nb < 0 || from[nb] >= 0 || isWaterBiome(world.biome[nb])) continue;
+      from[nb] = cell;
+      queue[tail++] = nb;
     }
   }
-  // Arrived, or no land way closer: turn around.
-  if (next < 0) {
-    d.state = d.state === ArmyState.Retreating ? ArmyState.Marching : ArmyState.Retreating;
-    return;
-  }
-  d.cell = next;
+  if (end === home) end = detour;
+  let length = 1;
+  for (let c = end; c !== home; c = from[c]) length++;
+  const route = new Int32Array(length);
+  for (let c = end, i = length - 1; i >= 0; c = from[c], i--) route[i] = c;
+  return route;
+}
+
+/** A marching decoy steps one hex along its route every week: away while marching, home while retreating; at an end it turns. */
+function step(d: Decoy): void {
+  const last = d.route.length - 1;
+  if (d.kind !== 0 || last < 1) return;
+  if (d.state === ArmyState.Retreating) {
+    if (d.at === 0) d.state = ArmyState.Marching;
+  } else if (d.at === last) d.state = ArmyState.Retreating;
+  d.at += d.state === ArmyState.Retreating ? -1 : 1;
+  d.cell = d.route[d.at];
 }

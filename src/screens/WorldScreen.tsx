@@ -7,6 +7,7 @@ import { ChronicleDialog } from '../components/ChronicleDialog';
 import { CivPanel } from '../components/CivPanel';
 import { DiplomacyPanel } from '../components/DiplomacyPanel';
 import { GovernmentPanel } from '../components/GovernmentPanel';
+import { LeaderPanel } from '../components/LeaderPanel';
 import { WarPanel } from '../components/WarPanel';
 import { HexInfoPanel, hexWar, strategicStock } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
@@ -38,6 +39,7 @@ type OpenPanel =
   | { kind: 'peoples' }
   | { kind: 'diplomacy' }
   | { kind: 'government' }
+  | { kind: 'leader' }
   | { kind: 'war' };
 
 export function WorldScreen() {
@@ -160,11 +162,13 @@ export function WorldScreen() {
             onClose={closePanel}
             onDiplomacy={() => setPanel({ kind: 'diplomacy' })}
             onGovernment={() => setPanel({ kind: 'government' })}
+            onLeader={() => setPanel({ kind: 'leader' })}
             onWar={() => setPanel({ kind: 'war' })}
           />
         )}
         {sim && panel.kind === 'diplomacy' && <DiplomacyPanel sim={sim} onClose={closePanel} />}
         {sim && panel.kind === 'government' && <GovernmentPanel sim={sim} onClose={closePanel} />}
+        {sim && panel.kind === 'leader' && <LeaderPanel sim={sim} onClose={closePanel} />}
         {sim && panel.kind === 'war' && <WarPanel sim={sim} onClose={closePanel} />}
         {sim && entry && (
           <ChronicleDialog

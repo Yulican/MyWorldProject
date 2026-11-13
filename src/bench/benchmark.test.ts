@@ -83,6 +83,13 @@ test('the unrest scenario makes every settlement but the capitals break away', a
   const held = (civs: typeof rebels) => civs.reduce((n, c) => n + c.territory, 0);
   const old = livingCivilizations(sim).filter((c) => c.origin !== 'revolution');
   assert.ok(held(rebels) > held(old), `rebels ${held(rebels)} hexes, others ${held(old)}`);
+  // Peoples founded by the setup have no leader until the year's end (the panel shows "No leader yet"); the world
+  // runs on with them and every people has one after it.
+  const { leaderOf } = await import('../sim');
+  assert.ok(rebels.some((c) => leaderOf(sim, c.id) === null), 'new peoples without a leader');
+  for (const c of old) assert.ok(leaderOf(sim, c.id), `the ${c.name} kept their leader`);
+  for (let t = 0; t < TICKS_PER_YEAR; t++) stepSimulation(sim);
+  for (const c of livingCivilizations(sim)) assert.ok(leaderOf(sim, c.id), `the ${c.name} have a leader after the year's end`);
   assert.equal(SCENARIOS.unrest.unrest, true);
 });
 
@@ -175,7 +182,7 @@ test('the war scenario puts peoples at war in pairs with as many armies as the c
   }
   for (const k of all.values()) assert.ok(k <= WAR.maxArmies, `${k} armies of one people`);
   for (const k of main.values()) assert.equal(k, WAR.mainArmies);
-  // 32 armies (WAR.worldArmies) are out of reach under the caps: one war per people, 1 + up to 3 armies per war.
+  // At most 32 armies (WAR.worldArmies); the caps (one war per people, 1 + up to 3 armies per war) keep most worlds below.
   assert.ok(w.armies <= WAR.worldArmies);
   assert.ok(w.armies >= 10 && w.armies >= w.wars + 2, `${w.armies} armies in ${w.wars} wars`);
   const sieges = w.siege.reduce((n, v) => n + v, 0);
@@ -217,17 +224,32 @@ test('the war scenario draws 32 armies: real ones plus map-only decoys that keep
   const markers = { cell: new Int32Array(MAX_ARMIES), civ: new Uint8Array(MAX_ARMIES), state: new Uint8Array(MAX_ARMIES) };
   const decoys = armyDecoys();
   assert.equal(decoys.fill(sim, markers, real), 32);
-  const before = markers.cell.slice(real);
   for (let i = real; i < 32; i++) {
     assert.ok(!isWaterBiome(sim.world.biome[markers.cell[i]]), 'on land');
     assert.ok(sim.civs[markers.civ[i]], 'a living people');
   }
-  for (let t = 0; t < 4; t++) stepSimulation(sim);
-  // Decoys never enter the simulation: the map's count is the real armies' plus theirs, filled to 32 again.
-  assert.equal(decoys.fill(sim, markers, real), 32);
-  let moved = 0;
-  for (let i = 0; i < before.length; i++) if (markers.cell[real + i] !== before[i]) moved++;
-  assert.ok(moved > 0, 'decoys march');
+  // What the map would show without any real army: all 32 decoys, half of them marching. With leaders the worlds
+  // field 21 to 32 real armies, so how many decoys are left to show depends on the world's history.
+  const alone = armyDecoys();
+  const all = { cell: new Int32Array(MAX_ARMIES), civ: new Uint8Array(MAX_ARMIES), state: new Uint8Array(MAX_ARMIES) };
+  assert.equal(alone.fill(sim, all, 0), 32);
+  // A decoy marches when its marker stands on another hex than the week before.
+  const moved = new Set<number>();
+  const movedAlone = new Set<number>();
+  for (let t = 0; t < 4; t++) {
+    const before = markers.cell.slice();
+    const beforeAlone = all.cell.slice();
+    stepSimulation(sim);
+    // Decoys never enter the simulation: the map's count is the real armies' plus theirs, filled to 32 again.
+    assert.equal(decoys.fill(sim, markers, real), 32);
+    assert.equal(alone.fill(sim, all, 0), 32);
+    for (let i = real; i < 32; i++) if (markers.cell[i] !== before[i]) moved.add(i);
+    for (let i = 0; i < 32; i++) if (all.cell[i] !== beforeAlone[i]) movedAlone.add(i);
+  }
+  // The first decoy shown always marches, and every marching decoy found a way to walk.
+  if (real < 32) assert.ok(moved.has(real), 'decoys march');
+  assert.equal(movedAlone.size, 16, 'every marching decoy marches');
+  for (const i of movedAlone) assert.ok(!isWaterBiome(sim.world.biome[all.cell[i]]), 'marching on land');
   assert.equal(decoys.fill(sim, markers, sim.war.armies), 32);
   // Siege frames: real ones plus map-only decoys on seats of peoples at war, at least 3 (SIEGE_FRAMES when there are enough seats).
   const siege = Uint8Array.from(sim.war.siege);
