@@ -14,6 +14,8 @@ import type { Simulation } from './simulation';
 
 /** Peoples the tables have room for (MAX_CIV_ID + 1). */
 export const LEADER_CIVS = 256;
+/** Years of trade value kept per people. */
+export const TRADE_HISTORY = 10;
 
 /** Tunable numbers (tools/leaderStats.ts changes them by name); the Requirement's starting values. */
 export const LEADER = {
@@ -43,8 +45,10 @@ export const LEADER = {
   /** Goal completion: Expansion settlements x and at least +n; Wealth trade value x, partners and a floor for the start value; Security years; Glory years of +2 satisfaction. */
   expansionFactor: 1.5,
   expansionMin: 2,
-  wealthFactor: 1.8,
-  wealthPartners: 2,
+  wealthFactor: 1.5,
+  /** Years of trade value before takeover that make the start value (the mean). */
+  wealthYears: 5,
+  wealthPartners: 0,
   wealthFloor: 10,
   securityYears: 5,
   securityDanger: 40,
@@ -174,6 +178,9 @@ export type Leaders = {
   /** Trade value (goods x price, both peoples of a delivery) of the running year and the last year. */
   tradeValue: Float64Array;
   tradeLast: Float64Array;
+  /** Ring of the last TRADE_HISTORY yearly trade values per people and the years counted. */
+  tradeHist: Float64Array;
+  tradeCount: Uint32Array;
   /** Wars the people declared in the running year (a measure), uprisings suffered likewise. */
   declared: Uint16Array;
   uprisings: Uint16Array;
@@ -235,6 +242,8 @@ export function createLeaders(seed: number): Leaders {
     sat: new Float32Array(LEADER_CIVS),
     tradeValue: new Float64Array(LEADER_CIVS),
     tradeLast: new Float64Array(LEADER_CIVS),
+    tradeHist: new Float64Array(LEADER_CIVS * TRADE_HISTORY),
+    tradeCount: new Uint32Array(LEADER_CIVS),
     declared: new Uint16Array(LEADER_CIVS),
     conquests: new Uint16Array(LEADER_CIVS),
     uprisings: new Uint16Array(LEADER_CIVS),

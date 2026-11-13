@@ -1,7 +1,7 @@
 import { DIRECTION_COUNT } from '../hex';
 import { PAIRS } from './diplomacy';
 import { capacityAfterRepair, isSettlementTarget } from './economy';
-import { EVENTS, Ev, Goal, L, LEADER, MUTE, LEADER_CIVS, LEVERS, LEVER_KIND, MEASURES, M, clearLeader, type TermRecord } from './leaders';
+import { EVENTS, Ev, Goal, L, LEADER, MUTE, TRADE_HISTORY, LEADER_CIVS, LEVERS, LEVER_KIND, MEASURES, M, clearLeader, type TermRecord } from './leaders';
 import type { Simulation } from './simulation';
 import { WAR } from './war';
 
@@ -17,39 +17,40 @@ export type Effect = [lever: number, value: number];
 /** The 25 attributes, index 1..25 (Requirement section 4); effects are deviations from the base values. */
 export const ATTRS: { name: string; fx: Effect[] }[] = [
   { name: '', fx: [] },
-  { name: 'Warmonger', fx: [[L.warChance, 0.15], [L.ratio, -0.7], [L.sold, 1.2]] },
+  { name: 'Warmonger', fx: [[L.warChance, 0.2], [L.ratio, -0.7], [L.sold, 1.2]] },
   { name: 'Pacifist', fx: [[L.neverWar, 1], [L.openTrust, -10], [L.giveUp, 0.15]] },
   { name: 'Cautious Strategist', fx: [[L.ratio, 1], [L.warChance, 0.1]] },
   { name: 'Stubborn', fx: [[L.giveUp, -0.25], [L.exhaust, 5], [L.satWar, -3]] },
   { name: 'Craven', fx: [[L.giveUp, 0.2], [L.dangerMul, 0.8]] },
   { name: 'Drillmaster', fx: [[L.strength, 1.25], [L.sold, 1.3]] },
-  { name: 'Silver Tongue', fx: [[L.trust, 10], [L.trustBase, 15]] },
+  { name: 'Silver Tongue', fx: [[L.trust, 10], [L.trustBase, 5]] },
   { name: 'Xenophobe', fx: [[L.openTrust, 20], [L.closeTrust, 15], [L.tollAsk, 2]] },
-  { name: 'Oathkeeper', fx: [[L.allyTrust, -20], [L.pactTrust, -15], [L.oath, 1]] },
+  { name: 'Oathkeeper', fx: [[L.allyTrust, -15], [L.pactTrust, -10], [L.oath, 1]] },
   { name: 'Opportunist', fx: [[L.ratioBusy, -0.8], [L.ratioCalm, 0.5]] },
   { name: 'Grudge-bearer', fx: [[L.moodYears, 20], [L.warTrust, -20], [L.truce, 10]] },
-  { name: 'Merchant Prince', fx: [[L.tradeTrust, -20], [L.tollPay, 0.5], [L.income, 0.1]] },
+  { name: 'Merchant Prince', fx: [[L.tradeTrust, -15], [L.tollPay, 0.5], [L.income, 0.1]] },
   { name: 'Generous', fx: [[L.margin, 7], [L.sat, 4]] },
   { name: 'Tax Hawk', fx: [[L.margin, -5], [L.income, 0.15], [L.sat, -3]] },
   { name: 'Builder', fx: [[L.buildFrom, -0.2], [L.govUpkeep, 1.2]] },
   { name: 'Frugal', fx: [[L.income, -0.15], [L.govUpkeep, 0.75], [L.buildFrom, 0.1]] },
   { name: 'Prospector', fx: [[L.resMul, 2]] },
-  { name: 'Pioneer', fx: [[L.travel, 0.5], [L.settleOver, 0.77], [L.sat, -2]] },
-  { name: 'Homebody', fx: [[L.travel, 2], [L.sat, 3]] },
+  { name: 'Pioneer', fx: [[L.travel, 0.7], [L.settleOver, 0.95], [L.sat, -2]] },
+  { name: 'Homebody', fx: [[L.travel, 1.5], [L.sat, 3]] },
   { name: 'Beloved', fx: [[L.sat, 5]] },
   { name: 'Tyrant', fx: [[L.sat, -6], [L.rebel, 2]] },
   { name: 'Iron Fist', fx: [[L.rebel, 1.5], [L.sat, -2], [L.sold, 1.1]] },
   { name: 'Weak Hand', fx: [[L.rebel, 0.6], [L.sat, 3]] },
   { name: 'Devout', fx: [[L.devotion, 0.05], [L.sat, 1]] },
-  { name: 'Skeptic', fx: [[L.devotion, -0.03], [L.margin, -2]] },
+  // Removed for now (the player cannot counter it; a replacement is being designed): never drawn, no effect, the slot stays free.
+  { name: 'Skeptic', fx: [] },
 ];
 export const ATTR_COUNT = 25;
 
 /** The goals' effects while active (halved by LEADER.goalHalf once reached): index Goal. */
 export const GOAL_FX: Effect[][] = [
   [],
-  [[L.settleOver, 0.85], [L.warPop, 1.5], [L.buildFrom, -0.1]],
-  [[L.tradeTrust, -10], [L.income, 0.1]],
+  [[L.settleOver, 0.98], [L.warPop, 1.5], [L.buildFrom, -0.1]],
+  [[L.tradeTrust, -5], [L.income, 0.1]],
   [[L.warChanceMul, 0.5], [L.pactTrust, -10], [L.threat, -15], [L.strength, 1.1]],
   [[L.warChanceMul, 1.5], [L.ratio, -0.5], [L.satGlory, 2]],
 ];
@@ -61,6 +62,9 @@ for (const [a, b] of EXCLUDE_PAIRS) {
   excludes[a * 26 + b] = 1;
   excludes[b * 26 + a] = 1;
 }
+/** Attributes taken out of the game for now (never drawn or inherited). */
+const REMOVED = new Uint8Array(26);
+REMOVED[25] = 1;
 const PACIFIST = 2;
 const HOMEBODY = 19;
 /** Whether attribute `a` may not go with goal `g`. */
@@ -181,6 +185,7 @@ export function resetLeaderCiv(sim: Simulation, civ: number): void {
   s.lastSettlements[civ] = 0;
   s.tradeValue[civ] = 0;
   s.tradeLast[civ] = 0;
+  s.tradeCount[civ] = 0;
   clearLeader(sim, civ);
 }
 
@@ -189,6 +194,7 @@ const randInt = (sim: Simulation, n: number) => Math.floor(sim.leaders.rng() * n
 /** Whether attribute `a` may be added to the leader of `civ`: not present, no exclusion pair, not against the goal. */
 function allowed(sim: Simulation, civ: number, a: number): boolean {
   const s = sim.leaders;
+  if (REMOVED[a]) return false;
   for (let i = 0; i < 3; i++) {
     const h = s.attr[civ * 3 + i];
     if (h === a || (h !== 0 && excludes[h * 26 + a])) return false;
@@ -307,6 +313,16 @@ function goalMeasure(sim: Simulation, civ: number, goal: number): number {
   return 0;
 }
 
+/** Mean trade value of the last LEADER.wealthYears years (a calmer base than one year). */
+function tradeAverage(sim: Simulation, civ: number): number {
+  const s = sim.leaders;
+  const n = Math.min(s.tradeCount[civ], LEADER.wealthYears);
+  if (n === 0) return s.tradeLast[civ];
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += s.tradeHist[civ * TRADE_HISTORY + ((s.tradeCount[civ] - 1 - i) % TRADE_HISTORY)];
+  return sum / n;
+}
+
 /** A new leader of `civ`; `pred` = the predecessor's attributes (empty for a new dynasty). */
 function startLeader(sim: Simulation, civ: number, pred: readonly number[]): void {
   const s = sim.leaders;
@@ -335,7 +351,8 @@ function startLeader(sim: Simulation, civ: number, pred: readonly number[]): voi
     st.inheritChances++;
     if (s.rng() < LEADER.inherit) {
       first = pred[randInt(sim, pred.length)];
-      st.inherited++;
+      if (REMOVED[first]) first = 0;
+      else st.inherited++;
     }
   }
   if (LEADER.forceAttr > 0) first = LEADER.forceAttr;
@@ -345,7 +362,7 @@ function startLeader(sim: Simulation, civ: number, pred: readonly number[]): voi
   const goal = chooseGoal(sim, civ);
   s.goal[civ] = goal;
   st.goalsChosen[goal]++;
-  s.goalBase[civ] = goal === Goal.Wealth ? Math.max(LEADER.wealthFloor, s.tradeLast[civ]) : goalMeasure(sim, civ, goal);
+  s.goalBase[civ] = goal === Goal.Wealth ? Math.max(LEADER.wealthFloor, tradeAverage(sim, civ)) : goalMeasure(sim, civ, goal);
   st.started++;
   recompute(sim, civ);
 }
@@ -428,6 +445,7 @@ export function updateLeaders(sim: Simulation): void {
   // Trade value counts per year.
   for (let civ = 1; civ < LEADER_CIVS; civ++) {
     s.tradeLast[civ] = s.tradeValue[civ];
+    if (sim.civs[civ]) s.tradeHist[civ * TRADE_HISTORY + (s.tradeCount[civ]++ % TRADE_HISTORY)] = s.tradeValue[civ];
     s.tradeValue[civ] = 0;
   }
 }
