@@ -442,8 +442,10 @@ test('the decided numbers of the attributes and goals', () => {
   assert.equal(fx(attr('Builder'), L.buildFrom), -0.1);
   assert.equal(fx(attr('Builder'), L.buildCost), 0.7);
   assert.equal(fx(attr('Builder'), L.buildTime), 0.7);
-  assert.equal(fx(attr('Builder'), L.govUpkeep), 1.2);
+  assert.equal(fx(attr('Builder'), L.govUpkeep), undefined, 'no dearer government upkeep');
   assert.ok(Math.abs(WAR.sendShare + fx(attr('Craven'), L.sendShare)! - 0.25) < 1e-9, 'Craven sends 25 %');
+  assert.equal(fx(attr('Craven'), L.sold), 0.85);
+  assert.equal(fx(attr('Craven'), L.giveUp), 0.2);
   assert.equal(fx(attr('Merchant Prince'), L.load), 2);
   assert.equal(fx(attr('Merchant Prince'), L.tripRange), 1.2);
   assert.equal(fx(attr('Merchant Prince'), L.dealAmount), 1.5);
@@ -451,8 +453,8 @@ test('the decided numbers of the attributes and goals', () => {
   assert.equal(fx(attr('Merchant Prince'), L.tollPay), 0.5);
   assert.equal(fx(attr('Merchant Prince'), L.income), 0.1);
   assert.equal(fx(attr('Pioneer'), L.settleOver), 0.97);
-  assert.equal(fx(attr('Pioneer'), L.travel), 0.7);
-  assert.equal(fx(attr('Homebody'), L.travel), 1.5);
+  assert.equal(fx(attr('Pioneer'), L.travel), 0.85);
+  assert.equal(fx(attr('Homebody'), L.travel), 1.25);
   assert.equal(fx(attr('Frugal'), L.reserve), 2);
   assert.equal(fx(attr('Prospector'), L.harvest), 1.5);
   assert.deepEqual(attr('Road Builder'), [[L.tripRange, 1.3], [L.connection, 3]]);
@@ -520,7 +522,7 @@ test('what the app reads: name with ordinal, age, years, attributes and goal wit
     'Amount of a trade agreement +50 %',
     'Share of the income spent on upkeep +10 points',
   ]);
-  assert.deepEqual(info.traits[1].effects, ['Share of the soldiers sent to war −45 points', 'Soldiers’ pay −30 %'.replace('’', "'"), "Gives up below this share of the enemy's strength +20 points"]);
+  assert.deepEqual(info.traits[1].effects, ['Share of the soldiers sent to war −45 points', 'Soldiers’ pay −15 %'.replace('’', "'"), "Gives up below this share of the enemy's strength +20 points"]);
   assert.equal(info.goal.name, 'Expansion');
   assert.equal(info.goal.reached, false);
   assert.deepEqual(info.goal.progress, [{ label: 'Settlements', value: 5, target: 6, met: false }]);

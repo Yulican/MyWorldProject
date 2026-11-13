@@ -266,9 +266,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement is cut off in year 272.
-  const sim = createSimulation(generateWorld({ seed: 8 }));
-  for (let year = 1; year <= 275; year++) {
+  // In this world (with its leaders) a settlement is cut off in year 254.
+  const sim = createSimulation(generateWorld({ seed: 10 }));
+  for (let year = 1; year <= 257; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
@@ -316,7 +316,7 @@ test('settlers never go where the connection to a seat would fall below the stop
   for (let t = 0; t < 250 * TICKS_PER_YEAR; t++) {
     const before = Int32Array.from(sim.cellPop);
     const seatCost = Float32Array.from(sim.seatCost);
-    // A leader counts the way shorter or longer for its settlers (Pioneer x0.7, Homebody x1.5): the stop holds for the cost as its people count it.
+    // A leader counts the way shorter or longer for its settlers (Pioneer x0.85, Homebody x1.25): the stop holds for the cost as its people count it.
     for (let id = 0; id < 256; id++) travel[id] = sim.leaders.lev[id * LEVERS + L.travel];
     stepSimulation(sim);
     if (sim.tick % 13 !== 0) continue;
