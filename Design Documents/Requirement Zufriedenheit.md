@@ -174,7 +174,8 @@ vorerst immer auf; später entscheidet die Außenpolitik.
   Gründung, neues Volk (neuer Stamm), Aufstand, Abspaltung (auch abgeschnittener
   Gebiete), Volk verschwunden, Spielende (eigener Screen), erster Kontakt,
   Grenze geschlossen, Kriegserklärung, Frieden (jedes Kriegsende, auch das
-  einer Rebellion) und neues Bündnis (`Requirement Krieg.md`). Die Liste ist
+  einer Rebellion), neues Bündnis (`Requirement Krieg.md`) und Herrschaftswechsel eines
+  Anführers (`Requirement Anführer.md`). Die Liste ist
   fest, es gibt keine Einstellung.
 - Alle anderen Einträge stehen nur still in der Chronik-Liste: kein Dialog,
   keine Pause, kein Banner, keine Ungelesen-Markierung. Das sind
@@ -195,6 +196,7 @@ vorerst immer auf; später entscheidet die Außenpolitik.
   heutigen Arten: Gründung, Abspaltung abgeschnittener Gebiete, Abspaltung,
   Volk verschwunden, neuer Stamm und Spielende.
 - Kommen mehrere wichtige Einträge gleichzeitig, werden sie nacheinander gezeigt.
+- **„Close all“ (entschieden):** Stehen **mehr als eine** Meldung an (ein Dialog ist offen und mindestens eine weitere wartet), zeigt der Dialog zusätzlich einen Knopf „Close all“. Er schließt alle anstehenden Meldungen auf einmal; bei nur einer Meldung ist er nicht sichtbar. Die Einträge bleiben in der Chronik-Liste nachlesbar. Beim Schließen gilt die Zeitsteuerung wie oben. Anlass: Herrschaftswechsel der Anführer (`Requirement Anführer.md`, Abschnitt 8) erzeugen für alle Völker Dialoge.
 - Im Benchmark werden keine Dialoge geöffnet und das Spiel nicht pausiert.
 
 ## 6. Anzeige
