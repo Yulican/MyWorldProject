@@ -1,14 +1,14 @@
 # Requirement: Anführer
 
-Stand: **vom Nutzer entschieden und bestätigt (Attribute, Ziele, Nachfolge, Anzeige, alle Punkte aus Abschnitt 12), simuliert (Runde 3, Abschnitt 11a), im Kern und in der App umgesetzt (Abschnitt 11b)** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind in Runde 3 gemessen (24 Welten, Abschnitt 11a); Feinschliff bei der Implementierung.** Abschnitt 12 hält die bestätigten Festlegungen fest. Spieltexte sind Englisch („Leader“).
+Stand: **vom Nutzer entschieden und bestätigt (Attribute, Ziele, Nachfolge, Anzeige, alle Punkte aus Abschnitt 12), simuliert (Runde 3, Abschnitt 11a), im Kern und in der App umgesetzt (Abschnitt 11b)** (Branch `feature/leaders`). Ablauf: Design → Simulation → Umsetzung. **Alle Zahlen in diesem Dokument sind in Runde 3 gemessen (24 Welten, Abschnitt 11a); Feinschliff bei der Implementierung.** Abschnitt 12 hält die bestätigten Festlegungen fest. Spieltexte sind Englisch („Leader“). **Nachtrag (Gacha):** Eingriffe des Gottes auf Anführer sind jetzt in 1.0 (Abschnitte 1, 8, 10; Entwurf in `Requirement Gacha.md`).
 
-Baut auf Krieg (`Requirement Krieg.md`), Diplomatie (`Requirement Diplomatie.md`), Zentralregierung (`Requirement Zentralregierung.md`), Zufriedenheit (`Requirement Zufriedenheit.md`) und Handel (`Requirement Handel.md`) auf. Eines der letzten Features für Version 1.0.
+Baut auf Krieg (`Requirement Krieg.md`), Diplomatie (`Requirement Diplomatie.md`), Zentralregierung (`Requirement Zentralregierung.md`), Zufriedenheit (`Requirement Zufriedenheit.md`) und Handel (`Requirement Handel.md`) auf. Eines der letzten Features für Version 1.0. Der Eingriff des Gottes (Gacha) ist hier nachgetragen (siehe `Requirement Gacha.md`), noch nicht umgesetzt.
 
 ## 1. Ziel
 
 Jedes Volk wird von einem **Anführer** regiert. Er regiert, bis er stirbt, hat Attribute und ein Ziel und prägt das Verhalten seines Volks **stark**: Er verschiebt die Schwellen und Wahrscheinlichkeiten, nach denen das Volk heute automatisch entscheidet (Krieg, Bündnisse, Grenzen, Handel, Bau, Steuern, Siedeln, Aufstände, Andacht zum Gott). Völker mit gleicher Lage verhalten sich dadurch verschieden, und ein Herrscherwechsel kann das Verhalten eines Volks kippen. Der starke Einfluss ist gewollt.
 
-Es gibt keine Sturz-Mechanik: kein Putsch, keine Absetzung, auch nicht bei Aufständen. Ein Eingriff des Gottes auf Anführer kommt **nicht in 1.0** (Abschnitt 10, „Später“).
+Es gibt keine Sturz-Mechanik: kein Putsch, keine Absetzung, auch nicht bei Aufständen. Ein Eingriff des Gottes auf Anführer (Attribute, Ziel, Lebensdauer) ist **über die Gacha-Fähigkeiten in 1.0** vorgesehen (`Requirement Gacha.md`, §6.3 und §7.7); er ist die einzige Ausnahme von „kein Zielwechsel“ und von den Attribut-Plätzen.
 
 ## 2. Der Anführer
 
@@ -168,7 +168,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 - **Weltstart (entschieden):** Jede Welt beginnt mit genau einem Volk (dem des Spielers). Dessen erster Anführer kommt am Ende von Jahr 1 als einzelner Dialog, ein Jahr nach dem Gründungsdialog. Es entsteht kein Stapel; der Eintrag bleibt wichtig (Dialog mit Pause).
 - **Mehrere Meldungen:** Stehen mehrere Dialoge an, gilt der Knopf „Close all“ (`Requirement Zufriedenheit.md`, Abschnitt 5).
 - Karte: nichts Neues.
-- Gott-Eingriff: nicht in 1.0.
+- Gott-Eingriff: über die Gacha-Fähigkeiten (`Requirement Gacha.md`); das Panel zeigt das Ergebnis (Attribute, Ziel, Alter) ohne Änderung.
 
 ## 9. Datenhaltung
 
@@ -180,7 +180,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 
 ## 10. Später (nicht in 1.0)
 
-- Eingriff des Gottes auf Anführer (Segen, Fluch, früherer Tod, Ziel eingeben); gehört zu den Gacha-Fähigkeiten im Game-Design-Dokument.
+- ~~Eingriff des Gottes auf Anführer~~ ist jetzt **in Version 1** (Entscheidung des Nutzers): Gift of Trait, Mark of Weakness, Wisdom of Ages, Unburden (Attribute), Reroll Destiny (Ziel), Long Life und Brittle Crown (Lebensdauer, Todesalter ±10 Jahre); Regeln und Teilsysteme in `Requirement Gacha.md` (§6.3, §7.7). Ein frei gewähltes Ziel („Seeker of …“) und ein früher Tod auf Befehl sind **nicht** vorgesehen.
 - Anführer anderer Völker erst bei Kontakt sichtbar machen.
 - Sturz, Putsch, Regentschaft, Anführer, die auf Verträge reagieren.
 
