@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
+  ABILITIES,
   TickPart,
+  leaderEffects,
   leaderOf,
   livingCivilizations,
   simulationYear,
@@ -10,13 +12,13 @@ import {
   type LeaderTrait,
   type Simulation,
 } from '../sim';
-import { LEADER } from '../sim/society/leaders';
+import { LEADER, NATURAL_SLOTS } from '../sim/society/leaders';
 import { colors, spacing } from '../theme';
 
 /** A met part of the goal. */
 const MET_TEXT = '#6fbf73';
-/** Attributes a leader can have. */
-const MAX_TRAITS = 3;
+/** Attributes a leader gains on his own; the god can add more (Gift of Trait, Mark of Weakness, up to ATTR_SLOTS). */
+const MAX_TRAITS = NATURAL_SLOTS;
 
 type Props = {
   sim: Simulation;
@@ -41,8 +43,12 @@ export function LeaderPanel({ sim, onClose }: Props) {
   const year = simulationYear(sim);
   // The year's number changes a tick part before the leaders' year does: read again once that tick is complete.
   const settled = sim.part === TickPart.Start;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- year and settled say when the simulation's leaders changed
-  const leader = useMemo(() => (self ? leaderOf(sim, self) : null), [sim, self, year, settled]);
+  // The god's casts change a leader at once: read again with every change of the player's charges too.
+  const charges = sim.gacha.charges.reduce((n, c) => n + c, 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- year, settled and charges say when the simulation's leaders changed
+  const leader = useMemo(() => (self ? leaderOf(sim, self) : null), [sim, self, year, settled, charges]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- as above
+  const god = useMemo(() => (self ? leaderEffects(sim, self) : []), [sim, self, year, settled, charges]);
   const people = sim.civs[self]?.name ?? '';
 
   return (
@@ -74,6 +80,16 @@ export function LeaderPanel({ sim, onClose }: Props) {
           </>
         )}
         {leader && <LeaderBlock leader={leader} people={people} />}
+        {god.length > 0 && (
+          <>
+            <Text style={styles.section}>Your doing</Text>
+            {god.map((e) => (
+              <Text key={e.ability} style={styles.effect}>
+                {e.name}: {ABILITIES[e.ability].about}
+              </Text>
+            ))}
+          </>
+        )}
         <Text style={styles.note}>
           Every people has one leader for life; a successor of the same line follows in the year of the death. A leader
           starts with one trait, gains a second after {LEADER.secondYears} years in office and a third when the goal is
@@ -88,6 +104,8 @@ export function LeaderPanel({ sim, onClose }: Props) {
 
 function LeaderBlock({ leader, people }: { leader: LeaderInfo; people: string }) {
   const { traits, goal } = leader;
+  const natural = traits.filter((t) => !t.byGod).length;
+  const given = traits.length - natural;
   return (
     <>
       <Text style={styles.name}>{leader.name}</Text>
@@ -101,19 +119,20 @@ function LeaderBlock({ leader, people }: { leader: LeaderInfo; people: string })
       </Text>
 
       <Text style={styles.section}>
-        Traits ({traits.length} of {MAX_TRAITS})
+        Traits ({natural} of {MAX_TRAITS}
+        {given > 0 ? `, +${given} from you` : ''})
       </Text>
       {traits.map((t) => (
         <TraitBlock key={t.id} trait={t} />
       ))}
-      {traits.length < 2 && (
+      {natural < 2 && (
         <Text style={styles.pending}>
           {leader.yearsToSecondTrait > 0
             ? `Second trait in ${yearsText(leader.yearsToSecondTrait)}.`
             : 'Second trait at the end of this year.'}
         </Text>
       )}
-      {traits.length < MAX_TRAITS && !goal.reached && <Text style={styles.pending}>Third trait when the goal is reached.</Text>}
+      {natural < MAX_TRAITS && !goal.reached && <Text style={styles.pending}>Third trait when the goal is reached.</Text>}
 
       <GoalBlock goal={goal} />
     </>
@@ -125,6 +144,8 @@ function TraitBlock({ trait }: { trait: LeaderTrait }) {
     <View style={styles.block}>
       <Text style={styles.item}>
         {trait.name}
+        {trait.byGod && <Text style={styles.godTag}>{'  '}from you</Text>}
+        {trait.honed && <Text style={styles.godTag}>{'  '}honed ×1.5</Text>}
         <Text style={styles.about}>
           {'  '}
           {trait.about}
@@ -234,6 +255,7 @@ const styles = StyleSheet.create({
   muted: { color: colors.panelMuted },
   section: { color: colors.panelText, fontSize: 13, fontWeight: '700', marginTop: spacing.sm },
   block: { paddingVertical: spacing.xs },
+  godTag: { color: '#b07cff', fontSize: 11, fontWeight: '700' },
   item: { color: colors.accent, fontSize: 14, fontWeight: '700' },
   about: { color: colors.panelMuted, fontSize: 12, fontWeight: '400' },
   effect: { color: colors.panelText, fontSize: 12, paddingLeft: spacing.md, paddingVertical: 1 },

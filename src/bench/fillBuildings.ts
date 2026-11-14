@@ -1,5 +1,5 @@
 import { DIRECTION_COUNT, isWaterBiome, type Simulation } from '../sim';
-import { BUILDINGS, SLOTS, SlotState, cityTier } from '../sim/society/buildings';
+import { BUILDINGS, SlotState, cityTier } from '../sim/society/buildings';
 import { updateCellSupply, usableSlots } from '../sim/society/economy';
 
 // The "cities" benchmark scenario: the busiest map the building feature can
@@ -23,7 +23,8 @@ export function fillWithBuildings(sim: Simulation): void {
       if (!ruin) continue;
     }
     const slots = usableSlots(sim, c);
-    for (let s = c * SLOTS, k = 0; k < SLOTS; s++, k++) {
+    // The slot stride grows at runtime (god-given slots, Requirement Gacha 7.5): read it from the economy.
+    for (let s = c * economy.slots, k = 0; k < economy.slots; s++, k++) {
       economy.type[s] = k % BUILDINGS.length;
       economy.state[s] = ruin || k >= slots ? (k === 0 ? SlotState.Ruin : SlotState.Empty) : SlotState.Standing;
       economy.work[s] = 0;

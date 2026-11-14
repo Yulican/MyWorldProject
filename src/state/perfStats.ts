@@ -19,6 +19,8 @@ export const perfEvents = {
   /** Renders of the map's tile layer (each sends new drawing commands to the UI thread). */
   tileLayerRenders: 0,
   territoryOverviews: 0,
+  /** Terrain overviews built again after the god changed the land (only after a long rest). */
+  terrainOverviews: 0,
   /** Army marker pictures recorded (an army moved, appeared or is gone). */
   armyPictures: 0,
   /** Text updates of the on-screen performance meter. */

@@ -3,7 +3,9 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { scenarioFromUrl } from '../bench/benchmark';
 import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
+import { CastBar, invalidText, targetName, type CastState } from '../components/CastBar';
 import { ChronicleDialog } from '../components/ChronicleDialog';
+import { GachaPanel, formatFaith } from '../components/GachaPanel';
 import { CivPanel } from '../components/CivPanel';
 import { DiplomacyPanel } from '../components/DiplomacyPanel';
 import { GovernmentPanel } from '../components/GovernmentPanel';
@@ -11,15 +13,31 @@ import { LeaderPanel } from '../components/LeaderPanel';
 import { WarPanel } from '../components/WarPanel';
 import { HexInfoPanel, hexWar, strategicStock } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
-import { WorldMap, type MapController, type TerritorySource } from '../map/WorldMap';
-import { hexEconomy, hexMilitary, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
+import { castArea, peopleHexes } from '../map/castArea';
+import { WorldMap, type MapController, type MapHighlight, type TerritorySource } from '../map/WorldMap';
+import {
+  ABILITIES,
+  TargetKind,
+  canCast,
+  hexEconomy,
+  hexEffects,
+  hexMilitary,
+  hexSatisfaction,
+  hexSupplyTerms,
+  isWaterBiome,
+  nextPullPrice,
+  simulationYear,
+  validTargets,
+} from '../sim';
 import {
   acknowledgeChronicle,
+  castCharge,
   closeAllChronicle,
   armyStore,
   shownAfter,
   shownInDialog,
   createNewWorld,
+  landStore,
   mapArmies,
   mapWar,
   setResumeSpeed,
@@ -41,12 +59,24 @@ type OpenPanel =
   | { kind: 'diplomacy' }
   | { kind: 'government' }
   | { kind: 'leader' }
-  | { kind: 'war' };
+  | { kind: 'war' }
+  | { kind: 'gacha' };
+
+/** How long the note after a cast stays on screen. */
+const NOTICE_MS = 3500;
 
 export function WorldScreen() {
   const { sim, speed, chronicleSeen, resumeSpeed, chronicleDialogs } = useGameState();
   const world = sim?.world ?? null;
   const [panel, setPanel] = useState<OpenPanel>({ kind: 'none' });
+  // A charge being cast (target choice on the map), and the note after a cast.
+  const [cast, setCast] = useState<CastState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const mapController = useRef<MapController | null>(null);
   const benchmark = useBenchmark(mapController);
   const benchmarkRunning = benchmark.status?.running === true;
@@ -70,6 +100,7 @@ export function WorldScreen() {
       ...snapshotStore,
       civColor: (id) => sim?.civs[id]?.color ?? '#ffffff',
       war: mapWar,
+      land: landStore,
       armies: { ...armyStore, markers: mapArmies },
     }),
     [sim],
@@ -77,18 +108,80 @@ export function WorldScreen() {
 
   const newWorld = () => {
     setPanel({ kind: 'none' });
+    setCast(null);
     createNewWorld();
   };
 
+  // While casting: the valid targets, checked again when the ability, the direction or the year changes (validTargets allocates).
+  const year = sim ? simulationYear(sim) : 0;
+  const castAbilityId = cast?.ability ?? -1;
+  const castOption = cast?.option ?? 0;
+  const [castRound, setCastRound] = useState(0);
+  const valid = useMemo(
+    () => new Set(sim && castAbilityId >= 0 ? validTargets(sim, castAbilityId, castOption) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- year and castRound say when the targets may have changed
+    [sim, castAbilityId, castOption, year, castRound],
+  );
+  const castTarget = cast?.target ?? -1;
+  const highlight = useMemo<MapHighlight | null>(() => {
+    if (!sim || castAbilityId < 0) return null;
+    const onHex = ABILITIES[castAbilityId].target === TargetKind.Hex;
+    return {
+      targets: onHex ? [...valid] : peopleHexes(sim.world, [...valid]),
+      area: castArea(sim.world, castAbilityId, castTarget),
+    };
+  }, [sim, castAbilityId, castTarget, valid]);
+
+  /** A target tapped or picked while casting: chosen if valid, else why not. */
+  const chooseTarget = useCallback(
+    (target: number) =>
+      setCast((c) => {
+        if (!c || !sim) return c;
+        if (target <= 0 && ABILITIES[c.ability].target !== TargetKind.Hex) return { ...c, target: -1, message: 'Nobody lives there.' };
+        if (target < 0) return c;
+        if (!canCast(sim, c.ability, target, c.option)) return { ...c, target: -1, message: `Not a valid target: ${invalidText(c.ability)}` };
+        return { ...c, target, message: null };
+      }),
+    [sim],
+  );
+
   const selectedCell = panel.kind === 'hex' ? panel.cell : -1;
-  // Tapping the selected hex again (or off the map) closes the info bar.
+  // Tapping the selected hex again (or off the map) closes the info bar; while casting, a tap chooses the target.
+  const casting = cast !== null;
   const onTapCell = useCallback(
-    (cell: number) =>
+    (cell: number) => {
+      if (casting) {
+        if (cell < 0 || !sim) return;
+        const kind = ABILITIES[castAbilityId].target;
+        chooseTarget(kind === TargetKind.Hex ? cell : sim.world.owner[cell]);
+        return;
+      }
       setPanel((open) =>
         cell < 0 || (open.kind === 'hex' && open.cell === cell) ? { kind: 'none' } : { kind: 'hex', cell },
-      ),
-    [],
+      );
+    },
+    [casting, castAbilityId, chooseTarget, sim],
   );
+
+  const startCast = (ability: number) => {
+    setPanel({ kind: 'none' });
+    setCast({ ability, option: 0, target: -1, message: null });
+  };
+  const confirmCast = () => {
+    if (!sim || !cast || cast.target < 0) return;
+    const name = targetName(sim, cast.ability, cast.target);
+    const result = castCharge(cast.ability, cast.target, cast.option);
+    if (result === 'invalid') {
+      setCast({ ...cast, target: -1, message: `Not a valid target: ${invalidText(cast.ability)}` });
+      setCastRound((n) => n + 1);
+      return;
+    }
+    setCast(null);
+    setCastRound((n) => n + 1);
+    setNotice(`You cast ${ABILITIES[cast.ability].name} on ${name}${result === 'next' ? ' (from next week)' : ''}.`);
+  };
+  const price = sim ? nextPullPrice(sim) : 0;
+  const affordable = sim !== null && !sim.gameOver && sim.gacha.faith >= price;
   const closePanel = () => setPanel({ kind: 'none' });
   // An important chronicle entry pauses the game and is shown until the player closes it.
   const next = sim && chronicleDialogs && !sim.gameOver ? sim.chronicle[chronicleSeen] : undefined;
@@ -108,6 +201,20 @@ export function WorldScreen() {
             {sim ? `${sim.pop.count} people · ${sim.believers} believe in you` : 'Creating world…'}
           </Text>
         </View>
+        {/* Faith and the next pull's price, always in view; green when a pull is affordable. */}
+        <Pressable
+          style={({ pressed }) => [styles.gacha, affordable && styles.gachaReady, pressed && styles.buttonPressed]}
+          disabled={!sim || benchmarkRunning}
+          onPress={() => {
+            setCast(null);
+            setPanel(panel.kind === 'gacha' ? { kind: 'none' } : { kind: 'gacha' });
+          }}
+        >
+          <Text style={[styles.gachaLabel, affordable && styles.gachaLabelReady]}>Gacha</Text>
+          <Text style={[styles.gachaFaith, affordable && styles.gachaLabelReady]}>
+            {sim ? `${formatFaith(sim.gacha.faith)} / ${price}` : ''}
+          </Text>
+        </Pressable>
         <Pressable
           style={({ pressed }) => [styles.button, styles.benchButton, pressed && styles.buttonPressed]}
           disabled={benchmarkRunning}
@@ -137,6 +244,7 @@ export function WorldScreen() {
           <WorldMap
             world={world}
             selectedCell={selectedCell}
+            highlight={highlight}
             onTapCell={onTapCell}
             territory={territory}
             controller={mapController}
@@ -154,8 +262,26 @@ export function WorldScreen() {
             military={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexMilitary(sim, panel.cell)}
             strategic={isWaterBiome(sim.world.biome[panel.cell]) ? null : strategicStock(sim, panel.cell)}
             war={hexWar(sim, panel.cell)}
+            god={hexEffects(sim, panel.cell)}
             onClose={closePanel}
           />
+        )}
+        {sim && panel.kind === 'gacha' && <GachaPanel sim={sim} onClose={closePanel} onUse={startCast} />}
+        {sim && cast && (
+          <CastBar
+            sim={sim}
+            cast={cast}
+            valid={valid}
+            onOption={(option) => setCast({ ...cast, option, target: -1, message: null })}
+            onPick={chooseTarget}
+            onConfirm={confirmCast}
+            onCancel={() => setCast(null)}
+          />
+        )}
+        {notice && (
+          <View style={styles.notice} pointerEvents="none">
+            <Text style={styles.noticeText}>{notice}</Text>
+          </View>
         )}
         {sim && panel.kind === 'peoples' && (
           <CivPanel
@@ -255,6 +381,29 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   benchButton: { marginRight: spacing.sm, backgroundColor: colors.panelMuted },
+  gacha: {
+    marginRight: spacing.sm,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.panelMuted,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    alignItems: 'center',
+  },
+  gachaReady: { backgroundColor: '#3fa860', borderColor: '#3fa860' },
+  gachaLabel: { color: colors.panelText, fontWeight: '700', fontSize: 12 },
+  gachaFaith: { color: colors.panelMuted, fontSize: 11, fontVariant: ['tabular-nums'] },
+  gachaLabelReady: { color: '#ffffff' },
+  notice: {
+    position: 'absolute',
+    top: spacing.sm,
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: 'rgba(20,23,31,0.92)',
+    borderRadius: 10,
+    padding: spacing.sm,
+  },
+  noticeText: { color: colors.panelText, fontSize: 13, textAlign: 'center' },
   buttonPressed: { opacity: 0.7 },
   bench: {
     position: 'absolute',

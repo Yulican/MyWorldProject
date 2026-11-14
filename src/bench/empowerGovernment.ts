@@ -1,6 +1,6 @@
 import { TICKS_PER_YEAR, stepSimulation, type Simulation } from '../sim';
 import { hexDistance } from '../sim/hex';
-import { BUILDINGS, GOV_SLOT, Good, SLOTS, SlotState } from '../sim/society/buildings';
+import { BUILDINGS, Good, SlotState } from '../sim/society/buildings';
 import { buildingFits, updateCellSupply, usableSlots } from '../sim/society/economy';
 
 // The "government" benchmark scenario: the most the central government
@@ -35,7 +35,7 @@ export function empowerGovernment(sim: Simulation): void {
   for (let c = 0; c < n; c++) {
     if (sim.cellPop[c] === 0 || world.owner[c] === 0) continue;
     const slots = usableSlots(sim, c);
-    let next = c * SLOTS + GOV_SLOT;
+    let next = c * sim.economy.slots + sim.economy.half;
     const end = next + slots;
     const far = seats.every((s) => hexDistance(world, s, c) >= SEAT_SPACING);
     if (far && buildingFits(sim, c, SEAT_TYPE)) {

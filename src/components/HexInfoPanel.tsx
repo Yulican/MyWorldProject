@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
+  Ab,
   BIOMES,
   CityTier,
   DEPOSITS,
@@ -17,6 +18,7 @@ import {
   hasFreshWater,
   resourceCapacityTerms,
   sumTerms,
+  type GodEffect,
   type HexEconomy,
   type HexMilitary,
   type HexSatisfaction,
@@ -48,6 +50,8 @@ type Props = {
   strategic?: readonly StrategicStock[] | null;
   /** The war here: siege or occupation, armies on the hex (see hexWar). */
   war?: readonly string[];
+  /** The god's effects running on this hex (Fertile Blessing, Drought, a fire), with years left (see hexEffects). */
+  god?: readonly GodEffect[];
   onClose: () => void;
 };
 
@@ -55,7 +59,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, war, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, war, god, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -80,6 +84,7 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
     civName ? settlementName(world.cityTier[cell]) : null,
     war && war.length > 0 ? war[0] : null,
+    god?.some((e) => e.ability === Ab.WildFire) ? 'Burning' : null,
     military && military.soldiers > 0 ? `${military.soldiers} soldier${military.soldiers > 1 ? 's' : ''}` : null,
     !civName && ruins > 0 ? `${ruins} ruin${ruins > 1 ? 's' : ''}` : null,
     cell === world.startCell ? 'Your tribe starts here' : null,
@@ -119,6 +124,14 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
             value={`×${world.moveCost[cell]}${roads > 0 ? ` · ${roads} road${roads > 1 ? 's' : ''} (half cost)` : ''}`}
           />
           {deposit && <Row label="Deposit" value={`${deposit.name} (${deposit.category})`} />}
+          {god && god.length > 0 && (
+            <>
+              <Text style={styles.section}>The god's effects</Text>
+              {god.map((e, i) => (
+                <Row key={i} label={e.name} value={e.yearsLeft > 0 ? `${e.yearsLeft} year${e.yearsLeft > 1 ? 's' : ''} left` : 'burning now'} />
+              ))}
+            </>
+          )}
 
           <Text style={styles.section}>Resources</Text>
           {RESOURCE_NAMES.map((name, r) => (
@@ -175,7 +188,8 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                 <Row key={g.name} label={g.name} value={`${Math.floor(g.stock)} in stock${g.covered ? ' · enough for everyone' : ''}`} />
               ))}
               <Text style={styles.note}>
-                Satisfaction moves a quarter of the way to its target each year. Satisfied settlements have more
+                Satisfaction moves a quarter of the way to its target each year. “Divine” is your doing: Grateful
+                Hearts and Restless Spirits on the people (at most ±15). Satisfied settlements have more
                 children and harvest more; unhappy ones send people away. A realm's settlements below zero (not
                 the capital) rise together once their soldiers and militia outweigh the realm, and fight a war for
                 their independence.

@@ -2,8 +2,9 @@ import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
 import { gcTotals, logWork, perfEvents, setWorkLogging, workBetween } from '../state/perfStats';
-import { advanceYears, createNewWorld, setChronicleDialogs, setExtraArmies } from '../state/worldStore';
+import { advanceYears, createNewWorld, setBenchTick, setChronicleDialogs, setExtraArmies } from '../state/worldStore';
 import { armyDecoys } from './armyDecoys';
+import { castGacha, gachaDuringSwipes } from './castGacha';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
 import { declareWarsEverywhere } from './declareWars';
@@ -60,6 +61,8 @@ export function useBenchmark(controller: { current: MapController | null }) {
       const setup = SCENARIOS[scenario];
       // The war scenario draws the worst case: extra markers up to 32 armies on the map (armyDecoys.ts).
       setExtraArmies(setup.war ? armyDecoys() : null);
+      // The gacha scenario keeps the land changing during the swipes (castGacha.ts).
+      setBenchTick(setup.gacha ? gachaDuringSwipes() : null);
       const prepare = setup.buildings
         ? fillWithBuildings
         : setup.unrest
@@ -72,7 +75,9 @@ export function useBenchmark(controller: { current: MapController | null }) {
                 ? empowerGovernment
                 : setup.war
                   ? declareWarsEverywhere
-                  : undefined;
+                  : setup.gacha
+                    ? castGacha
+                    : undefined;
       advanceYears(setup.years, prepare);
       setStatus({ running: true, scenario, world, swipe: 0, failed: results.filter((r) => !r.pass).length });
       await delay(WORLD_SETTLE_MS);
@@ -112,6 +117,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
     console.log(`${LOG}_DONE ${JSON.stringify(summary)}`);
     setStatus({ running: false, summary });
     setExtraArmies(null);
+    setBenchTick(null);
     setChronicleDialogs(true);
     running.current = false;
   }, [controller]);

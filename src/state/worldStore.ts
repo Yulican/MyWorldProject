@@ -10,6 +10,9 @@ import {
   stepSimulation,
   stepSimulationPart,
   TickPart,
+  castAbility,
+  landChanges,
+  pullGacha,
   type ChronicleEntry,
   type Simulation,
   type World,
@@ -52,7 +55,7 @@ const HOLD_MS = 750;
  * cell 1 while besieged.
  * Arrays are reused; only a new world replaces `siege`.
  */
-export const mapWar = { foe: new Uint8Array(256 * 256), siege: new Uint8Array(0) };
+export const mapWar = { foe: new Uint8Array(256 * 256), siege: new Uint8Array(0), burning: new Uint8Array(0) };
 
 /**
  * The map's army markers: `count` armies, each on hex `cell[i]` with the
@@ -136,8 +139,11 @@ function subscribe(listener: () => void): () => void {
 function syncMapWar(sim: Simulation) {
   const w = sim.war;
   if (mapWar.siege.length !== sim.world.cellCount) mapWar.siege = new Uint8Array(sim.world.cellCount);
+  if (mapWar.burning.length !== sim.world.cellCount) mapWar.burning = new Uint8Array(sim.world.cellCount);
   mapWar.foe.set(w.foe.subarray(0, mapWar.foe.length));
   mapWar.siege.set(w.siege);
+  // Burning hexes (Wild Fire) come with the same snapshot: the territory tiles draw them.
+  mapWar.burning.set(sim.gacha.burning);
   // Benchmark only: siege-frame decoys on real seats of peoples at war (bench/armyDecoys.ts).
   extraArmies?.sieges(sim, mapWar.siege);
 }
@@ -169,12 +175,45 @@ function syncArmies(sim: Simulation) {
   armyListeners.forEach((l) => l());
 }
 
-/** A new map snapshot is shown: the war data and armies come along. */
+/** A new map snapshot is shown: the war data, armies and land changes come along. */
 function syncSnapshot(sim: Simulation) {
   notifiedSnapshot = sim.snapshotVersion;
   syncMapWar(sim);
   syncArmies(sim);
+  syncLand(sim);
 }
+
+/**
+ * Changes of the land the terrain layer draws (the god's abilities: biome,
+ * rivers, lakes, deposits; Requirement Gacha 8): the map checks its terrain
+ * tiles when this version changes, which happens with a snapshot (or a
+ * cast) after the simulation's change counter `gacha.landTotal` moved.
+ */
+let landVersion = 0;
+let syncedLand = -1;
+let landSim: Simulation | null = null;
+const landListeners = new Set<() => void>();
+function syncLand(sim: Simulation) {
+  if (landSim === sim && sim.gacha.landTotal === syncedLand) return;
+  const fresh = landSim !== sim;
+  landSim = sim;
+  syncedLand = sim.gacha.landTotal;
+  landVersion++;
+  // A new world's map is built from its current land: nothing to redraw.
+  if (!fresh) landListeners.forEach((l) => l());
+}
+
+/** The land changes as an external store for the map's terrain (see syncLand). */
+export const landStore = {
+  subscribe: (listener: () => void): (() => void) => {
+    landListeners.add(listener);
+    return () => landListeners.delete(listener);
+  },
+  getVersion: (): number => landVersion,
+  /** The simulation's change counter as of the last notice, and the hexes changed since `seen` (count, -1: redraw all; see landChanges). */
+  total: (): number => syncedLand,
+  changes: (seen: number, out: Int32Array): number => (landSim ? landChanges(landSim, seen, out) : -1),
+};
 
 function publish(changes: Partial<GameState>) {
   state = { ...state, ...changes, version: state.version + 1 };
@@ -267,6 +306,47 @@ function holdForMap(now: number, ms: number): boolean {
   if (heldSince === 0) heldSince = now;
   return now - heldSince < HOLD_MS;
 }
+
+/**
+ * A gacha pull (Requirement Gacha 3): pays the next price and returns the 3
+ * abilities drawn (now charges in the inventory), or null without enough Faith.
+ */
+export function pullCharges(): number[] | null {
+  const { sim } = state;
+  if (!sim || sim.gameOver) return null;
+  const drawn = pullGacha(sim);
+  if (drawn) publish({});
+  return drawn;
+}
+
+/**
+ * Casts a charge (Requirement Gacha 5): 'now' when it took effect at once
+ * (between ticks), 'next' when it waits for the next tick's start (a tick
+ * is running in parts), 'invalid' when the target isn't valid (no charge used).
+ */
+export function castCharge(ability: number, target: number, option = 0): 'now' | 'next' | 'invalid' {
+  const { sim } = state;
+  if (!sim || sim.gameOver) return 'invalid';
+  const between = sim.part === TickPart.Start;
+  if (!castAbility(sim, ability, target, option)) return 'invalid';
+  if (between) {
+    // It took effect at once: the map shows it now (also while paused), the fire with the territories and the land in the terrain.
+    sim.snapshotVersion++;
+    syncSnapshot(sim);
+  }
+  publish({});
+  return between ? 'now' : 'next';
+}
+
+/**
+ * Benchmark only: called after every complete tick (between ticks, so casts
+ * take effect at once), e.g. the gacha scenario's new fires and biome shifts
+ * during the swipes (bench/castGacha.ts); null to stop.
+ */
+export function setBenchTick(hook: ((sim: Simulation) => void) | null) {
+  benchTick = hook;
+}
+let benchTick: ((sim: Simulation) => void) | null = null;
 
 /** Benchmark only: extra army markers on the map (the war scenario's worst case), null to stop. */
 export function setExtraArmies(extra: ExtraArmies | null) {
@@ -460,7 +540,14 @@ function runFrame(now: number) {
     partSeen[key] = 1;
     partTypeMs[part] = Math.max(ms, partTypeMs[part] * 0.99);
     parts++;
-    if (done) ticks++;
+    if (done) {
+      ticks++;
+      if (benchTick) {
+        const h0 = performance.now();
+        benchTick(sim);
+        logWork('bench gacha casts', h0, performance.now() - h0);
+      }
+    }
   }
   recordSimWork(performance.now() - start, ticks);
   // Drop what didn't fit instead of piling up a backlog (but keep what waited for the map to rest).

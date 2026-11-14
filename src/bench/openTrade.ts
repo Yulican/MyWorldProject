@@ -1,5 +1,5 @@
 import { TICKS_PER_YEAR, stepSimulation, type Simulation } from '../sim';
-import { BUILDINGS, LUXURY_COUNT, STORED_COUNT, SLOTS, SlotState } from '../sim/society/buildings';
+import { BUILDINGS, LUXURY_COUNT, STORED_COUNT, SlotState } from '../sim/society/buildings';
 import { updateCellSupply, usableSlots } from '../sim/society/economy';
 import { isCoast, updateTradeBuildings } from '../sim/society/trade';
 
@@ -37,8 +37,8 @@ export function openTrade(sim: Simulation): void {
 /** A standing building of `type` in a free settlement slot, else in settlement slot `fallback`. */
 function putUp(sim: Simulation, cell: number, type: number, fallback: number): void {
   const { economy } = sim;
-  let slot = cell * SLOTS + fallback;
-  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
+  let slot = cell * economy.slots + fallback;
+  for (let s = cell * economy.slots, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Standing && economy.type[s] === type) return;
     if (economy.state[s] === SlotState.Empty) {
       slot = s;

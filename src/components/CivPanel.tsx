@@ -8,7 +8,9 @@ import {
   civMilitary,
   ledgerNet,
   livingCivilizations,
+  peopleEffects,
   simulationYear,
+  type GodEffect,
   type CivMilitary,
   type Civilization,
   type Simulation,
@@ -67,7 +69,7 @@ export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onLeader, on
         <TrendChart population={sim.history.population} believers={sim.history.believers} />
 
         {civs.map((civ) => (
-          <CivRow key={civ.id} civ={civ} military={civMilitary(sim, civ.id)} />
+          <CivRow key={civ.id} civ={civ} military={civMilitary(sim, civ.id)} god={peopleEffects(sim, civ.id)} />
         ))}
 
         <Text style={styles.section}>Chronicle</Text>
@@ -115,7 +117,7 @@ function TrendChart({ population, believers }: { population: number[]; believers
   );
 }
 
-function CivRow({ civ, military }: { civ: Civilization; military: CivMilitary }) {
+function CivRow({ civ, military, god }: { civ: Civilization; military: CivMilitary; god: readonly GodEffect[] }) {
   return (
     <View style={styles.civ}>
       <View style={styles.civHeader}>
@@ -128,6 +130,11 @@ function CivRow({ civ, military }: { civ: Civilization; military: CivMilitary })
         {cultureText(civ)}
       </Text>
       <Text style={styles.stats}>{militaryText(military)}</Text>
+      {god.length > 0 && (
+        <Text style={styles.god}>
+          Your doing: {god.map((e) => `${e.name} (${e.yearsLeft} year${e.yearsLeft === 1 ? '' : 's'} left)`).join(' · ')}
+        </Text>
+      )}
 
       <View style={styles.faithRow}>
         <Text style={styles.faithLabel}>Faith</Text>
@@ -161,6 +168,8 @@ function ledgerText(civ: Civilization): string {
     l.immigrated && `+${l.immigrated} moved in from other peoples`,
     l.enlisted && `−${l.enlisted} became soldiers`,
     l.discharged && `+${l.discharged} returned from the army`,
+    l.divineLight && `+${l.divineLight} touched by Prophet's Light`,
+    l.divineDoubt && `−${l.divineDoubt} lost to Doubt`,
   ].filter(Boolean);
   const sign = net > 0 ? '+' : net < 0 ? '−' : '±';
   return `Believers last year ${sign}${Math.abs(net)}${parts.length ? ': ' + parts.join(', ') : ''}`;
@@ -250,6 +259,7 @@ const styles = StyleSheet.create({
   faithFill: { position: 'absolute', top: 0, bottom: 0, left: 0, backgroundColor: colors.accent },
   faithLine: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: colors.panelText },
   faithValue: { color: colors.panelText, fontSize: 13, minWidth: 80, textAlign: 'right' },
+  god: { color: colors.accent, fontSize: 12, marginTop: 4 },
   ledger: { color: colors.panelText, fontSize: 12, marginTop: 4 },
   why: { color: colors.panelMuted, fontSize: 12, marginTop: 2 },
   section: { color: colors.panelText, fontSize: 14, fontWeight: '700', marginTop: spacing.md, marginBottom: spacing.xs },

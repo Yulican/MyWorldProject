@@ -1,4 +1,16 @@
-import { Canvas, Group, Image, Path, Picture, Skia, createPicture, type SkImage, type SkPaint, type SkPicture } from '@shopify/react-native-skia';
+import {
+  Canvas,
+  Group,
+  Image,
+  Path,
+  Picture,
+  Skia,
+  createPicture,
+  type SkImage,
+  type SkPaint,
+  type SkPathBuilder,
+  type SkPicture,
+} from '@shopify/react-native-skia';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -28,6 +40,7 @@ import { setMapMoving } from '../state/worldStore';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { ArmySprites, buildArmyPicture, type ArmyMarkers } from './armyLayer';
 import { MapPerfMeter } from './MapPerfMeter';
+import { fillPaint, strokePaint } from './paints';
 import { uiArmySwaps, uiTileDraws } from './uiCounters';
 import { SELECTION_COLOR } from './palette';
 import {
@@ -39,7 +52,7 @@ import {
 } from './territoryLayers';
 import { TileImages } from './tileImages';
 import { sameViewTiles, TIER_ZOOMS, viewTiles, visibleTiles, type ViewTiles } from './viewport';
-import { buildWorldLayers, renderTile, TILE_BLEED, type WorldLayers } from './worldPicture';
+import { buildTerrainOverview, buildWorldLayers, renderTile, terrainTileSignature, TILE_BLEED, type WorldLayers } from './worldPicture';
 
 const MAX_SCALE = 3;
 const START_SCALE = 1;
@@ -89,6 +102,19 @@ const PREFETCH_TILES = 1;
  * row and a column of tiles, both layers, in one frame).
  */
 const WARM_PER_FRAME = 2;
+/**
+ * After the god changed the land, the zoomed-out terrain image is built
+ * again only once the map has rested this long (it is the whole map: a
+ * long piece of JS work and a large new image for the GPU). Zoomed in,
+ * the changed detail tiles show the change already.
+ */
+const OVERVIEW_REST_MS = 1000;
+/** A replaced overview image is freed after this long (it may still be on screen). */
+const OVERVIEW_KEEP_MS = 1000;
+/** Valid targets while casting a charge, and the area the chosen target covers. */
+const TARGET_FILL = 'rgba(255,214,64,0.22)';
+const AREA_FILL = 'rgba(255,214,64,0.5)';
+const AREA_STROKE = '#ffd640';
 
 /**
  * Where the territory layer gets the society snapshot from: an external
@@ -101,6 +127,11 @@ export type TerritorySource = {
   civColor: (civ: number) => string;
   /** Wars and sieges as of the current snapshot (red dashed borders, siege frames). */
   war: MapWar;
+  /** Changes of the land (the god's abilities): the terrain tiles and overview follow them (worldStore.landStore). */
+  land: {
+    subscribe: (listener: () => void) => () => void;
+    getVersion: () => number;
+  };
   /** Army markers: their own store, as armies move weekly, between snapshots. */
   armies: {
     subscribe: (listener: () => void) => () => void;
@@ -119,9 +150,13 @@ export type MapController = {
   swipe: (swipe: Swipe) => Promise<SwipeStats>;
 };
 
+/** While a charge is cast: the hexes it may target (highlighted) and the area of the chosen target. */
+export type MapHighlight = { targets: readonly number[]; area: readonly number[] };
+
 type Props = {
   world: World;
   selectedCell: number;
+  highlight?: MapHighlight | null;
   onTapCell: (cell: number) => void;
   territory: TerritorySource;
   controller?: { current: MapController | null };
@@ -148,9 +183,55 @@ type Props = {
  * While pinching, tiles keep their zoom tier and are scaled; the sharper or
  * lighter tier is rendered when the fingers lift.
  */
-export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell, territory, controller }: Props) {
+export const WorldMap = memo(function WorldMap({ world, selectedCell, highlight, onTapCell, territory, controller }: Props) {
   const layers = useMemo(() => buildWorldLayers(world), [world]);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // The terrain overview, built again after land changes (see OVERVIEW_REST_MS); the world's own until then.
+  const [rebuilt, setRebuilt] = useState<{ layers: WorldLayers; image: SkImage } | null>(null);
+  const overviewImage = rebuilt?.layers === layers ? rebuilt.image : layers.overview;
+  /** Told when the map starts moving (false) and rests (true), for the overview rebuild. */
+  const overviewRest = useRef<(resting: boolean) => void>(() => {});
+  useEffect(() => {
+    let dirty = false;
+    let resting = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let seen = territory.land.getVersion();
+    let last: SkImage | null = null;
+    const schedule = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (!dirty || !resting) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (!dirty || !resting) return;
+        dirty = false;
+        const t0 = performance.now();
+        const image = buildTerrainOverview(world, layers.overviewRect);
+        logWork('terrain overview (land changed)', t0, performance.now() - t0);
+        countEvent('terrainOverviews');
+        const old = last;
+        last = image;
+        if (old) setTimeout(() => old.dispose(), OVERVIEW_KEEP_MS);
+        setRebuilt({ layers, image });
+      }, OVERVIEW_REST_MS);
+    };
+    overviewRest.current = (r) => {
+      resting = r;
+      schedule();
+    };
+    const unsubscribe = territory.land.subscribe(() => {
+      const version = territory.land.getVersion();
+      if (version === seen) return;
+      seen = version;
+      dirty = true;
+      schedule();
+    });
+    return () => {
+      unsubscribe();
+      if (timer !== null) clearTimeout(timer);
+      overviewRest.current = () => {};
+    };
+  }, [world, layers, territory]);
 
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -172,6 +253,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   const restListener = useRef<(resting: boolean) => void>(() => {});
   const onRest = useCallback((resting: boolean) => {
     restListener.current(resting);
+    overviewRest.current(resting);
     // Long simulation parts and snapshots wait while the map moves (worldStore).
     setMapMoving(!resting);
   }, []);
@@ -442,7 +524,10 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
   ]);
 
   const selection = useMemo(() => (selectedCell < 0 ? null : hexOutline(world, selectedCell)), [selectedCell, world]);
-  const { overview, overviewRect: o } = layers;
+  // Recorded once per change of the cast's targets (never per frame), both map copies.
+  const highlightPicture = useMemo(() => (highlight ? buildHighlight(world, highlight, mapWidth) : null), [highlight, world, mapWidth]);
+  const overview = overviewImage;
+  const { overviewRect: o } = layers;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -474,6 +559,7 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, onTapCell,
               territory={territory}
             />
             <ArmyLayer world={world} mapWidth={mapWidth} territory={territory} />
+            {highlightPicture && <Picture picture={highlightPicture} />}
             {selection &&
               [0, 1].map((copy) => (
                 <Group key={`s${copy}`} transform={[{ translateX: copy * mapWidth }]}>
@@ -540,7 +626,8 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
           countEvent('terrainTiles');
           return renderTile(world, chunk, layers.chunkCols, px);
         },
-        null,
+        // Only tiles whose land the god changed are rendered again (see the land subscription below).
+        (chunk) => terrainTileSignature(world, chunk, layers.chunkCols),
         scales,
         onReady,
         undefined,
@@ -719,6 +806,20 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
     });
   }, [territory, territoryTiles, listener]);
 
+  // Changes of the land (the god's abilities): redo the terrain tiles that look different, while the map rests.
+  useEffect(() => {
+    let seen = territory.land.getVersion();
+    return territory.land.subscribe(() => {
+      const version = territory.land.getVersion();
+      if (version === seen) return;
+      seen = version;
+      const t0 = performance.now();
+      terrainTiles.invalidate();
+      listener.current(current.current);
+      logWork('tile check (land)', t0, performance.now() - t0);
+    });
+  }, [territory, terrainTiles, listener]);
+
   return (
     <>
       <Picture picture={picture} />
@@ -789,6 +890,43 @@ const ArmyLayer = memo(function ArmyLayer({ world, mapWidth, territory }: { worl
   }, [world, mapWidth, territory, picture]);
   return <Picture picture={picture} />;
 });
+
+/** The cast's valid targets as a faint fill and the chosen area as a strong one with outlines, on both map copies. */
+function buildHighlight(world: World, h: MapHighlight, mapWidth: number): SkPicture {
+  const targets = Skia.PathBuilder.Make();
+  const area = Skia.PathBuilder.Make();
+  for (const c of h.targets) addHexPath(targets, world, c, HEX_PX + 0.5);
+  for (const c of h.area) addHexPath(area, world, c, HEX_PX * 0.9);
+  const targetPath = targets.detach();
+  const areaPath = area.detach();
+  const targetFill = fillPaint(TARGET_FILL);
+  const areaFill = fillPaint(AREA_FILL);
+  const stroke = strokePaint(AREA_STROKE, 2);
+  return createPicture((canvas) => {
+    for (let copy = 0; copy < 2; copy++) {
+      canvas.save();
+      canvas.translate(copy * mapWidth, 0);
+      canvas.drawPath(targetPath, targetFill);
+      canvas.drawPath(areaPath, areaFill);
+      canvas.drawPath(areaPath, stroke);
+      canvas.restore();
+    }
+  });
+}
+
+function addHexPath(path: SkPathBuilder, world: World, cell: number, r: number) {
+  const col = cell % world.width;
+  const x = hexCenterX(col) * HEX_PX;
+  const y = hexCenterY(col, Math.floor(cell / world.width)) * HEX_PX;
+  const h = (Math.sqrt(3) / 2) * r;
+  path.moveTo(x + r, y);
+  path.lineTo(x + r / 2, y + h);
+  path.lineTo(x - r / 2, y + h);
+  path.lineTo(x - r, y);
+  path.lineTo(x - r / 2, y - h);
+  path.lineTo(x + r / 2, y - h);
+  path.close();
+}
 
 function hexOutline(world: World, cell: number) {
   const col = cell % world.width;
