@@ -9,13 +9,15 @@ type Props = {
   /** Jumps to the entry's hex (only for entries that have one). */
   onGoTo: (cell: number) => void;
   onOk: () => void;
+  /** Closes this and every waiting entry at once (shown only while more wait). */
+  onCloseAll: () => void;
 };
 
 /**
  * A notable event of the chronicle. The game pauses while it is open and
  * continues at the speed chosen meanwhile in the time controls below it.
  */
-export function ChronicleDialog({ entry, more, onGoTo, onOk }: Props) {
+export function ChronicleDialog({ entry, more, onGoTo, onOk, onCloseAll }: Props) {
   return (
     <View style={styles.backdrop}>
       <View style={styles.dialog}>
@@ -29,6 +31,11 @@ export function ChronicleDialog({ entry, more, onGoTo, onOk }: Props) {
               onPress={() => onGoTo(entry.cell)}
             >
               <Text style={styles.secondaryText}>Go to</Text>
+            </Pressable>
+          )}
+          {more > 0 && (
+            <Pressable style={({ pressed }) => [styles.secondary, pressed && styles.pressed]} onPress={onCloseAll}>
+              <Text style={styles.secondaryText}>Close all ({more + 1})</Text>
             </Pressable>
           )}
           <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={onOk}>
@@ -55,7 +62,7 @@ const styles = StyleSheet.create({
   year: { color: colors.panelMuted, fontSize: 13 },
   text: { color: colors.panelText, fontSize: 17, fontWeight: '600' },
   note: { color: colors.panelMuted, fontSize: 12, marginTop: spacing.sm },
-  buttons: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.sm },
+  buttons: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.sm },
   primary: { backgroundColor: colors.accent, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   primaryText: { color: colors.panel, fontWeight: '700', fontSize: 14 },
   secondary: {

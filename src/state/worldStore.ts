@@ -236,6 +236,23 @@ export function acknowledgeChronicle() {
   if (seen >= sim.chronicle.length) setSpeed(resumeSpeed);
 }
 
+/**
+ * "Close all" in the chronicle dialog: every waiting entry counts as seen
+ * (they stay in the chronicle list) and the game continues at the chosen
+ * speed, as when the last one is closed.
+ */
+export function closeAllChronicle() {
+  const { sim, resumeSpeed } = state;
+  if (!sim) return;
+  publish({ chronicleSeen: sim.chronicle.length });
+  setSpeed(resumeSpeed);
+}
+
+/** The current game state outside React (tests). */
+export function getGameState(): GameState {
+  return state;
+}
+
 /** The map started moving (true) or rests again (false): long tick parts and snapshots wait while it moves. */
 export function setMapMoving(moving: boolean) {
   mapMoving = moving;

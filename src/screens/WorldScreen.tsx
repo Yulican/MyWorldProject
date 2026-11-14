@@ -15,6 +15,7 @@ import { WorldMap, type MapController, type TerritorySource } from '../map/World
 import { hexEconomy, hexMilitary, hexSatisfaction, hexSupplyTerms, isWaterBiome, simulationYear } from '../sim';
 import {
   acknowledgeChronicle,
+  closeAllChronicle,
   armyStore,
   shownAfter,
   shownInDialog,
@@ -176,6 +177,7 @@ export function WorldScreen() {
             more={shownAfter(sim, chronicleSeen)}
             onGoTo={goTo}
             onOk={acknowledgeChronicle}
+            onCloseAll={closeAllChronicle}
           />
         )}
         {sim?.gameOver && (
