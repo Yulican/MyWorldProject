@@ -113,7 +113,7 @@ export function pruneMoods(civ: Civilization, tick: number): void {
 /** People one hex's standing comfort buildings serve. */
 export function comfortServed(eco: Economy, cell: number): number {
   let served = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) {
     if (eco.state[s] === SlotState.Standing && BUILDINGS[eco.type[s]].good === Good.Comfort) served += BUILDINGS[eco.type[s]].amount;
   }
   return served;
@@ -133,7 +133,7 @@ export function luxuryValue(covered: number): number {
 
 /** Whether a hex has a standing seat of government. */
 export function hasSeat(eco: Economy, cell: number): boolean {
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) {
     if (eco.state[s] === SlotState.Standing && BUILDINGS[eco.type[s]].good === Good.Seat) return true;
   }
   return false;
@@ -188,6 +188,8 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
       if (v !== 0) terms.push({ label: mood.label, value: v });
     }
     if (sim.leaders.sat[civ.id] !== 0) terms.push({ label: 'Leader', value: sim.leaders.sat[civ.id] });
+    // The god's Grateful Hearts / Restless Spirits (Requirement Gacha 7.6), capped on their own.
+    if (sim.gacha.divine[civ.id] !== 0) terms.push({ label: 'Divine', value: sim.gacha.divine[civ.id] });
   }
   return terms;
 }
@@ -210,7 +212,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   sum += sim.war.siegeValue[cell] + conqueredValue(sim, cell);
   if (civ) {
     for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
-    sum += sim.leaders.sat[civ.id] + sim.leaders.conn[civ.id];
+    sum += sim.leaders.sat[civ.id] + sim.leaders.conn[civ.id] + sim.gacha.divine[civ.id];
   }
   return clampSatisfaction(sum);
 }

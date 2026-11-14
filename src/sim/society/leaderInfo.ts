@@ -1,5 +1,5 @@
 import { ATTRS, GOAL_ABOUT, GOAL_FX, capitalTier, expansionTarget, type Effect } from './leaderRules';
-import { GOALS, Goal, L, LEADER, LEADER_CIVS, LEVER_KIND, leaderName } from './leaders';
+import { ATTR_SLOTS, GOALS, Goal, L, LEADER, LEADER_CIVS, LEVER_KIND, NATURAL_SLOTS, leaderName } from './leaders';
 import type { Simulation } from './simulation';
 
 // Leaders: what the app shows of a people's leader ("Leader >" in the peoples panel, Requirement Anführer
@@ -13,8 +13,12 @@ export type LeaderTrait = {
   name: string;
   /** What the attribute means, one sentence. */
   about: string;
-  /** Its effects in numbers, one line each, e.g. "Merchant load +100 %". */
+  /** Its effects in numbers, one line each, e.g. "Merchant load +100 %" (the table's; a honed attribute acts stronger). */
   effects: string[];
+  /** Given by the god (Gift of Trait, Mark of Weakness: beyond the 3 attributes). */
+  byGod?: boolean;
+  /** Strengthened by the god's Honed Mind: its deviations x1.5 (factors ^1.5). */
+  honed?: boolean;
 };
 
 /** One part of a goal's completion condition: `value` of `target`, e.g. "Settlements" 7 / 9. */
@@ -163,7 +167,14 @@ export function leaderOf(sim: Simulation, civ: number): LeaderInfo | null {
   if (civ <= 0 || civ >= LEADER_CIVS || !s.has[civ] || !sim.civs[civ]) return null;
   const years = Math.floor((sim.tick - s.start[civ]) / 52);
   const traits: LeaderTrait[] = [];
-  for (let i = 0; i < 3; i++) if (s.attr[civ * 3 + i]) traits.push(leaderTrait(s.attr[civ * 3 + i]));
+  for (let i = 0; i < ATTR_SLOTS; i++) {
+    const a = s.attr[civ * ATTR_SLOTS + i];
+    if (!a) continue;
+    const t = leaderTrait(a);
+    if (i >= NATURAL_SLOTS) t.byGod = true;
+    if (s.honed[civ] === i + 1) t.honed = true;
+    traits.push(t);
+  }
   const g = s.goal[civ];
   const reached = s.goalDone[civ] === 1;
   const base = s.goalBase[civ];
@@ -187,7 +198,7 @@ export function leaderOf(sim: Simulation, civ: number): LeaderInfo | null {
     age: s.age0[civ] + years,
     yearsInOffice: years,
     traits,
-    yearsToSecondTrait: s.attr[civ * 3 + 1] !== 0 ? 0 : Math.max(0, LEADER.secondYears - years),
+    yearsToSecondTrait: s.attr[civ * ATTR_SLOTS + 1] !== 0 ? 0 : Math.max(0, LEADER.secondYears - years),
     goal: {
       id: g,
       name: GOALS[g],

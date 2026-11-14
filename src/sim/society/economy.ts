@@ -10,9 +10,7 @@ import {
   MATERIAL_COUNT,
   Material,
   REPAIR_SHARE,
-  GOV_SLOT,
   SETTLEMENT_SLOTS,
-  SLOTS,
   SlotState,
   UPKEEP_GRACE_YEARS,
   buildingSupplyModifiers,
@@ -67,9 +65,22 @@ export const SAVE_UP_YEARS = 5;
 const PLAINS_SLOTS = SETTLEMENT_SLOTS;
 const OTHER_SLOTS = 4;
 
-/** Building slots a hex can use. */
+/** Building slots a hex's biome gives it. */
+export function biomeSlots(biome: number): number {
+  return biome === Biome.Plains ? PLAINS_SLOTS : OTHER_SLOTS;
+}
+
+/**
+ * Building slots a hex can use (each part, settlement and government): its
+ * biome's, shifted by the god (slotMod, Requirement Gacha 7.5), never below
+ * the floor its buildings set when the biome changed, never below 0. The
+ * slot arrays have room for it (gacha.ts grows them before raising slotMod).
+ */
 export function usableSlots(sim: Simulation, cell: number): number {
-  return sim.world.biome[cell] === Biome.Plains ? PLAINS_SLOTS : OTHER_SLOTS;
+  const eco = sim.economy;
+  const n = biomeSlots(sim.world.biome[cell]) + eco.slotMod[cell];
+  const floor = eco.slotFloor[cell];
+  return n > floor ? n : floor;
 }
 
 /** Smallest capacity gain (people) worth a building. */
@@ -162,7 +173,7 @@ export function capacityAfterRepair(sim: Simulation, cell: number): number {
   let a = -1;
   let b = -1;
   let ruins = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
     if (economy.state[s] !== SlotState.Ruin && economy.state[s] !== SlotState.Repair) continue;
     ruins++;
     if (a < 0) a = economy.type[s];
@@ -176,7 +187,7 @@ export function capacityAfterRepair(sim: Simulation, cell: number): number {
   for (let k = 0; k < SUPPLY_KINDS; k++) {
     let add = 0;
     let mul = 1;
-    for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+    for (let s = cell * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
       const st = economy.state[s];
       if (st === SlotState.Empty || st === SlotState.Construction) continue;
       const t = BUILDINGS[economy.type[s]];
@@ -214,7 +225,7 @@ function upkeepWith(sim: Simulation, cell: number, material: number, extraA: num
   const { economy } = sim;
   let sum = 0;
   // The settlement's own buildings (the government keeps up its own).
-  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + sim.economy.half; s < end; s++) {
     if (economy.state[s] === SlotState.Standing) sum += upkeepOfType(economy.type[s], material);
   }
   if (extraA >= 0) sum += upkeepOfType(extraA, material);
@@ -321,21 +332,21 @@ function runCellEconomy(sim: Simulation, c: number, yearEnd: boolean): boolean {
   }
   let busy = false;
   let supplyChanged = false;
-  for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = c * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
     const st = economy.state[s];
     if (st === SlotState.Construction || st === SlotState.Repair) {
       // Only people build; an empty hex's construction site waits.
       if (people > 0) economy.work[s] -= 1 / STEPS_PER_YEAR;
       if (economy.work[s] > 1e-4) {
         // Government construction doesn't hold up the settlement's own.
-        if (s < c * SLOTS + GOV_SLOT) busy = true;
+        if (s < c * sim.economy.slots + sim.economy.half) busy = true;
       } else {
         economy.state[s] = SlotState.Standing;
         economy.work[s] = 0;
         economy.unpaid[s] = 0;
         supplyChanged = true;
       }
-    } else if (st === SlotState.Standing && yearEnd && s < c * SLOTS + GOV_SLOT) {
+    } else if (st === SlotState.Standing && yearEnd && s < c * sim.economy.slots + sim.economy.half) {
       // The government keeps up its own buildings (government.ts).
       const b = BUILDINGS[economy.type[s]];
       // Nobody maintains an empty hex's buildings. A frugal leader's people pay less upkeep.
@@ -409,7 +420,7 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
   if (sim.cellPop[cell] < (BUILD_FROM_CROWDING + sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.buildFrom]) * capacity) return false;
   let free = 0;
   let ruins = 0;
-  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Empty) free++;
     else if (economy.state[s] === SlotState.Ruin) ruins++;
   }
@@ -429,14 +440,14 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
   let firstType = -1;
 
   // Options: every population building type in a free slot, every ruined one repaired.
-  for (let option = 0; option < BUILDINGS.length + SETTLEMENT_SLOTS; option++) {
+  for (let option = 0; option < BUILDINGS.length + sim.economy.half; option++) {
     let type: number;
     let slot = -1;
     if (option < BUILDINGS.length) {
       if (!newAllowed) continue;
       type = option;
     } else {
-      slot = cell * SLOTS + option - BUILDINGS.length;
+      slot = cell * sim.economy.slots + option - BUILDINGS.length;
       if (economy.state[slot] !== SlotState.Ruin) continue;
       type = economy.type[slot];
     }
@@ -461,14 +472,14 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
     }
 
     // After an affordable production building (new or repaired) first.
-    for (let first = 0; first < BUILDINGS.length + SETTLEMENT_SLOTS; first++) {
+    for (let first = 0; first < BUILDINGS.length + sim.economy.half; first++) {
       let ptype: number;
       let pslot = -1;
       if (first < BUILDINGS.length) {
         if (free < (slot >= 0 ? 1 : 2)) continue;
         ptype = first;
       } else {
-        pslot = cell * SLOTS + first - BUILDINGS.length;
+        pslot = cell * sim.economy.slots + first - BUILDINGS.length;
         if (economy.state[pslot] !== SlotState.Ruin || pslot === slot) continue;
         ptype = economy.type[pslot];
       }
@@ -520,7 +531,7 @@ function planTrade(sim: Simulation, cell: number): boolean {
   if (type < 0 || !buildingFits(sim, cell, type)) return false;
   const { economy } = sim;
   let free = false;
-  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free = true;
+  for (let s = cell * sim.economy.slots, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free = true;
   if (!free) return false;
   const b = BUILDINGS[type];
   const cost = leaderLever(sim, cell, L.buildCost);
@@ -540,7 +551,7 @@ function harvestLuxury(sim: Simulation, cell: number, yearEnd: boolean): void {
   const factor = yieldFactor(sim.satisfaction[cell]);
   // A Prospector's people get more out of mines and special deposits.
   const mined = leaderLever(sim, cell, L.harvest);
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
     if (economy.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[economy.type[s]];
     if (isStored(b.good)) {
@@ -589,7 +600,7 @@ export function buildingFits(sim: Simulation, cell: number, type: number): boole
 /** Whether the hex has a building of this good standing, under construction or under repair. */
 function hasGood(sim: Simulation, cell: number, good: number): boolean {
   const { economy } = sim;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
     const st = economy.state[s];
     if ((st === SlotState.Standing || st === SlotState.Construction || st === SlotState.Repair) && BUILDINGS[economy.type[s]].good === good) return true;
   }
@@ -615,7 +626,7 @@ function planDeposit(sim: Simulation, cell: number): boolean {
   }
   let slot = -1;
   let free = false;
-  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Ruin && economy.type[s] === type) slot = s;
     if (economy.state[s] === SlotState.Empty) free = true;
   }
@@ -643,7 +654,7 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
   if (sim.satisfaction[cell] >= SATISFACTION_FIRST_BELOW || people > sim.cellCapacity[cell]) return false;
   prepareNet(sim, cell);
   let free = 0;
-  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
+  for (let s = cell * sim.economy.slots, end = s + usableSlots(sim, cell); s < end; s++) if (economy.state[s] === SlotState.Empty) free++;
   const wood = economy.stock[cell * MATERIAL_COUNT + Material.Wood];
   const stone = economy.stock[cell * MATERIAL_COUNT + Material.Stone];
   const netWood = netFast(sim, cell, Material.Wood, -1, -1);
@@ -655,14 +666,14 @@ function planSatisfaction(sim: Simulation, cell: number): boolean {
   let bestTime = Infinity;
   let bestSlot = -1;
   let bestType = -1;
-  for (let option = 0; option < BUILDINGS.length + SETTLEMENT_SLOTS; option++) {
+  for (let option = 0; option < BUILDINGS.length + sim.economy.half; option++) {
     let type: number;
     let slot = -1;
     if (option < BUILDINGS.length) {
       if (free === 0) continue;
       type = option;
     } else {
-      slot = cell * SLOTS + option - BUILDINGS.length;
+      slot = cell * sim.economy.slots + option - BUILDINGS.length;
       if (economy.state[slot] !== SlotState.Ruin) continue;
       type = economy.type[slot];
     }
@@ -749,7 +760,7 @@ export function startSeatPlan(sim: Simulation, owner: Uint8Array): SeatPlan {
     civOf[g] = id;
     if (sim.seatSite[c]) busy[g] = 1;
     if (sim.hasBuildings[c]) {
-      for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+      for (let s = c * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
         const st = economy.state[s];
         if ((st === SlotState.Construction || st === SlotState.Repair) && economy.type[s] === SEAT_TYPE) busy[g] = 1;
       }
@@ -819,7 +830,7 @@ function scratchField(n: number): Float32Array {
 function seatSlot(sim: Simulation, cell: number): number | null {
   const { economy } = sim;
   let free = false;
-  for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + usableSlots(sim, cell); s < end; s++) {
     if (economy.state[s] === SlotState.Ruin && economy.type[s] === SEAT_TYPE) return s;
     if (economy.state[s] === SlotState.Empty) free = true;
     if (economy.state[s] !== SlotState.Empty && economy.state[s] !== SlotState.Ruin && economy.type[s] === SEAT_TYPE) return null;
@@ -833,7 +844,7 @@ function startConstruction(sim: Simulation, cell: number, slot: number, type: nu
   const b = BUILDINGS[type];
   const share = (slot >= 0 ? REPAIR_SHARE : 1) * leaderLever(sim, cell, L.buildCost);
   if (slot < 0) {
-    for (let s = cell * SLOTS, end = s + usableSlots(sim, cell); s < end && slot < 0; s++) if (economy.state[s] === SlotState.Empty) slot = s;
+    for (let s = cell * sim.economy.slots, end = s + usableSlots(sim, cell); s < end && slot < 0; s++) if (economy.state[s] === SlotState.Empty) slot = s;
     if (slot < 0) return false;
     economy.type[slot] = type;
   }
@@ -912,12 +923,12 @@ export function hexEconomy(sim: Simulation, cell: number): HexEconomy {
   const { economy, world, government: gov } = sim;
   const buildings: BuildingInfo[] = [];
   const govBuildings: BuildingInfo[] = [];
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
     const st = economy.state[s];
     if (st === SlotState.Empty) continue;
     const b = BUILDINGS[economy.type[s]];
     const good = GOOD_NAMES[b.good].toLowerCase();
-    const isGov = s >= cell * SLOTS + GOV_SLOT;
+    const isGov = s >= cell * sim.economy.slots + sim.economy.half;
     // Seats in government slots cost GOV_TUNING.seatUpkeep of the usual upkeep.
     const factor = isGov && b.good === Good.Seat ? GOV_TUNING.seatUpkeep : 1;
     const upkeep = [b.upkeepWood ? `${b.upkeepWood * factor} wood` : '', b.upkeepStone ? `${b.upkeepStone * factor} stone` : ''].filter(Boolean);

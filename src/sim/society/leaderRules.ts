@@ -1,7 +1,8 @@
 import { DIRECTION_COUNT } from '../hex';
 import { PAIRS } from './diplomacy';
 import { capacityAfterRepair, isSettlementTarget } from './economy';
-import { EVENTS, Ev, GOALS, Goal, L, LEADER, LEADER_STEMS, MUTE, TRADE_HISTORY, LEADER_CIVS, LEVERS, LEVER_KIND, MEASURES, M, clearLeader, leaderName, type TermRecord } from './leaders';
+import { ATTR_SLOTS, EVENTS, Ev, GOALS, Goal, L, LEADER, LEADER_STEMS, MUTE, NATURAL_SLOTS, TRADE_HISTORY, LEADER_CIVS, LEVERS, LEVER_KIND, MEASURES, M, clearLeader, combineLevers, leaderName, type TermRecord } from './leaders';
+import type { Rng } from '../rng';
 import type { Simulation } from './simulation';
 import { WAR } from './war';
 
@@ -112,7 +113,7 @@ let freeDone = false;
 const add = new Float64Array(LEVERS);
 const mul = new Float64Array(LEVERS);
 const pick = new Uint8Array(32);
-const pred = new Uint8Array(3);
+const pred = new Uint8Array(ATTR_SLOTS);
 const goalPick = new Uint8Array(5);
 const goalWeight = new Float64Array(5);
 
@@ -205,7 +206,7 @@ function endTerm(sim: Simulation, civ: number, end: number): void {
 function termRecord(sim: Simulation, civ: number, end: number): TermRecord {
   const s = sim.leaders;
   const attrs: number[] = [];
-  for (let i = 0; i < 3; i++) if (s.attr[civ * 3 + i]) attrs.push(s.attr[civ * 3 + i]);
+  for (let i = 0; i < ATTR_SLOTS; i++) if (s.attr[civ * ATTR_SLOTS + i]) attrs.push(s.attr[civ * ATTR_SLOTS + i]);
   return {
     civ,
     goal: s.goal[civ],
@@ -257,24 +258,24 @@ export function dismissLeaders(sim: Simulation): void {
   }
 }
 
-const randInt = (sim: Simulation, n: number) => Math.floor(sim.leaders.rng() * n);
+const randInt = (sim: Simulation, n: number, rng: Rng = sim.leaders.rng) => Math.floor(rng() * n);
 
 /** Whether attribute `a` may be added to the leader of `civ`: not present, no exclusion pair, not against the goal. */
 function allowed(sim: Simulation, civ: number, a: number): boolean {
   const s = sim.leaders;
   if (REMOVED[a]) return false;
-  for (let i = 0; i < 3; i++) {
-    const h = s.attr[civ * 3 + i];
+  for (let i = 0; i < ATTR_SLOTS; i++) {
+    const h = s.attr[civ * ATTR_SLOTS + i];
     if (h === a || (h !== 0 && excludes[h * 26 + a])) return false;
   }
   return !goalExcludes(s.goal[civ], a);
 }
 
-/** Draws an attribute for `civ` at random among the allowed ones (0 if none). */
-function drawRandom(sim: Simulation, civ: number): number {
+/** Draws an attribute for `civ` at random among the allowed ones (0 if none); `rng`: the god's draws use the gacha's. */
+function drawRandom(sim: Simulation, civ: number, rng: Rng = sim.leaders.rng): number {
   let n = 0;
   for (let a = 1; a <= ATTR_COUNT; a++) if (allowed(sim, civ, a)) pick[n++] = a;
-  return n > 0 ? pick[randInt(sim, n)] : 0;
+  return n > 0 ? pick[randInt(sim, n, rng)] : 0;
 }
 
 /** 1 if the last drawExperienced took the attribute from an experience. */
@@ -312,8 +313,8 @@ function drawExperienced(sim: Simulation, civ: number): number {
   return drawRandom(sim, civ);
 }
 
-function chooseGoal(sim: Simulation, civ: number): number {
-  const s = sim.leaders;
+/** The goal of a new leader (Requirement Anführer section 6); `exclude`: a goal not to choose (Reroll Destiny: the current one), `rng` the draws' sequence. */
+function chooseGoal(sim: Simulation, civ: number, exclude = 0, rng: Rng = sim.leaders.rng): number {
   const dip = sim.diplomacy;
   let neighborDanger = 0;
   let neighbors = 0;
@@ -328,7 +329,7 @@ function chooseGoal(sim: Simulation, civ: number): number {
   const people = sim.civs[civ]?.population ?? 0;
   let n = 0;
   for (let g: number = Goal.Expansion; g <= Goal.Glory; g++) {
-    if (g === Goal.Security && neighbors === 0) continue;
+    if (g === exclude || (g === Goal.Security && neighbors === 0)) continue;
     if ((g === Goal.Glory && hasAttr(sim, civ, PACIFIST)) || (g === Goal.Expansion && hasAttr(sim, civ, HOMEBODY))) continue;
     let wgt = 1;
     if (g === Goal.Expansion) {
@@ -340,23 +341,24 @@ function chooseGoal(sim: Simulation, civ: number): number {
     goalPick[n] = g;
     goalWeight[n++] = wgt;
   }
-  if (n === 0) return Goal.Wealth;
-  if (s.rng() < LEADER.goalBySituation) {
+  if (n === 0) return exclude === Goal.Wealth ? 0 : Goal.Wealth;
+  if (rng() < LEADER.goalBySituation) {
     let sum = 0;
     for (let i = 0; i < n; i++) sum += goalWeight[i];
-    let r = s.rng() * sum;
+    let r = rng() * sum;
     for (let i = 0; i < n; i++) {
       r -= goalWeight[i];
       if (r < 0) return goalPick[i];
     }
     return goalPick[n - 1];
   }
-  return goalPick[randInt(sim, n)];
+  return goalPick[randInt(sim, n, rng)];
 }
 
 function hasAttr(sim: Simulation, civ: number, a: number): boolean {
   const s = sim.leaders;
-  return s.attr[civ * 3] === a || s.attr[civ * 3 + 1] === a || s.attr[civ * 3 + 2] === a;
+  for (let i = 0; i < ATTR_SLOTS; i++) if (s.attr[civ * ATTR_SLOTS + i] === a) return true;
+  return false;
 }
 
 /** The capital's city tier (the Glory goal's second measure); 0 without a capital. */
@@ -406,16 +408,24 @@ function startLeader(sim: Simulation, civ: number, inherit: boolean, died: strin
   const s = sim.leaders;
   const st = s.stats;
   let preds = 0;
-  if (inherit) for (let i = 0; i < 3; i++) if (s.attr[civ * 3 + i]) pred[preds++] = s.attr[civ * 3 + i];
+  if (inherit) for (let i = 0; i < ATTR_SLOTS; i++) if (s.attr[civ * ATTR_SLOTS + i]) pred[preds++] = s.attr[civ * ATTR_SLOTS + i];
   s.has[civ] = 1;
   if (s.counter[civ] === 0) {
     s.stem[civ] = drawStem(sim, civ);
     st.dynasties++;
   }
   s.counter[civ]++;
-  s.age0[civ] = LEADER.ageMin + randInt(sim, LEADER.ageMax - LEADER.ageMin + 1);
+  // Young Heir (Requirement Gacha 7.8): this successor takes office at the youngest age; then the flag is used up.
+  if (s.youngHeir[civ]) s.age0[civ] = LEADER.ageMin;
+  else s.age0[civ] = LEADER.ageMin + randInt(sim, LEADER.ageMax - LEADER.ageMin + 1);
+  s.youngHeir[civ] = 0;
+  // Interventions on the predecessor end with it.
+  s.ageShift[civ] = 0;
+  s.honed[civ] = 0;
+  const surelyInherits = s.heirInherits[civ] === 1;
+  s.heirInherits[civ] = 0;
   s.start[civ] = sim.tick;
-  s.attr.fill(0, civ * 3, civ * 3 + 3);
+  s.attr.fill(0, civ * ATTR_SLOTS, civ * ATTR_SLOTS + ATTR_SLOTS);
   s.goal[civ] = 0;
   s.goalDone[civ] = 0;
   s.goalTick[civ] = 0;
@@ -434,7 +444,8 @@ function startLeader(sim: Simulation, civ: number, inherit: boolean, died: strin
   let first = 0;
   if (preds > 0) {
     st.inheritChances++;
-    if (s.rng() < LEADER.inherit) {
+    // Dynasty's Heir: surely one of the predecessor's attributes (else 50 %).
+    if (surelyInherits || s.rng() < LEADER.inherit) {
       first = pred[randInt(sim, preds)];
       if (REMOVED[first]) first = 0;
       else st.inherited++;
@@ -442,7 +453,7 @@ function startLeader(sim: Simulation, civ: number, inherit: boolean, died: strin
   }
   if (LEADER.forceAttr > 0) first = LEADER.forceAttr;
   if (first === 0) first = drawRandom(sim, civ);
-  s.attr[civ * 3] = first;
+  s.attr[civ * ATTR_SLOTS] = first;
   st.attrDrawn[first]++;
   const goal = chooseGoal(sim, civ);
   s.goal[civ] = goal;
@@ -465,11 +476,13 @@ export function recompute(sim: Simulation, civ: number): void {
   const s = sim.leaders;
   add.fill(0);
   mul.fill(1);
-  for (let i = 0; i < 3; i++) {
-    const a = s.attr[civ * 3 + i];
+  for (let i = 0; i < ATTR_SLOTS; i++) {
+    const a = s.attr[civ * ATTR_SLOTS + i];
     if (a !== 0) {
       const fx = ATTRS[a].fx;
-      for (let e = 0; e < fx.length; e++) accumulate(fx[e][0], fx[e][1], LEADER.attrScale);
+      // Honed Mind (Requirement Gacha 7.8): this attribute's deviation x1.5, a factor ^1.5.
+      const honed = s.honed[civ] === i + 1;
+      for (let e = 0; e < fx.length; e++) accumulate(fx[e][0], fx[e][1], LEADER.attrScale, honed ? LEADER.honed : 1);
     }
   }
   const g = s.goal[civ];
@@ -478,9 +491,10 @@ export function recompute(sim: Simulation, civ: number): void {
     const fx = GOAL_FX[g];
     for (let e = 0; e < fx.length; e++) accumulate(fx[e][0], fx[e][1], k);
   }
-  const lev = s.lev;
+  const own = s.own;
   const o = civ * LEVERS;
-  for (let k = 0; k < LEVERS; k++) lev[o + k] = LEVER_KIND[k] ? mul[k] : add[k];
+  for (let k = 0; k < LEVERS; k++) own[o + k] = LEVER_KIND[k] ? mul[k] : add[k];
+  combineLevers(sim, civ);
   updateMood(sim, civ);
 }
 
@@ -503,11 +517,14 @@ function updateMood(sim: Simulation, civ: number): boolean {
   return Math.abs(raw) > cap;
 }
 
-/** Adds one effect to the scratch sums: `k` scales the deviation (1 = full, LEADER.goalHalf after the goal). */
-function accumulate(lever: number, value: number, k: number): void {
+/**
+ * Adds one effect to the scratch sums: `k` scales the deviation (1 = full, LEADER.goalHalf after the goal);
+ * `honed` (Honed Mind) strengthens it once more: an additive deviation x honed, a factor ^honed.
+ */
+function accumulate(lever: number, value: number, k: number, honed = 1): void {
   if (MUTE[lever]) return;
-  if (LEVER_KIND[lever]) mul[lever] *= 1 + (value - 1) * k;
-  else add[lever] += value * k;
+  if (LEVER_KIND[lever]) mul[lever] *= Math.pow(1 + (value - 1) * k, honed);
+  else add[lever] += value * k * honed;
 }
 
 // ---------------------------------------------------------------------------
@@ -544,8 +561,8 @@ export function updateLeaders(sim: Simulation): void {
     const row = civMeasures(sim, civ, atWar, known);
     for (let m = 0; m < MEASURES; m++) s.all[m] += row[m];
     if (on && s.has[civ]) {
-      for (let i = 0; i < 3; i++) {
-        const a = s.attr[civ * 3 + i];
+      for (let i = 0; i < ATTR_SLOTS; i++) {
+        const a = s.attr[civ * ATTR_SLOTS + i];
         if (a !== 0) for (let m = 0; m < MEASURES; m++) s.attrM[a * MEASURES + m] += row[m];
       }
       const g = s.goal[civ] + (s.goalDone[civ] ? 5 : 0);
@@ -592,7 +609,8 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
   // Death (the successor takes office in the same year).
   const years = Math.floor((sim.tick - s.start[civ]) / 52);
   const age = s.age0[civ] + years;
-  const p = deathChance(age);
+  // Long Life / Brittle Crown: the roll counts with the age shifted by the god (the age shown stays).
+  const p = deathChance(age + s.ageShift[civ]);
   st.capYears++;
   if (p > 0 && s.rng() < p) {
     st.died++;
@@ -612,10 +630,10 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
   else if (++s.calmYears[civ] % LEADER.peaceYears === 0) bump(sim, civ, Ev.Peace, 1);
   let changed = false;
   // The 2nd attribute after the first years in office.
-  if (s.attr[civ * 3 + 1] === 0 && years >= LEADER.secondYears) {
+  if (s.attr[civ * ATTR_SLOTS + 1] === 0 && years >= LEADER.secondYears) {
     const a = drawExperienced(sim, civ);
     if (a !== 0) {
-      s.attr[civ * 3 + 1] = a;
+      s.attr[civ * ATTR_SLOTS + 1] = a;
       st.attrDrawn[a]++;
       st.secondFromExperience += drawnFromExperience;
       changed = true;
@@ -629,11 +647,11 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
     st.goalsDone[s.goal[civ]]++;
     changed = true;
     chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, reached the goal ${GOALS[s.goal[civ]]}.`, false);
-    if (s.attr[civ * 3 + 2] === 0) {
-      const slot = s.attr[civ * 3 + 1] === 0 ? 1 : 2;
+    if (s.attr[civ * ATTR_SLOTS + 2] === 0) {
+      const slot = s.attr[civ * ATTR_SLOTS + 1] === 0 ? 1 : 2;
       const a = drawExperienced(sim, civ);
       if (a !== 0) {
-        s.attr[civ * 3 + slot] = a;
+        s.attr[civ * ATTR_SLOTS + slot] = a;
         st.attrDrawn[a]++;
         st.thirdFromExperience += drawnFromExperience;
         chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, gained the trait ${ATTRS[a].name}.`, false);
@@ -642,10 +660,10 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
   }
   if (changed) {
     // Exclusions must hold (the tool and the tests check the count).
-    for (let i = 0; i < 3; i++) {
-      const a = s.attr[civ * 3 + i];
-      for (let j = i + 1; j < 3; j++) {
-        const b = s.attr[civ * 3 + j];
+    for (let i = 0; i < ATTR_SLOTS; i++) {
+      const a = s.attr[civ * ATTR_SLOTS + i];
+      for (let j = i + 1; j < ATTR_SLOTS; j++) {
+        const b = s.attr[civ * ATTR_SLOTS + j];
         if (a && b && excludes[a * 26 + b]) st.exclusionBreaks++;
       }
       if (a && goalExcludes(s.goal[civ], a)) st.exclusionBreaks++;
@@ -709,4 +727,109 @@ function goalReached(sim: Simulation, civ: number): boolean {
     return s.wonAttack[civ] > 0 || tierUp;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// The god's interventions (Requirement Gacha 6.3 and 7.8). The draws use the gacha's random numbers, so the
+// leaders' own sequence is not shifted by them.
+
+/** The first free god slot (NATURAL_SLOTS..ATTR_SLOTS-1) of the leader of `civ`, -1 if none. */
+function freeGodSlot(sim: Simulation, civ: number): number {
+  const s = sim.leaders;
+  for (let i = NATURAL_SLOTS; i < ATTR_SLOTS; i++) if (s.attr[civ * ATTR_SLOTS + i] === 0) return i;
+  return -1;
+}
+
+/**
+ * Attributes the god could give the leader of `civ` (Gift of Trait: any of the 25, Mark of Weakness: `list`),
+ * with the exclusion pairs and the goal's exclusions; 0 if the people has no leader or no slot is free.
+ */
+export function godTraitChoices(sim: Simulation, civ: number, list: readonly number[] | null): number {
+  if (civ <= 0 || civ >= LEADER_CIVS || !sim.leaders.has[civ] || freeGodSlot(sim, civ) < 0) return 0;
+  let n = 0;
+  if (list === null) {
+    for (let a = 1; a <= ATTR_COUNT; a++) if (allowed(sim, civ, a)) n++;
+  } else for (let i = 0; i < list.length; i++) if (allowed(sim, civ, list[i])) n++;
+  return n;
+}
+
+/** Gives the leader of `civ` a random allowed attribute (of `list`, or of all), beyond its 3; returns it (0 = none possible). */
+export function giveGodTrait(sim: Simulation, civ: number, list: readonly number[] | null, rng: Rng): number {
+  if (godTraitChoices(sim, civ, list) === 0) return 0;
+  let a = 0;
+  if (list === null) a = drawRandom(sim, civ, rng);
+  else {
+    let n = 0;
+    for (let i = 0; i < list.length; i++) if (allowed(sim, civ, list[i])) pick[n++] = list[i];
+    a = pick[randInt(sim, n, rng)];
+  }
+  const s = sim.leaders;
+  s.attr[civ * ATTR_SLOTS + freeGodSlot(sim, civ)] = a;
+  s.stats.attrDrawn[a]++;
+  recompute(sim, civ);
+  chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${sim.civs[civ]?.name ?? '?'}, gained the trait ${ATTRS[a].name} by the god.`, false);
+  return a;
+}
+
+/** Number of attributes the leader of `civ` has (0 without a leader). */
+export function traitCount(sim: Simulation, civ: number): number {
+  const s = sim.leaders;
+  if (civ <= 0 || civ >= LEADER_CIVS || !s.has[civ]) return 0;
+  let n = 0;
+  for (let i = 0; i < ATTR_SLOTS; i++) if (s.attr[civ * ATTR_SLOTS + i] !== 0) n++;
+  return n;
+}
+
+/** Honed Mind: one of the leader's attributes at random is strengthened (a new cast picks again); returns the attribute. */
+export function honeTrait(sim: Simulation, civ: number, rng: Rng): number {
+  const s = sim.leaders;
+  const n = traitCount(sim, civ);
+  if (n === 0) return 0;
+  let k = randInt(sim, n, rng);
+  for (let i = 0; i < ATTR_SLOTS; i++) {
+    if (s.attr[civ * ATTR_SLOTS + i] === 0) continue;
+    if (k-- === 0) {
+      s.honed[civ] = i + 1;
+      recompute(sim, civ);
+      return s.attr[civ * ATTR_SLOTS + i];
+    }
+  }
+  return 0;
+}
+
+/** Whether Reroll Destiny may target the leader of `civ`: it has a leader whose goal is still active, and another goal is possible. */
+export function canRerollGoal(sim: Simulation, civ: number): boolean {
+  const s = sim.leaders;
+  if (civ <= 0 || civ >= LEADER_CIVS || !s.has[civ] || s.goal[civ] === 0 || s.goalDone[civ]) return false;
+  // Expansion or Wealth is always open unless the leader's attributes or the current goal rule them out.
+  const g = s.goal[civ];
+  if (g !== Goal.Wealth) return true;
+  if (!hasAttr(sim, civ, HOMEBODY) || !hasAttr(sim, civ, PACIFIST)) return true;
+  // Only Security is left: it needs a neighbor people.
+  collect(sim);
+  for (let b = 1; b <= sim.diplomacy.maxId; b++) if (sim.civs[b] && adj[civ * PAIRS + b]) return true;
+  return false;
+}
+
+/**
+ * Reroll Destiny (Requirement Gacha 6.3): a new goal for the leader of `civ`, chosen like at takeover but
+ * not the current one; the base value and the progress start over. The only change of goal. Returns the goal.
+ */
+export function rerollGoal(sim: Simulation, civ: number, rng: Rng): number {
+  if (!canRerollGoal(sim, civ)) return 0;
+  const s = sim.leaders;
+  collect(sim);
+  const goal = chooseGoal(sim, civ, s.goal[civ], rng);
+  if (goal === 0) return 0;
+  s.goal[civ] = goal;
+  s.goalDone[civ] = 0;
+  s.goalTick[civ] = 0;
+  s.safeYears[civ] = 0;
+  s.conquests[civ] = 0;
+  s.wonAttack[civ] = 0;
+  s.goalBase[civ] = goal === Goal.Expansion ? cSettle[civ] : goal === Goal.Wealth ? Math.max(LEADER.wealthFloor, tradeAverage(sim, civ)) : goal === Goal.Glory ? capitalTier(sim, civ) : 0;
+  s.stats.goalsChosen[goal]++;
+  recompute(sim, civ);
+  chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${sim.civs[civ]?.name ?? '?'}, follows a new goal by the god: ${GOALS[goal]}.`, false);
+  return goal;
 }

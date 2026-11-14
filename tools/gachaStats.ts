@@ -1,10 +1,14 @@
 // Gacha calibration (see "Design Documents/Requirement Gacha.md"): believers of the player god over time,
-// Faith accrual, price curve and rarity statistics, modelled on top of the unchanged simulation.
-// Usage: npx tsx tools/gachaStats.ts [worlds=12] [years=500] [cache=path.json]
-//   Without effects of abilities (current faith rules). Believers are read every tick (sim.believers).
-//   Price models: exp (a*g^(n-1)), lin (a*(1+b*(n-1))), pow (a*n^k); each with accrual factor f (Faith/believer/tick).
+// Faith accrual, price curve and rarity statistics.
+// Usage: npx tsx tools/gachaStats.ts [worlds=12] [years=500] [cache=path.json] [model ...]
+//   Without casting abilities (worship from 55 % believers, until below 45 %). Believers are read every tick
+//   (sim.believers). Without a cache the worlds also pull with the core (pullGacha, whenever the Faith of
+//   sim.gacha suffices): "real pulls" below. The first model is the core's (GACHA.faithPerBeliever, pullPrice).
+//   Further price models: exp (a*g^(n-1)), lin (a*(1+b*(n-1))), pow (a*n^k); each with accrual factor f (Faith/believer/tick).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
+import { ABILITIES, GACHA, TICKS_PER_YEAR, TIER_NAMES, createSimulation, generateWorld, pullGacha, pullPrice, stepSimulation } from '../src/sim';
+import { drawAbility } from '../src/sim/society/gacha';
+import { createRng } from '../src/sim/rng';
 
 const worlds = Number(process.argv[2] ?? 12);
 const years = Number(process.argv[3] ?? 500);
@@ -14,6 +18,8 @@ const TARGET_TICKS = 300 * TPS; // 5 real minutes at default speed
 
 // ---- believers per tick per world ----
 let bel: number[][];
+/** Pulls the core made per world (only without a cache). */
+const realPulls: number[] = [];
 if (cache && existsSync(cache)) bel = JSON.parse(readFileSync(cache, 'utf8'));
 else {
   bel = [];
@@ -23,8 +29,10 @@ else {
     while (a.length < years * TICKS_PER_YEAR) {
       if (!sim.gameOver) stepSimulation(sim);
       a.push(sim.gameOver ? 0 : sim.believers);
+      while (pullGacha(sim)) {}
     }
     bel.push(a);
+    realPulls.push(sim.gacha.pulls);
   }
   if (cache) writeFileSync(cache, JSON.stringify(bel));
 }
@@ -85,7 +93,7 @@ function report(m: Model, speeds = [6]) {
 const expModel = (f: number, a: number, g: number): Model => ({ name: `exp ${a}*${g}^(n-1)`, f, price: (n) => a * Math.pow(g, n - 1) });
 const linModel = (f: number, a: number, b: number): Model => ({ name: `lin ${a}*(1+${b}*(n-1))`, f, price: (n) => a * (1 + b * (n - 1)) });
 const powModel = (f: number, a: number, k: number): Model => ({ name: `pow ${a}*n^${k}`, f, price: (n) => a * Math.pow(n, k) });
-const models: Model[] = [expModel(0.0005, 20, 1.25)];
+const models: Model[] = [{ name: `core ${GACHA.priceBase}*n^${GACHA.priceExp}`, f: GACHA.faithPerBeliever, price: pullPrice }];
 for (const arg of process.argv.slice(5)) {
   const [kind, ...p] = arg.split(':');
   const x = p.map(Number);
@@ -123,18 +131,23 @@ if (process.env.FIT) {
   for (const [k, [l, d]] of Object.entries(best)) console.log(`  ${k}: rms log dev ${Math.sqrt(l).toFixed(2)}  ${d}`);
 }
 for (const m of models) report(m);
+if (realPulls.length) {
+  const s2 = [...realPulls].sort((x, y) => x - y);
+  console.log(`\nReal pulls of the core (${years} J): Median ${q(s2, 0.5)} [${q(s2, 0.1)} .. ${q(s2, 0.9)}]`);
+}
 
-// 3. rarity (tools/gachaStats uses the requirement's tiers, weights via env W=60,28,10,2)
-const tiers = { Common: 7, Rare: 10, Epic: 6, Legendary: 2 };
-const w = (process.env.W ?? '60,28,10,2').split(',').map(Number);
+// 3. rarity: the core's tiers (ABILITIES) and weights (GACHA.tierWeights, or env W=50,30,15,5), plus 100000 draws of the core
+const cnt = [0, 1, 2, 3].map((t) => ABILITIES.filter((a) => a.tier === t).length);
+const w = (process.env.W ?? GACHA.tierWeights.join(',')).split(',').map(Number);
 const sw = w.reduce((a, b) => a + b, 0);
-const cnt = Object.values(tiers);
+const drawn = new Array<number>(4).fill(0);
+const rng = createRng(1);
+for (let k = 0; k < 100000; k++) drawn[ABILITIES[drawAbility(rng)].tier]++;
 console.log(`\nSeltenheit, Gewichte ${w.join('/')}: Wahrscheinlichkeit je Fähigkeit und Ziehung (3 Fähigkeiten je Pull)`);
-let i = 0;
-for (const [name, c] of Object.entries(tiers)) {
+for (let i = 0; i < 4; i++) {
+  const c = cnt[i];
   const pAb = w[i] / sw / c; // per single ability draw
   const pTier = w[i] / sw;
   const first1 = 1 / (1 - Math.pow(1 - pTier, 3)); // expected pulls to first of tier
-  console.log(`  ${name.padEnd(10)} ${c} Fähigkeiten, Stufe ${(100 * pTier).toFixed(1)}%, je Fähigkeit ${(100 * pAb).toFixed(2)}%/Slot, ${(3 * pAb).toFixed(3)} je Pull, erwartete Pulls bis erste Stufe: ${first1.toFixed(1)}, bis bestimmte Fähigkeit: ${(1 / (1 - Math.pow(1 - pAb, 3))).toFixed(1)}`);
-  i++;
+  console.log(`  ${TIER_NAMES[i].padEnd(10)} ${c} Fähigkeiten, Stufe ${(100 * pTier).toFixed(1)}% (Kern gezogen ${(drawn[i] / 1000).toFixed(1)}%), je Fähigkeit ${(100 * pAb).toFixed(2)}%/Slot, ${(3 * pAb).toFixed(3)} je Pull, erwartete Pulls bis erste Stufe: ${first1.toFixed(1)}, bis bestimmte Fähigkeit: ${(1 / (1 - Math.pow(1 - pAb, 3))).toFixed(1)}`);
 }

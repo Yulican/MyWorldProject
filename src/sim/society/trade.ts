@@ -241,7 +241,7 @@ export function updateTradeBuildings(sim: Simulation, cell: number): void {
   const { economy, trade } = sim;
   let merchants = 0;
   let harbor = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
     if (economy.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[economy.type[s]];
     if (b.good === Good.Merchants || b.good === Good.Harbor) merchants += b.amount;
@@ -396,7 +396,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
 export function upkeepOf(eco: Economy, cell: number, material: number): number {
   let sum = 0;
   // The settlement's own buildings (the government keeps up its own).
-  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.half; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
     sum += material === 0 ? b.upkeepWood : b.upkeepStone;
@@ -429,7 +429,7 @@ export function sumCivWants(sim: Simulation, owner: Uint8Array): void {
       trade.civSpare[id * TRADE_GOODS + g] += trade.surplus[c * TRADE_GOODS + g];
     }
     if (!sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+    for (let s = c * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
       const st = economy.state[s];
       if (st !== SlotState.Standing && st !== SlotState.Construction && st !== SlotState.Repair) continue;
       const b = BUILDINGS[economy.type[s]];
@@ -846,7 +846,7 @@ function isHub(sim: Simulation, cell: number): boolean {
 
 /** Whether the settlement itself keeps up a seat of government (not one in the government's slots). */
 function settlementSeat(eco: Economy, cell: number): boolean {
-  for (let s = cell * SLOTS, end = s + SETTLEMENT_SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.half; s < end; s++) {
     if (eco.state[s] === SlotState.Standing && BUILDINGS[eco.type[s]].good === Good.Seat) return true;
   }
   return false;

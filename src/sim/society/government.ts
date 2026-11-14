@@ -202,7 +202,7 @@ function projectUpkeep(sim: Simulation, seat: number, seatsOnly: boolean): numbe
 function upkeepReserve(sim: Simulation, cell: number, m: number, years = UPKEEP_RESERVE_YEARS): number {
   const { economy } = sim;
   let sum = 0;
-  for (let s = cell * SLOTS + GOV_SLOT, end = s + usableSlots(sim, cell); s < end; s++) {
+  for (let s = cell * sim.economy.slots + sim.economy.half, end = s + usableSlots(sim, cell); s < end; s++) {
     const st = economy.state[s];
     if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
     sum += upkeepOf(economy.type[s], m);
@@ -468,7 +468,7 @@ export function updateGovernmentUpkeep(sim: Simulation, owner: Uint8Array): void
   for (let c = 0; c < n; c++) {
     if (!sim.hasBuildings[c]) continue;
     let ruined = false;
-    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+    for (let s = c * sim.economy.slots + sim.economy.half, end = s + usableSlots(sim, c); s < end; s++) {
       if (economy.state[s] !== SlotState.Standing) continue;
       const t = economy.type[s];
       const w = c * MATERIAL_COUNT;
@@ -507,7 +507,7 @@ export function updateGovernmentProjects(sim: Simulation, owner: Uint8Array): vo
   for (let c = 0; c < n; c++) {
     const d = gov.district[c];
     if (d < 0 || !sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+    for (let s = c * sim.economy.slots + sim.economy.half, end = s + usableSlots(sim, c); s < end; s++) {
       const st = economy.state[s];
       if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
       const t = economy.type[s];
@@ -588,7 +588,7 @@ function setProject(gov: Government, seat: number, year: number): void {
 
 /** A free government slot of a hex, -1 if none. */
 function freeGovSlot(sim: Simulation, cell: number): number {
-  for (let s = cell * SLOTS + GOV_SLOT, end = s + usableSlots(sim, cell); s < end; s++) if (sim.economy.state[s] === SlotState.Empty) return s;
+  for (let s = cell * sim.economy.slots + sim.economy.half, end = s + usableSlots(sim, cell); s < end; s++) if (sim.economy.state[s] === SlotState.Empty) return s;
   return -1;
 }
 
@@ -879,7 +879,7 @@ export function governmentOf(sim: Simulation, civ: number): District[] {
     d.settlements++;
     d.people += sim.cellPop[c];
     if (!sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS + GOV_SLOT, end = s + usableSlots(sim, c); s < end; s++) {
+    for (let s = c * sim.economy.slots + sim.economy.half, end = s + usableSlots(sim, c); s < end; s++) {
       const st = economy.state[s];
       if (st === SlotState.Empty) continue;
       const t = economy.type[s];

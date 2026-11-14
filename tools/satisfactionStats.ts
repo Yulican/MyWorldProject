@@ -2,7 +2,7 @@
 // numbers (see "Design Documents/Requirement Zufriedenheit.md", Abnahme).
 // Usage: npx tsx tools/satisfactionStats.ts [worlds=12] [years=100,200,300]
 import { performance } from 'node:perf_hooks';
-import { BUILDINGS, Good, SLOTS, TICKS_PER_YEAR, createSimulation, generateWorld, isLuxury, stepSimulation } from '../src/sim';
+import { BUILDINGS, Good, TICKS_PER_YEAR, createSimulation, generateWorld, isLuxury, stepSimulation } from '../src/sim';
 import { SlotState } from '../src/sim/society/buildings';
 
 const worlds = Number(process.argv[2] ?? 12);
@@ -27,7 +27,7 @@ for (let seed = 1; seed <= worlds; seed++) {
     let buildings = 0;
     for (let c = 0; c < sim.world.cellCount; c++) {
       if (sim.cellPop[c] > 0) moods.push(sim.satisfaction[c]);
-      for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) {
+      for (let s = c * sim.economy.slots; s < (c + 1) * sim.economy.slots; s++) {
         if (sim.economy.state[s] !== SlotState.Standing) continue;
         const good = BUILDINGS[sim.economy.type[s]].good;
         buildings++;
