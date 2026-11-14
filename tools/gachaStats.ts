@@ -79,7 +79,7 @@ function report(m: Model, speeds = [6]) {
   }
   const tot = per.map((p) => p.length);
   console.log(`  Ziehungen gesamt (${years} J): Median ${q(tot, 0.5)} [${q(tot, 0.1)} .. ${q(tot, 0.9)}]; Preis der letzten: ${f1(m.price(q(tot, 0.5)))}`);
-  for (const s of speeds.slice(1)) console.log(`  bei ${s} Wochen/s: ${f1((q(tot, 0.5) * 0) + (60 * (s / TPS)) / Math.max(1e-9, 60 / Math.max(0.01, q(per.map((p) => p.length / (years * TICKS_PER_YEAR / TPS / 3600)), 0.5))))} Ziehungen je Echtstunde (Faktor ${f1(s / TPS)} gegenüber Default, gleiche Spielzeit-Kadenz)`);
+  // Faith and price depend on game time only: at 26 / 104 weeks/s the pulls per real minute are 4.3x / 17.3x the default ones.
 }
 
 const expModel = (f: number, a: number, g: number): Model => ({ name: `exp ${a}*${g}^(n-1)`, f, price: (n) => a * Math.pow(g, n - 1) });
@@ -92,6 +92,35 @@ for (const arg of process.argv.slice(5)) {
   if (kind === 'exp') models.push(expModel(x[0], x[1], x[2]));
   if (kind === 'lin') models.push(linModel(x[0], x[1], x[2]));
   if (kind === 'pow') models.push(powModel(x[0], x[1], x[2]));
+}
+if (process.env.FIT) {
+  // grid search: start price a (f fixed = FIT) and shape, minimising mean squared log deviation of the pull intervals from the 5 minute target
+  const f = Number(process.env.FIT);
+  const loss = (m: Model) => {
+    let sum = 0;
+    let c = 0;
+    for (const a of bel) {
+      const p = pullTicks(a, m);
+      for (let i = 0; i < p.length; i++) {
+        const d = Math.log(Math.max(1, p[i] - (i ? p[i - 1] : 0)) / TARGET_TICKS);
+        sum += d * d;
+        c++;
+      }
+      // a world that never pulls again is penalised by the time since its last pull
+      const since = a.length - (p.length ? p[p.length - 1] : 0);
+      if (since > 2 * TARGET_TICKS) { sum += Math.pow(Math.log(since / TARGET_TICKS), 2); c++; }
+    }
+    return sum / c;
+  };
+  const best: Record<string, [number, string]> = {};
+  const consider = (k: string, l: number, d: string) => { if (!best[k] || l < best[k][0]) best[k] = [l, d]; };
+  for (let a = 2; a <= 400; a *= 1.15) {
+    for (let g = 1.02; g <= 1.6; g += 0.02) consider('exp', loss(expModel(f, a, g)), `a=${a.toFixed(1)} g=${g.toFixed(2)}`);
+    for (let b = 0.1; b <= 20; b *= 1.2) consider('lin', loss(linModel(f, a, b)), `a=${a.toFixed(1)} b=${b.toFixed(2)}`);
+    for (let k = 0.6; k <= 2.6; k += 0.1) consider('pow', loss(powModel(f, a, k)), `a=${a.toFixed(1)} k=${k.toFixed(1)}`);
+  }
+  console.log(`\nFit (f=${f}):`);
+  for (const [k, [l, d]] of Object.entries(best)) console.log(`  ${k}: rms log dev ${Math.sqrt(l).toFixed(2)}  ${d}`);
 }
 for (const m of models) report(m);
 
