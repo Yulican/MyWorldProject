@@ -26,7 +26,7 @@ export const LEADER = {
   enabled: 1,
   /** 1 = keep a sample of every ended term (`records`; tools and tests only, the game keeps none). */
   records: 0,
-  /** 1 = takeover, death, new attribute and reached goal go into the chronicle (silent entries). */
+  /** 1 = leaders go into the chronicle: a new leader (with the predecessor's death) as an important entry, a new attribute and a reached goal as silent ones. */
   chronicle: 1,
   /** Age at takeover: ageMin + one of (ageMax - ageMin + 1); death: from deathFrom with deathBase + deathStep per year over it, at most deathMax. */
   ageMin: 20,

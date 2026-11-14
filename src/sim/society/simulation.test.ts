@@ -343,7 +343,7 @@ test('a people of 100 lacking a luxury good settles a free deposit of it nearby'
   assert.ok(sim.world.deposit[cell] !== 0);
 });
 
-test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace and alliances are important', () => {
+test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace, alliances and new leaders are important', () => {
   const important = [
     / They pray to you\.$/,
     /^A new people, /,
@@ -363,6 +363,7 @@ test('only founding, new peoples, uprisings, secessions, vanished peoples, game 
     / could not crush the rebellion: /,
     /^The rebellion against the .* ended\.$/,
     / formed an alliance\.$/,
+    / now leads the /,
   ];
   const seen = { important: 0, silent: 0 };
   for (const seed of [5, 16, 102]) {

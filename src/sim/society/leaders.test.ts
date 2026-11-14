@@ -80,7 +80,7 @@ test('leaders are on in the game; a simulation without them (tools) keeps every 
   }
   assert.equal(warChance(sim, 1, WAR.chance), WAR.chance);
   assert.equal(warRatio(sim, 1, true, WAR.ratio), WAR.ratio);
-  assert.ok(!sim.chronicle.some((e) => / leader /.test(e.text)));
+  assert.ok(!sim.chronicle.some((e) => / now leads the | leader of the /.test(e.text)));
 });
 
 test('leaders are deterministic per seed, rule every living people, and their lever sets are those of their attributes and goal', () => {
@@ -155,12 +155,14 @@ test('a leader dies only from 55 on; the successor takes office the same year: s
     assert.equal(s.events[civ * EVENTS + Ev.WarWon], 0, 'experiences start anew');
     const texts = sim.chronicle.slice(entries);
     const name = sim.civs[civ]!.name;
-    assert.ok(texts.some((e) => e.text.includes(`leader of the ${name}, died at the age of 55 after 12 years in office`)), texts.map((e) => e.text).join(' | '));
-    assert.ok(texts.some((e) => e.text.startsWith(`${leaderName(stem, counter + 1)} became leader of the ${name}`)));
-    for (const e of texts) {
-      assert.equal(e.important, false, 'silent entries');
-      assert.equal(e.cell, sim.civs[civ]!.capital);
-    }
+    // Death and succession are ONE important entry (it opens the chronicle dialog), at the capital.
+    const mine = texts.filter((e) => e.text.includes(`the ${name} (`));
+    assert.equal(mine.length, 1, texts.map((e) => e.text).join(' | '));
+    const first = attrsOf(sim, civ)[0];
+    assert.equal(mine[0].text, `${leaderName(stem, counter)} died at 55 after 12 years. ${leaderName(stem, counter + 1)} now leads the ${name} (${ATTRS[first].name}, goal: ${GOALS[s.goal[civ]]}).`);
+    assert.equal(mine[0].important, true);
+    assert.equal(mine[0].cell, sim.civs[civ]!.capital);
+    assert.ok(!texts.some((e) => / died at /.test(e.text) && !/ now leads the /.test(e.text)), 'no separate death entry');
   });
   // The death curve: 2 % at 55, +1.5 points a year, at most 50 %.
   assert.equal(LEADER.deathFrom, 55);
@@ -204,7 +206,8 @@ test('the 2nd attribute comes after 10 years in office, from the most frequent e
       const got = attrsOf(sim, civ);
       assert.equal(got.length, 2);
       assert.ok([1, 6, 10, 4].includes(got[1]), `from the experience: ${ATTRS[got[1]].name}`);
-      assert.ok(sim.chronicle.slice(entries).some((e) => e.text.includes(`gained the trait ${ATTRS[got[1]].name}`)));
+      const gained = sim.chronicle.slice(entries).filter((e) => e.text.includes(`gained the trait ${ATTRS[got[1]].name}`));
+      assert.ok(gained.length === 1 && !gained[0].important, 'a new attribute is a silent entry');
       assert.ok(lever(sim, civ, L.sat) === 5 + (got[1] === 1 ? -2 : 0), 'the lever set follows the new attribute');
     }
     // A tie goes to the latest experience.
@@ -278,7 +281,8 @@ test('each goal is reached by its condition; then its effect halves and the 3rd 
     assert.equal(s.goalTick[civ], sim.tick);
     assert.equal(attrsOf(sim, civ).length, 3, 'the 3rd attribute');
     assert.ok([22, 23].includes(attrsOf(sim, civ)[2]));
-    assert.ok(sim.chronicle.slice(entries).some((e) => e.text.includes('reached the goal Expansion')));
+    const reached = sim.chronicle.slice(entries).filter((e) => e.text.includes('reached the goal Expansion'));
+    assert.ok(reached.length === 1 && !reached[0].important, 'a reached goal is a silent entry');
     // Half the deviation from the base value.
     assert.equal(lever(sim, civ, L.warPop), 1.25);
     assert.ok(Math.abs(lever(sim, civ, L.settleOver) - 0.99) < 1e-6);
@@ -490,6 +494,11 @@ test('a new people starts a new line with ordinal 1; names come from the list by
   updateLeaders(sim);
   assert.equal(s.has[born.id], 1);
   assert.equal(s.counter[born.id], 1);
+  // The first leader of a new people: one important entry, without a death.
+  const taken = sim.chronicle.filter((e) => e.text.includes(` now leads the ${born.name} (`));
+  assert.equal(taken.length, 1);
+  assert.equal(taken[0].important, true);
+  assert.ok(taken[0].text.startsWith(`${leaderName(s.stem[born.id], 1)} now leads the ${born.name} (`), taken[0].text);
   assert.notEqual(s.stem[born.id], s.stem[civ]);
   assert.equal(attrsOf(sim, born.id).length, 1);
   assert.equal(s.stats.inheritChances, sim.leaders.stats.died, 'only successors may inherit');

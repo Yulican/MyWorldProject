@@ -102,6 +102,19 @@ function worldRow(sim: Simulation): Row {
   for (let c = 1; c < 256; c++) value += sim.leaders.tradeLast[c];
   let soldiers = 0;
   for (let c = 0; c < w.cellCount * 3; c++) soldiers += sim.military.soldiers[c];
+  // Leader dialogs (important "now leads" entries, Requirement Anführer section 8) and the most in one year.
+  const dialogsPerYear = new Map<number, number>();
+  for (const e of sim.chronicle) {
+    if (!e.important || !e.text.includes(' now leads the ')) continue;
+    const y = Math.floor(e.tick / TICKS_PER_YEAR);
+    dialogsPerYear.set(y, (dialogsPerYear.get(y) ?? 0) + 1);
+  }
+  let leaderDialogs = 0;
+  let leaderDialogsMax = 0;
+  for (const n of dialogsPerYear.values()) {
+    leaderDialogs += n;
+    leaderDialogsMax = Math.max(leaderDialogsMax, n);
+  }
   return {
     settlements,
     'towns (50+)': towns,
@@ -137,6 +150,8 @@ function worldRow(sim: Simulation): Row {
     'unhappy (<0) %': (100 * satNeg) / Math.max(1, settlements),
     'game over (nobody prays, worlds)': sim.gameOver ? 1 : 0,
     'wars on an earlier victor (revenge)': sim.leaders.stats.revengeWars,
+    'leader dialogs (new leaders, total)': leaderDialogs,
+    'leader dialogs, most in one year': leaderDialogsMax,
     'buildings standing': standing,
     'government treasuries (sum)': treasury,
     'hexes with roads': roads,

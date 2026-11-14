@@ -389,13 +389,20 @@ function drawStem(sim: Simulation, civ: number): number {
 }
 
 const leaderLabel = (sim: Simulation, civ: number) => leaderName(sim.leaders.stem[civ], sim.leaders.counter[civ]);
-/** A silent chronicle entry at the people's capital (Requirement section 8). */
-function chronicle(sim: Simulation, civ: number, text: string): void {
-  if (LEADER.chronicle === 1) sim.chronicle.push({ tick: sim.tick, text, cell: sim.civs[civ]?.capital ?? -1, important: false });
+/**
+ * A chronicle entry at the people's capital (Requirement section 8). A new leader is `important` (the entry
+ * opens the chronicle dialog, like every important entry); a new attribute and a reached goal are silent.
+ */
+function chronicle(sim: Simulation, civ: number, text: string, important: boolean): void {
+  if (LEADER.chronicle === 1) sim.chronicle.push({ tick: sim.tick, text, cell: sim.civs[civ]?.capital ?? -1, important });
 }
 
-/** A new leader of `civ`; `inherit`: it follows a leader whose attributes are still in the slots (else a new dynasty's first). */
-function startLeader(sim: Simulation, civ: number, inherit: boolean): void {
+/**
+ * A new leader of `civ`; `inherit`: it follows a leader whose attributes are still in the slots (else a new
+ * dynasty's first). `died` is the sentence about the predecessor's death ('' for a first leader): death and
+ * succession make one important chronicle entry.
+ */
+function startLeader(sim: Simulation, civ: number, inherit: boolean, died: string): void {
   const s = sim.leaders;
   const st = s.stats;
   let preds = 0;
@@ -444,7 +451,7 @@ function startLeader(sim: Simulation, civ: number, inherit: boolean): void {
   st.started++;
   recompute(sim, civ);
   const name = sim.civs[civ]?.name ?? '?';
-  chronicle(sim, civ, `${leaderLabel(sim, civ)} became leader of the ${name} (${ATTRS[first].name}, goal: ${GOALS[goal]}).`);
+  chronicle(sim, civ, `${died}${leaderLabel(sim, civ)} now leads the ${name} (${ATTRS[first].name}, goal: ${GOALS[goal]}).`, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +536,7 @@ export function updateLeaders(sim: Simulation): void {
     if (!people) continue;
     const atWar = w.enemy[civ] !== 0 || w.allyWarsOf[civ] > 0;
     if (on) {
-      if (!s.has[civ]) startLeader(sim, civ, false);
+      if (!s.has[civ]) startLeader(sim, civ, false, '');
       else yearOfLeader(sim, civ, atWar);
     }
     // Measures (also without leaders, for the comparison).
@@ -589,9 +596,9 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
   st.capYears++;
   if (p > 0 && s.rng() < p) {
     st.died++;
-    chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, died at the age of ${age} after ${years} years in office.`);
+    const died = `${leaderLabel(sim, civ)} died at ${age} after ${years} years. `;
     endTerm(sim, civ, 0);
-    startLeader(sim, civ, true);
+    startLeader(sim, civ, true, died);
     return;
   }
   // Experiences of the year.
@@ -612,7 +619,7 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
       st.attrDrawn[a]++;
       st.secondFromExperience += drawnFromExperience;
       changed = true;
-      chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, gained the trait ${ATTRS[a].name}.`);
+      chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, gained the trait ${ATTRS[a].name}.`, false);
     }
   }
   // Goal: once reached its effect halves and the 3rd attribute comes.
@@ -621,7 +628,7 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
     s.goalTick[civ] = sim.tick;
     st.goalsDone[s.goal[civ]]++;
     changed = true;
-    chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, reached the goal ${GOALS[s.goal[civ]]}.`);
+    chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, reached the goal ${GOALS[s.goal[civ]]}.`, false);
     if (s.attr[civ * 3 + 2] === 0) {
       const slot = s.attr[civ * 3 + 1] === 0 ? 1 : 2;
       const a = drawExperienced(sim, civ);
@@ -629,7 +636,7 @@ function yearOfLeader(sim: Simulation, civ: number, atWar: boolean): void {
         s.attr[civ * 3 + slot] = a;
         st.attrDrawn[a]++;
         st.thirdFromExperience += drawnFromExperience;
-        chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, gained the trait ${ATTRS[a].name}.`);
+        chronicle(sim, civ, `${leaderLabel(sim, civ)}, leader of the ${name}, gained the trait ${ATTRS[a].name}.`, false);
       }
     }
   }
