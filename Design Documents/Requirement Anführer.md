@@ -163,9 +163,9 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 
 - **Peoples-Panel:** eigenes Untermenü „Leader ›“ (wie „War ›“, „Diplomacy ›“, „Government ›“). Es zeigt: Name (mit Zähler), Alter, Regierungsjahre, jedes Attribut mit Beschreibung und **Wirkung in Zahlen**, das Ziel mit Wirkung in Zahlen (aktiv oder zur Hälfte nach Abschluss) und den **Zielfortschritt** (Stand/Ziel, z. B. „Settlements 7 / 9“). Für das 2. Attribut: Jahre bis zum Eintreffen.
 - **Chronik** (`Requirement Zufriedenheit.md`, Abschnitt 5): Einträge „Leader takes office“ (Name, Volk), „Leader died“ (Alter, Regierungsjahre), „Leader gains trait“ (Attribut), „Goal reached“ (Ziel). Mit „Go to“ auf die Hauptstadt.
-- **Dialog bei Herrschaftswechsel (entschieden):** Wenn ein neuer Anführer übernimmt, öffnet sich für **alle Völker** ein Dialog mit Pause (Regeln wie jeder wichtige Eintrag, Zufriedenheit §5). Das gilt auch für den **ersten Anführer eines neuen Volks** (Aufstand, Stamm; Amtsantritt am Jahresende nach der Gründung). **Tod und Nachfolge stehen in einem Dialog** mit Attribut und Ziel des Neuen. Muster: „Aron II died at 63 after 31 years. Yorin III now leads the Dolevol (Weak Hand, goal: Glory).“ Erster Anführer: „Yorin I now leads the Dolevol (Weak Hand, goal: Glory).“ Erwartet: etwa ein Herrschaftswechsel alle 7 Jahre in einer Welt mit 9 bis 12 Völkern.
+- **Dialog bei Herrschaftswechsel (entschieden):** Wenn ein neuer Anführer übernimmt, öffnet sich für **alle Völker** ein Dialog mit Pause (Regeln wie jeder wichtige Eintrag, Zufriedenheit §5). Das gilt auch für den **ersten Anführer eines neuen Volks** (Aufstand, Stamm; Amtsantritt am Jahresende nach der Gründung). **Tod und Nachfolge stehen in einem Dialog** mit Attribut und Ziel des Neuen. Muster: „Aron II died at 63 after 31 years. Yorin III now leads the Dolevol (Weak Hand, goal: Glory).“ Erster Anführer einer Dynastie ohne Zähler (Abschnitt 6): „Yorin now leads the Dolevol (Weak Hand, goal: Glory).“ **Gemessen** (6 Welten à 300 Jahre, nach Umsetzung): im Mittel 53,5 Anführer-Dialoge je Welt (39–66), etwa einer alle 5,6 Jahre, davon 6–10 erste Anführer neuer Völker; höchstens 2–3 im selben Jahr. Alle wichtigen Einträge zusammen: 45–81 je Welt.
 - **„Leader gains trait“ und „Goal reached“ bleiben still** in der Liste (kein Dialog, keine Pause).
-- **Offen:** Ob die Anführer der Startvölker bei Weltbeginn einen Dialog bekommen, prüft `sim-engineer`; im Zweifel still, damit das Spiel nicht mit einem Stapel Dialoge beginnt.
+- **Weltstart (entschieden):** Jede Welt beginnt mit genau einem Volk (dem des Spielers). Dessen erster Anführer kommt am Ende von Jahr 1 als einzelner Dialog, ein Jahr nach dem Gründungsdialog. Es entsteht kein Stapel; der Eintrag bleibt wichtig (Dialog mit Pause).
 - **Mehrere Meldungen:** Stehen mehrere Dialoge an, gilt der Knopf „Close all“ (`Requirement Zufriedenheit.md`, Abschnitt 5).
 - Karte: nichts Neues.
 - Gott-Eingriff: nicht in 1.0.
@@ -239,7 +239,7 @@ Der Nutzer hat alle folgenden Punkte bestätigt; sie stehen in den Regelabschnit
 - Sterbekurve (Abschnitt 2): nie vor 55, dann 2 % + 1,5 Punkte je Jahr, höchstens 50 %.
 - Zielwahl-Gewichte (60 % nach Lage, Faktoren ×2/×3, 40 % gleichverteilt) und Abschlussbedingungen aller vier Ziele (Abschnitte 5 und 6).
 - Gegenseitige Ausschlüsse Pacifist ↔ Glory und Homebody ↔ Expansion (Abschnitt 5).
-- Chronik-Einträge: Dialog nur bei Herrschaftswechsel (Tod und Nachfolge in einem Dialog, auch erster Anführer eines neuen Volks); „neues Attribut“ und „Ziel erreicht“ still (Abschnitt 8).
+- Chronik-Einträge: Dialog nur bei Herrschaftswechsel (Tod und Nachfolge in einem Dialog, auch erster Anführer eines neuen Volks, ohne Zähler, und der erste Anführer des Startvolks am Ende von Jahr 1); „neues Attribut“ und „Ziel erreicht“ still (Abschnitt 8).
 - „Zur Hälfte“ nach Abschluss: Zahlenwirkungen werden halbiert, Ja/Nein-Wirkungen bleiben voll (Abschnitt 5).
 - Neues Volk (Aufstand, Stamm, Rebellen): neuer Stamm, zufälliges 1. Attribut, kein Erbe; Eroberung ändert den Anführer nicht (Abschnitt 6).
 - Deckel und Kombination der Wirkungen (Abschnitt 3).
