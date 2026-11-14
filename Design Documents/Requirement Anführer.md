@@ -8,7 +8,7 @@ Baut auf Krieg (`Requirement Krieg.md`), Diplomatie (`Requirement Diplomatie.md`
 
 Jedes Volk wird von einem **Anführer** regiert. Er regiert, bis er stirbt, hat Attribute und ein Ziel und prägt das Verhalten seines Volks **stark**: Er verschiebt die Schwellen und Wahrscheinlichkeiten, nach denen das Volk heute automatisch entscheidet (Krieg, Bündnisse, Grenzen, Handel, Bau, Steuern, Siedeln, Aufstände, Andacht zum Gott). Völker mit gleicher Lage verhalten sich dadurch verschieden, und ein Herrscherwechsel kann das Verhalten eines Volks kippen. Der starke Einfluss ist gewollt.
 
-Es gibt keine Sturz-Mechanik: kein Putsch, keine Absetzung, auch nicht bei Aufständen. Ein Eingriff des Gottes auf Anführer (Attribute, Ziel, Lebensdauer) ist **über die Gacha-Fähigkeiten in 1.0** vorgesehen (`Requirement Gacha.md`, §6.3 und §7.7); er ist die einzige Ausnahme von „kein Zielwechsel“ und von den Attribut-Plätzen.
+Es gibt keine Sturz-Mechanik: kein Putsch, keine Absetzung, auch nicht bei Aufständen. Ein Eingriff des Gottes auf Anführer (Attribute, Ziel, Lebensdauer) ist **über die Gacha-Fähigkeiten in 1.0** vorgesehen (`Requirement Gacha.md`, §6.3 und §7.8); er ist die einzige Ausnahme von „kein Zielwechsel“ und von den Attribut-Plätzen.
 
 ## 2. Der Anführer
 
@@ -120,7 +120,7 @@ Ausschlusspaare insgesamt: 1/2, 1/3, 2/4, 4/5, 7/8, 13/14, 15/16, 18/19, 20/21, 
 | Neue Siedlungen gegründet (ab 2) | Pioneer, Builder, Prospector, Road Builder |
 | Lange Friedenszeit (10 Jahre ohne Krieg) | Pacifist, Merchant Prince, Beloved, Generous |
 
-Devout kommt nur über Zufall oder Erbe. Seine Andacht wirkt nur beim Volk des Spielers; Zufriedenheit und Geburtenrate wirken in jedem Volk.
+Devout kommt nur über Zufall oder Erbe. Seine Andacht wirkt nur in jedem Volk, das den Spieler-Gott anbetet (ab 55 % Gläubigen, bis unter 45 %, `Requirement Gacha.md` §7.7); Zufriedenheit und Geburtenrate wirken in jedem Volk.
 
 ## 5. Ziele (4)
 
@@ -180,7 +180,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 
 ## 10. Später (nicht in 1.0)
 
-- ~~Eingriff des Gottes auf Anführer~~ ist jetzt **in Version 1** (Entscheidung des Nutzers): Gift of Trait, Mark of Weakness, Wisdom of Ages, Unburden (Attribute), Reroll Destiny (Ziel), Long Life und Brittle Crown (Lebensdauer, Todesalter ±10 Jahre); Regeln und Teilsysteme in `Requirement Gacha.md` (§6.3, §7.7). Ein frei gewähltes Ziel („Seeker of …“) und ein früher Tod auf Befehl sind **nicht** vorgesehen.
+- ~~Eingriff des Gottes auf Anführer~~ ist jetzt **in Version 1** (Entscheidung des Nutzers): Gift of Trait, Mark of Weakness, Honed Mind (Attribute, zufällig; der Gott darf **mehr als 3 Attribute** vergeben), Reroll Destiny (Ziel), Long Life und Brittle Crown (Lebensdauer, Todesalter ±10 Jahre), Dynasty's Heir und Young Heir (Nachfolge: sicheres Erbe eines Attributs, Amtsantritt mit Alter 20); Regeln und Teilsysteme in `Requirement Gacha.md` (§6.3, §7.8). Ein frei gewähltes Ziel („Seeker of …“) und ein früher Tod auf Befehl sind **nicht** vorgesehen.
 - Anführer anderer Völker erst bei Kontakt sichtbar machen.
 - Sturz, Putsch, Regentschaft, Anführer, die auf Verträge reagieren.
 
