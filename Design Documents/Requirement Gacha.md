@@ -1,6 +1,6 @@
 # Requirement: Gacha und Fähigkeiten
 
-Stand: **Entwurf, Grundregeln und offene Details vom Nutzer entschieden (Faith nach Spielzeit, 3 Fähigkeiten je Ziehung, Inventar, 4 Seltenheiten, alle 25 Fähigkeiten in Version 1); alle Zahlen sind Startwerte „vorläufig, wird kalibriert“ (Simulation durch `sim-analyst`).** Ablauf: Design → Simulation → Umsetzung. Spieltexte sind Englisch („Faith“, „Gacha“, „Charge“).
+Stand: **Entwurf, Grundregeln und offene Details vom Nutzer entschieden (Faith nach Spielzeit, 3 Fähigkeiten je Ziehung, Inventar, 4 Seltenheiten, alle 25 Fähigkeiten in Version 1); Faith-Faktor, Preisformel und Stufengewichte sind in der Simulation kalibriert und vom Nutzer gewählt (`tools/gachaStats.ts`, 12 Welten × 500 Jahre); Dauern, Stärken und Flächen der Fähigkeiten sind Startwerte „vorläufig, wird kalibriert“.** Ablauf: Design → Simulation → Umsetzung. Spieltexte sind Englisch („Faith“, „Gacha“, „Charge“).
 
 Baut auf `Game Design Gott einer Zivilisation` (Abschnitte 7 und 10), `Requirement Anführer.md` (Eingriffe auf Anführer), `Requirement Zufriedenheit.md`, `Requirement Diplomatie.md`, `Requirement Handel.md` und `Requirement Krieg.md` auf. Rivalen-Götter (Game Design, Abschnitt 8) bleiben vorerst außen vor.
 
@@ -16,8 +16,8 @@ Der Reiz ist die Überraschung der Ziehung und die Frage, wo man die Ladung am b
 |---|---|
 | Name | „Faith“ (ersetzt die „Einflusspunkte“ im Game Design) |
 | Quelle | **alle Gläubigen des Gottes in allen Völkern**: Glaube ist je Bewohner der Glaube **an einen bestimmten Gott** (jetzt der Spieler-Gott, später Rivalen-Götter, Game Design 8); wer den Glaubenswert ≥ 0,5 (`BELIEVER_FAITH`) an den Gott hat, zählt, egal in welchem Volk. Faith wird also auch aus bekehrten Völkern erzeugt |
-| Zufluss | **je Tick (Spielzeit)**, nicht je Echtzeit: Faith je Tick = Gläubige × Faktor. Faktor **vorläufig 0,0005 Faith je Gläubigem und Tick** (≈ 0,026 je Gläubigem und Jahr); wird kalibriert |
-| Eichziel | Bei Standardgeschwindigkeit (6 Ticks je Sekunde) soll sich etwa **alle 5 Echtminuten** eine Ziehung leisten lassen (5 min = 1800 Ticks ≈ 35 Spieljahre). Der Faktor ist so zu eichen, dass dieses Ziel über eine typische Partie (die Gläubigenzahl wächst, der Preis steigt) ungefähr hält |
+| Zufluss | **je Tick (Spielzeit)**, nicht je Echtzeit: Faith je Tick = Gläubige × Faktor. Faktor **0,001 Faith je Gläubigem des Gottes und Tick (Woche)** (≈ 0,052 je Gläubigem und Jahr; kalibriert, vom Nutzer gewählt) |
+| Ergebnis der Eichung | Bei Standardgeschwindigkeit (6 Wochen je Sekunde) wird etwa **alle 5 Echtminuten (4–7)** eine Ziehung leistbar, über ein 500-Jahre-Spiel etwa **14 Ziehungen** (12 Welten × 500 Jahre, `tools/gachaStats.ts`) |
 | Zeitraffer | Bei höheren Stufen (26 und 104 Ticks je Sekunde) läuft Faith entsprechend schneller auf: mehr Ziehungen je Echtminute. Das ist gewollt |
 | Kein Zeitgeber | Es gibt keinen Timer und keine Wartezeit; leistbar ist, was angespart ist |
 | Vorrat | kein Deckel; Faith bleibt unbegrenzt gespeichert |
@@ -28,7 +28,7 @@ Faith ist ein einzelner Zähler (`Float64`) im Spielerzustand, im Kern geführt 
 
 ## 3. Preis und Ziehung
 
-- **Preis:** Die n-te Ziehung kostet **20 × 1,25^(n−1)** Faith (vorläufig, wird kalibriert; n zählt alle bisherigen Ziehungen des Spiels). Der Preis **steigt nur**, kein Zurücksetzen, kein Rabatt. Anzeige gerundet.
+- **Preis:** Die n-te Ziehung kostet **75 · n^1,8** Faith, gerundet (kalibriert, vom Nutzer gewählt): 75, 261, 540, 905, … (n zählt die Ziehungen des Spiels, die n-te kostet den Preis für n). Der Preis **steigt nur**, kein Zurücksetzen, kein Rabatt. Anzeige gerundet.
 - **Eine Ziehung** kostet einmal den Preis und liefert **3 Fähigkeiten**. Alle 3 kommen als Ladungen ins Inventar. Kein Wählen, kein Verwerfen.
 - **Mischung:** Die 3 Ziehungen sind unabhängig und stammen aus dem **ganzen Pool aller Kategorien** (Land, Völker, Anführer). Es gibt keinen Slot je Kategorie.
 - **Zufall:** stark, kein Pity-System (Game Design, Abschnitt 10). Eigener Zufallsgenerator „gacha“ (deterministisch pro Seed, verschiebt die Folgen anderer Systeme nicht).
@@ -40,7 +40,7 @@ Faith ist ein einzelner Zähler (`Float64`) im Spielerzustand, im Kern geführt 
 Vier Stufen: **Common, Rare, Epic, Legendary**. Je mehr eine Fähigkeit das Spiel verändert (Reichweite, Dauer, Dauerhaftigkeit, Risiko, neue Systeme), desto seltener.
 
 - **Ziehung:** erst die Stufe nach Gewicht, dann gleichverteilt unter den Fähigkeiten der Stufe (jede Fähigkeit einmal im Pool, Stufen mit weniger Fähigkeiten geben der einzelnen also mehr Gewicht).
-- **Stufengewichte (vorläufig, wird kalibriert):** Common 60 %, Rare 28 %, Epic 10 %, Legendary 2 %.
+- **Stufengewichte (kalibriert, vom Nutzer gewählt):** Common 50 %, Rare 30 %, Epic 15 %, Legendary 5 %.
 - Die niedrigste Stufe muss nützlich sein (Game Design): Alle Common-Fähigkeiten wirken sichtbar und billig.
 - Die Zuordnung der Fähigkeiten zu Stufen (Abschnitt 6) ist **vorläufig**; die Simulation prüft die Wirkung je Fähigkeit und schiebt sie bei Bedarf in eine andere Stufe.
 
@@ -58,7 +58,7 @@ Vier Stufen: **Common, Rare, Epic, Legendary**. Je mehr eine Fähigkeit das Spie
 
 ## 6. Fähigkeiten (25)
 
-Alle 25 gehören zu Version 1 (vom Nutzer gesehen und bestätigt, bis auf die zwei Ersatz-Fähigkeiten Nr. 14 und Nr. 23, Abschnitt 6.5). Zahlen sind Startwerte („vorläufig, wird kalibriert“). „Jahre“ sind Spieljahre (52 Ticks). Die Hebel sind die bestehenden Hebel des Kerns (`LEVERS`, `Requirement Anführer.md` §9); die Einsätze legen eine **Gott-Schicht** darüber (Abschnitt 7.1).
+Alle 25 gehören zu Version 1 (vom Nutzer gesehen und bestätigt, bis auf die zwei Ersatz-Fähigkeiten Nr. 14 und Nr. 23, Abschnitt 6.5). Dauern, Stärken und Flächen sind Startwerte („vorläufig, wird kalibriert“); Faith-Faktor, Preis und Stufengewichte stehen in den Abschnitten 2 bis 4. „Jahre“ sind Spieljahre (52 Ticks). Die Hebel sind die bestehenden Hebel des Kerns (`LEVERS`, `Requirement Anführer.md` §9); die Einsätze legen eine **Gott-Schicht** darüber (Abschnitt 7.1).
 
 ### 6.1 Land (9)
 
@@ -115,7 +115,7 @@ Je mehr eine Fähigkeit das Spiel verändert (Dauer, Dauerhaftigkeit, Reichweite
 | Epic | 6 | Wild Fire, Golden Harvest, Gift of Trait, Mark of Weakness, Honed Mind, Dynasty's Heir |
 | Legendary | 2 | Great River, Biome Shift |
 
-Stufengewichte 60/28/10/2 (vorläufig); Young Heir steht in Rare (wirkt einmal, verlängert aber eine ganze Amtszeit). Die Simulation kalibriert Gewichte und Zuordnung (Wirkung je Fähigkeit, ob Common nützlich ist).
+Stufengewichte 50/30/15/5 (kalibriert); die Zuordnung der Fähigkeiten zu den Stufen bleibt wie oben. Young Heir steht in Rare (wirkt einmal, verlängert aber eine ganze Amtszeit).
 
 Aufteilung nach Kategorie: Land 9, Völker 8, Anführer 8.
 
@@ -213,11 +213,11 @@ Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.m
 - Laufender Aufwand: Faith je Tick eine Multiplikation; Effektliste und Feuerliste klein (≤ 256 bzw. ≤ 64), ein Vergleich je Tick. Einmalige Eingriffe (Biome Shift, Great River, Fertile Blessing) berühren ≤ 37 Hexfelder bzw. ≤ 12 Pfadfelder.
 - **Benchmark (Pflicht, `AGENTS.md`):** neues Szenario `gacha` (aged, mit Ladungen aller 25 Fähigkeiten, die der Setup auf verteilten Zielen einsetzt: Wild Fire in Wäldern, Great River, Biome Shift, Wide Foundations/Cramped Ground, Effekte aller Völker, brennende Hexfelder, neue Flüsse, viele Kacheln auf Neuzeichnen) und alle Szenarien bleiben grün. Die Karten-Kacheln werden bei Biom-, Fluss-, Ruinen- und Brandänderung neu gezeichnet; das darf auch während der Wischer keine Frames über 25 ms kosten (Neuzeichnen nur, wenn die Karte ruht, wie heute).
 - **Simulation (`sim-analyst`, 12 Welten, 300 Jahre):**
-  1. Eichung des Faith-Faktors und der Preiskurve: Ziehungen je Echtminute bei Geschwindigkeit 1 (Eichziel 5 min je Ziehung) und bei den höheren Stufen; Gläubigenzahl über die Zeit.
+  1. Eichung des Faith-Faktors und der Preiskurve (erledigt, Abschnitte 2 und 3): Ziehungen je Echtminute bei Geschwindigkeit 1 (Eichziel 5 min je Ziehung) und bei den höheren Stufen; Gläubigenzahl über die Zeit.
   2. Stufengewichte und Stufenzuordnung: Verteilung der Ziehungen, Wirkungsstärke je Fähigkeit (z. B. Wirkung auf Siedlungen, Kriege, Rebellionen, Handel bei Einsatz auf ein typisches Ziel), ob Common wirklich nützlich ist.
   3. Extremfälle: Einsatz **aller** Ladungen auf ein Volk (Gott-Schicht-Deckel), Doubt + Restless Spirits auf das eigene Volk (Spielende), Brittle Crown in Serie (Dynastie), Exhausted Soil und Cramped Ground auf die Hauptstadt.
   4. Dauern und Flächen (Abschnitt 12).
-- Tool geplant: `tools/gachaStats.ts`.
+- Tool: `tools/gachaStats.ts` (Faith, Preis, Stufengewichte, Ziehungen je Echtminute; Dauern und Flächen noch nicht kalibriert).
 
 ## 11. Abhängigkeiten
 
@@ -232,7 +232,6 @@ Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.m
 
 Entschieden (Nutzer): Startvorrat 0; Wanderlust und Young Heir; keine Grenze für Bauplätze und Attribute; zufällige Attribute; Wild Fire macht Ruinen; Great River in einer Senke macht einen See; Todesalter nicht angezeigt; Doubt senkt den Glauben an alle Götter; Anbetung ab 55 % Gläubigen, Ende unter 45 % (7.7); überflutete Siedlung bei See (7.2). Noch offen:
 
-- **Faktor und Preisformel** sind nur Startwerte (0,0005 je Gläubigem und Tick, 20 × 1,25^(n−1)); Eichung durch die Simulation.
 - **Folgeaufgabe Bauplatz-Arrays** (7.5).
 - **Honed Mind:** ×1,5 auf additive Abweichungen, Faktor^1,5 auf multiplikative.
 - **Dauern** (10/15 Jahre) und **Flächen** (Radius 1–3) aller Fähigkeiten, die Stärken (±0,15 Glaube, ±3 Zufriedenheit, ±10 % Geburten, +15 % Ernte, ×1,25 Fruchtbarkeit, ×1,5 Honed Mind, ±1 Bauplatz, −0,25 Feuchtigkeit) und die Gott-Obergrenzen je Hebel (Abschnitt 7.1): alles vorläufig.
