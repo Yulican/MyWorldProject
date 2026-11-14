@@ -1,4 +1,5 @@
 import { PAIRS, addMood } from './diplomacy';
+import { L, LEVERS } from './leaders';
 import { ALLY, Pact } from './pacts';
 import { record, type Simulation } from './simulation';
 
@@ -98,12 +99,16 @@ export function updateAlliances(sim: Simulation): void {
       if (!dip.known[k] || w.foe[k] > 0) continue;
       const trust = Math.min(dip.trust[k], dip.trust[b * PAIRS + a]);
       const cur = w.pact[k];
+      // The two leaders' wishes: the trust asked for moves by the mean of their shifts (Oathkeeper, goal Security).
+      const lev = sim.leaders.lev;
+      const pactOff = (lev[a * LEVERS + L.pactTrust] + lev[b * LEVERS + L.pactTrust]) / 2;
+      const allyOff = (lev[a * LEVERS + L.allyTrust] + lev[b * LEVERS + L.allyTrust]) / 2;
       const nameA = sim.civs[a]!.name;
       const nameB = sim.civs[b]!.name;
       if (cur === Pact.Alliance) {
-        if (trust >= ALLY.downgradeTrust) continue;
+        if (trust >= ALLY.downgradeTrust + allyOff) continue;
         const x = commonThreat(sim, a, b, ALLY.threatEnd);
-        if (x > 0 && trust >= ALLY.pactEnd) {
+        if (x > 0 && trust >= ALLY.pactEnd + pactOff) {
           setPact(sim, a, b, Pact.Pact, x);
           st.downgraded++;
           record(sim, `The alliance of the ${nameA} and the ${nameB} became a defense pact.`, sim.civs[a]!.capital);
@@ -113,7 +118,7 @@ export function updateAlliances(sim: Simulation): void {
           record(sim, `The alliance of the ${nameA} and the ${nameB} ended.`, sim.civs[a]!.capital);
         }
       } else if (cur === Pact.Pact) {
-        if (trust >= ALLY.allianceTrust) {
+        if (trust >= ALLY.allianceTrust + allyOff) {
           setPact(sim, a, b, Pact.Alliance, 0);
           st.alliancesSigned++;
           addMood(dip, a, b, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
@@ -123,18 +128,18 @@ export function updateAlliances(sim: Simulation): void {
         }
         const x = w.pactX[k];
         const gone = !sim.civs[x] || dip.danger[a * PAIRS + x] < ALLY.threatEnd || dip.danger[b * PAIRS + x] < ALLY.threatEnd;
-        if (trust < ALLY.pactEnd || gone) {
+        if (trust < ALLY.pactEnd + pactOff || gone) {
           setPact(sim, a, b, Pact.None, 0);
           st.pactsEnded++;
           record(sim, `The defense pact of the ${nameA} and the ${nameB} ended.`, sim.civs[a]!.capital);
         }
-      } else if (trust >= ALLY.allianceTrust) {
+      } else if (trust >= ALLY.allianceTrust + allyOff) {
         setPact(sim, a, b, Pact.Alliance, 0);
         st.alliancesSigned++;
         addMood(dip, a, b, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
         addMood(dip, b, a, 'Formed an alliance with us', ALLY.signBonus, sim.tick);
         record(sim, `The ${nameA} and the ${nameB} formed an alliance.`, sim.civs[a]!.capital, true);
-      } else if (trust >= ALLY.pactTrust) {
+      } else if (trust >= ALLY.pactTrust + pactOff) {
         const x = commonThreat(sim, a, b, ALLY.threatForm);
         if (x > 0) {
           setPact(sim, a, b, Pact.Pact, x);

@@ -22,6 +22,7 @@ import {
 } from './simulation';
 import { EXPAND_MIN_CONNECTION } from './economy';
 import { connectionValue } from './satisfaction';
+import { L, LEVERS } from './leaders';
 import { SUPPLY_KINDS, SupplyKind, supplyTerms } from './supply';
 import { sumTerms } from '../terms';
 import { resourceCapacityTerms } from '../world/features';
@@ -265,9 +266,9 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world a settlement is cut off in year 272.
-  const sim = createSimulation(generateWorld({ seed: 8 }));
-  for (let year = 1; year <= 275; year++) {
+  // In this world (with its leaders) a settlement is cut off in year 254.
+  const sim = createSimulation(generateWorld({ seed: 10 }));
+  for (let year = 1; year <= 257; year++) {
     runYears(sim, 1);
     for (const civ of livingCivilizations(sim)) {
       assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
@@ -311,9 +312,12 @@ test('every people gets its own random color, the same for the same seed', () =>
 test('settlers never go where the connection to a seat would fall below the stop', () => {
   const sim = createSimulation(generateWorld({ seed: 7 }));
   const { world } = sim;
+  const travel = new Float32Array(256);
   for (let t = 0; t < 250 * TICKS_PER_YEAR; t++) {
     const before = Int32Array.from(sim.cellPop);
     const seatCost = Float32Array.from(sim.seatCost);
+    // A leader counts the way shorter or longer for its settlers (Pioneer x0.85, Homebody x1.25): the stop holds for the cost as its people count it.
+    for (let id = 0; id < 256; id++) travel[id] = sim.leaders.lev[id * LEVERS + L.travel];
     stepSimulation(sim);
     if (sim.tick % 13 !== 0) continue;
     for (let c = 0; c < world.cellCount; c++) {
@@ -323,23 +327,23 @@ test('settlers never go where the connection to a seat would fall below the stop
         const source = world.neighbors[c * DIRECTION_COUNT + d];
         if (source < 0 || !hasRoad(world, c, d) || before[source] <= sim.cellCapacity[source]) continue;
         const step = stepCost(world, source, (d + 3) % DIRECTION_COUNT);
-        assert.ok(connectionValue(seatCost[source] + step) >= EXPAND_MIN_CONNECTION, `settlers to ${c} in year ${Math.floor(sim.tick / TICKS_PER_YEAR)}`);
+        assert.ok(connectionValue((seatCost[source] + step) * travel[world.owner[source]]) >= EXPAND_MIN_CONNECTION, `settlers to ${c} in year ${Math.floor(sim.tick / TICKS_PER_YEAR)}`);
       }
     }
   }
 });
 
 test('a people of 100 lacking a luxury good settles a free deposit of it nearby', () => {
-  // In this world it happens in year 65.
+  // In this world (with its leaders) it happens in year 70.
   const sim = createSimulation(generateWorld({ seed: 17 }));
-  runYears(sim, 70);
+  runYears(sim, 75);
   const settled = sim.chronicle.filter((e) => / settled the /.test(e.text));
   assert.ok(settled.length > 0, 'a deposit was settled');
   const cell = settled[0].cell!;
   assert.ok(sim.world.deposit[cell] !== 0);
 });
 
-test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace and alliances are important', () => {
+test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace, alliances and new leaders are important', () => {
   const important = [
     / They pray to you\.$/,
     /^A new people, /,
@@ -359,6 +363,7 @@ test('only founding, new peoples, uprisings, secessions, vanished peoples, game 
     / could not crush the rebellion: /,
     /^The rebellion against the .* ended\.$/,
     / formed an alliance\.$/,
+    / now leads the /,
   ];
   const seen = { important: 0, silent: 0 };
   for (const seed of [5, 16, 102]) {

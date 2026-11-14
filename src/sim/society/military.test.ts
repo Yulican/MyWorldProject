@@ -6,6 +6,7 @@ import { PAIRS, SIGHT_RANGE, dangerValue } from './diplomacy';
 import { updateGovernmentProjects } from './government';
 import { MIL, TROOP_GOOD, TROOP_TYPES, Troop, mayBuyStrategic, soldiersAt, strengthSize, updateMilitary } from './military';
 import { TICKS_PER_YEAR, createSimulation, livingCivilizations, runMilitaryYear, stepSimulation, type Simulation } from './simulation';
+import { dismissLeaders } from './leaderRules';
 import { GOV_TUNING } from './taxes';
 
 const typeOf = (good: number) => BUILDINGS.findIndex((b) => b.good === good);
@@ -36,6 +37,8 @@ function place(sim: Simulation, cell: number, type: number): void {
 function setup(minPop = 60): { sim: Simulation; a: number; b: number; seat: number; civ: number } {
   const sim = createSimulation(generateWorld({ seed: 5 }));
   runYears(sim, 150);
+  // The base rules of the military: without the shifts of a leader (pay, soldier shares, strength).
+  dismissLeaders(sim);
   const { economy, government: gov, military: m } = sim;
   const n = sim.world.cellCount;
   m.soldiers.fill(0);
@@ -105,11 +108,13 @@ test('the people’s other seats pay what the district treasury lacks', () => {
   sim.government.traders[other] = 1;
   sim.government.treasury[seat] = 0.5;
   sim.government.treasury[other] = 10;
+  // The counter is the world's total: its history (with leaders) dismissed soldiers before.
+  const dismissed = sim.military.dismissed;
   runMilitaryYear(sim);
   assert.equal(soldiersAt(sim, a), 20, 'all paid');
   assert.ok(Math.abs(sim.government.treasury[seat]) < 1e-4, 'the district’s money is spent first');
   assert.ok(Math.abs(sim.government.treasury[other] - (10 - 1.5)) < 1e-4, `the other seat lent 1.5: ${sim.government.treasury[other]}`);
-  assert.equal(sim.military.dismissed, 0);
+  assert.equal(sim.military.dismissed, dismissed);
 });
 
 test('unpaid soldiers are dismissed exactly and go back to the population of their settlement', () => {
@@ -126,8 +131,9 @@ test('unpaid soldiers are dismissed exactly and go back to the population of the
   const popA = sim.cellPop[a];
   const popB = sim.cellPop[b];
   const count = sim.pop.count;
+  const dismissed = m.dismissed;
   runMilitaryYear(sim);
-  assert.equal(m.dismissed, 10, 'exactly the unpaid ones, no rounding up');
+  assert.equal(m.dismissed - dismissed, 10, 'exactly the unpaid ones, no rounding up');
   assert.equal(soldiersAt(sim, a) + soldiersAt(sim, b), 10);
   // Half of each (7.5 and 2.5, rounded down), the one left from the first settlement.
   assert.equal(soldiersAt(sim, a), 7);

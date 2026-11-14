@@ -69,6 +69,12 @@ export function troopFactor(supplied: boolean): number {
   return supplied ? MIL.factor : 1;
 }
 
+/**
+ * Leaders' shifts of one battle (set by war.ts before fightBattle, neutral otherwise): the share of the usual
+ * losses side A / B takes, and an extra defense bonus of side B on its own land.
+ */
+export const BATTLE_LEADER = { takenA: 1, takenB: 1, extraB: 0 };
+
 /** True when a side of strength `own` gives up against an enemy of strength `enemy` (war phase 3). */
 export function givesUp(own: number, enemy: number): boolean {
   return own < BATTLE.giveUp * enemy;
@@ -119,8 +125,9 @@ export function fightBattle(inp: Float64Array, defense: Defense, out: Float64Arr
   const sA0 = cnt[0] + cnt[1] + cnt[2];
   const sB0 = cnt[3] + cnt[4] + cnt[5];
   const loss = BATTLE.loss;
-  const mulA = loss;
-  const mulB = loss * (1 + DEFENSE_BONUS[defense]);
+  // The damage a side deals scales with the losses the other one is spared.
+  const mulA = loss * BATTLE_LEADER.takenB;
+  const mulB = loss * (1 + DEFENSE_BONUS[defense] + BATTLE_LEADER.extraB) * BATTLE_LEADER.takenA;
   const sub = 1 - BATTLE.penalty;
   const fA = BI.factor;
   const fB = BI.SIDE + BI.factor;

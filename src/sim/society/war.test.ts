@@ -14,6 +14,8 @@ import { MIL, TROOP_TYPES, Troop, hostile, strengthSize } from './military';
 import { conqueredValue, hasSeat, satisfactionTerms } from './satisfaction';
 import { SUPPLY_KINDS, SupplyKind } from './supply';
 import { TICKS_PER_YEAR, changeCiv, createSimulation, foundCivilization, stepSimulation, type Simulation } from './simulation';
+import { dismissLeaders } from './leaderRules';
+import { EVENTS, Ev } from './leaders';
 import { TRADE_GOODS, updateTradeNeeds } from './trade';
 import {
   ArmyState,
@@ -89,6 +91,8 @@ type Fixture = { sim: Simulation; att: number; def: number; seats: number[] };
 function fixture(districts: number): Fixture {
   const sim = createSimulation(generateWorld({ seed: 12 }));
   runYears(sim, 200);
+  // The base rules of war: without the shifts of the peoples' leaders (war roll, threshold, army shares ...).
+  dismissLeaders(sim);
   assert.equal(sim.war.wars, 0);
   const owner = sim.world.owner;
   const att = 1;
@@ -521,7 +525,8 @@ test('armies that meet fight: on the same hex, and an army stops on the hex of a
 
 test('a beaten army retreats with what is left to its nearest own seat and goes home there; on the way it can be attacked', () => {
   for (const attacked of [false, true]) {
-    const f = fixture(1);
+    // Two districts: in this world (with leaders) one district of the new people is its seat alone, and the battle needs a second settlement.
+    const f = fixture(2);
     const { sim, att, def } = f;
     const w = sim.war;
     const goal = f.seats[0];
@@ -799,6 +804,28 @@ test('10 years without an attacker success end the war by exhaustion: peace with
   sim.tick = end;
   assert.equal(inTruce(sim, att, def), false);
   assert.deepEqual(warTargets(sim, att), [def]);
+});
+
+test('the leaders’ experiences of a war: seat besieged, war won and lost, a war won as the attacker (goal Glory)', () => {
+  const f = fixture(2);
+  const { sim, att, def } = f;
+  const l = sim.leaders;
+  // Both peoples have a leader again (the fixture dismissed them); no yearly pass runs here.
+  l.has[att] = 1;
+  l.has[def] = 1;
+  const ev = (civ: number, kind: number) => l.events[civ * EVENTS + kind];
+  const s = warOn(f, f.seats[1]);
+  besiege(f, s);
+  assert.equal(ev(def, Ev.WarLost), 1, 'its seat is besieged');
+  assert.equal(ev(att, Ev.WarLost), 0);
+  sim.war.wOccupied[s] = 1;
+  endWar(sim, s, EndType.GaveUp);
+  assert.equal(ev(att, Ev.WarWon), 1);
+  assert.equal(ev(def, Ev.WarLost), 2);
+  assert.equal(l.wonAttack[att], 1);
+  assert.equal(l.wonAttack[def], 0);
+  assert.equal(l.conquests[att], 1);
+  assert.equal(l.lastWin[att], sim.tick, 'the Glory satisfaction window starts');
 });
 
 test('at the war’s end only the goal district changes hands, with half the treasury, “Conquered” −15 for 10 years and a road at the border', () => {

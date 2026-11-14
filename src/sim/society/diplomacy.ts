@@ -6,6 +6,7 @@ import { stepCost } from '../world/roads';
 import type { CivMood } from './satisfaction';
 import type { Simulation } from './simulation';
 import { mayBuyStrategic, strengthSize } from './military';
+import { Ev, L, LEVERS, leaderEvent } from './leaders';
 import { pactTrust } from './pacts';
 import { MONEY_PER_ADULT, PRICE, TRADE_GOODS, TRADE_GOOD_NAMES, TradeGood, addStock, exportHub, isStrategic, stockOf } from './trade';
 
@@ -253,9 +254,14 @@ const deliversUs = (t: TradeAgreement, a: number, b: number) => t.legs.length ==
 // ---------------------------------------------------------------------------
 // Moods
 
-function moodNow(mood: CivMood, tick: number): number {
+function moodNow(mood: CivMood, tick: number, years = MOOD_YEARS): number {
   const age = (tick - mood.tick) / TICKS_PER_YEAR;
-  return age >= MOOD_YEARS ? 0 : mood.value * (1 - age / MOOD_YEARS);
+  return age >= years ? 0 : mood.value * (1 - age / years);
+}
+
+/** Years the moods of people `a` towards others fade over (a grudge-bearer's last longer). */
+function moodYears(sim: Simulation, a: number): number {
+  return MOOD_YEARS + sim.leaders.lev[a * LEVERS + L.moodYears];
 }
 
 /** a's new mood towards b; one of the same label replaces the old one. */
@@ -278,7 +284,7 @@ export function noteEmigration(sim: Simulation, from: number, to: number): void 
   const list = dip.moods.get(k) ?? [];
   const label = 'Took our people';
   let sum = 0;
-  for (const m of list) if (m.label === label) sum += moodNow(m, sim.tick);
+  for (const m of list) if (m.label === label) sum += moodNow(m, sim.tick, moodYears(sim, from));
   if (sum <= MIGRATION_LOSS_MAX) return;
   list.push({ label, value: Math.max(MIGRATION_LOSS, MIGRATION_LOSS_MAX - sum), tick: sim.tick });
   dip.moods.set(k, list);
@@ -291,7 +297,9 @@ export function noteEmigration(sim: Simulation, from: number, to: number): void 
 export function trustTerms(sim: Simulation, a: number, b: number): Term[] {
   const dip = sim.diplomacy;
   const k = pair(a, b);
-  const terms: Term[] = [{ label: 'Base', value: TRUST_BASE }];
+  const lev = sim.leaders.lev;
+  const terms: Term[] = [{ label: 'Base', value: TRUST_BASE + lev[a * LEVERS + L.trustBase] }];
+  if (lev[a * LEVERS + L.trust] !== 0) terms.push({ label: 'Leader', value: lev[a * LEVERS + L.trust] });
   if (dip.peace[k] > 0) terms.push({ label: 'Peaceful neighbors', value: dip.peace[k] });
   if (dip.open[pair(b, a)]) terms.push({ label: 'Their borders are open to us', value: AGREEMENT_TRUST });
   if (dip.freeTrade[k]) terms.push({ label: 'Free trade agreement', value: AGREEMENT_TRUST });
@@ -308,7 +316,7 @@ export function trustTerms(sim: Simulation, a: number, b: number): Term[] {
   const bond = sim.war.pactCount > 0 ? pactTrust(sim, a, b) : 0;
   if (bond !== 0) terms.push({ label: sim.war.pact[k] === 2 ? 'Alliance' : 'Defense pact', value: bond });
   for (const m of dip.moods.get(k) ?? []) {
-    const v = moodNow(m, sim.tick);
+    const v = moodNow(m, sim.tick, moodYears(sim, a));
     if (v !== 0) terms.push({ label: m.label, value: v });
   }
   return terms;
@@ -319,7 +327,7 @@ export function dangerTerms(sim: Simulation, a: number, b: number): Term[] {
   const civA = sim.civs[a];
   const civB = sim.civs[b];
   if (!civA || !civB) return [];
-  const size = strengthSize(sim, a, b, DANGER_SCALE);
+  const size = strengthSize(sim, a, b, DANGER_SCALE) * sim.leaders.lev[a * LEVERS + L.dangerMul];
   const near = nearness(sim.diplomacy.distance[pair(a, b)]);
   return [
     { label: `Strength ${Math.round(sim.military.strength[b] ?? 0)} against our ${Math.round(sim.military.strength[a] ?? 0)}`, value: size },
@@ -354,7 +362,8 @@ function sumTerms(terms: readonly Term[]): number {
 export function tollValue(sim: Simulation, cell: number, owner: number, traveler: number, reduced: boolean): number {
   const trust = sim.diplomacy.trust[pair(owner, traveler)];
   const short = isShort(sim, cell) ? 1 : 0;
-  return TOLL_BASE * (1 - trust / 100) * (1 + short) * (reduced ? TOLL_REDUCED : 1);
+  const lev = sim.leaders.lev;
+  return TOLL_BASE * (1 - trust / 100) * (1 + short) * (reduced ? TOLL_REDUCED : 1) * lev[owner * LEVERS + L.tollAsk] * lev[traveler * LEVERS + L.tollPay];
 }
 
 function isShort(sim: Simulation, cell: number): boolean {
@@ -551,6 +560,9 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   const trust = (a: number, b: number) => dip.trust[pair(a, b)];
   const danger = (a: number, b: number) => dip.danger[pair(a, b)];
   const mutual = (a: number, b: number, min: number) => trust(a, b) >= min && trust(b, a) >= min;
+  // Trade agreements: each people's leader shifts the trust it asks for (Merchant Prince, goal Wealth).
+  const lev = sim.leaders.lev;
+  const mutualTrade = (a: number, b: number, min: number) => trust(a, b) >= min + lev[a * LEVERS + L.tradeTrust] && trust(b, a) >= min + lev[b * LEVERS + L.tradeTrust];
   const pause = (t: TradeAgreement) => {
     for (const l of t.legs) dip.agreementPause.set(agreementKey(l.supplier, l.buyer, l.good), sim.tick + AGREEMENT_YEARS * TICKS_PER_YEAR);
   };
@@ -575,7 +587,8 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
     }
     // Faded moods go.
     for (const [k, list] of dip.moods) {
-      const kept = list.filter((m) => sim.tick - m.tick < MOOD_YEARS * TICKS_PER_YEAR);
+      const years = moodYears(sim, Math.floor(k / PAIRS)) * TICKS_PER_YEAR;
+      const kept = list.filter((m) => sim.tick - m.tick < years);
       if (kept.length) dip.moods.set(k, kept);
       else dip.moods.delete(k);
     }
@@ -586,12 +599,12 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         if (a === b || !dip.known[pair(a, b)]) continue;
         // Borders: open to those we trust and don't fear; close when that ends.
         const k = pair(a, b);
-        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST && danger(a, b) <= OPEN_DANGER && sim.war.foe[k] === 0) {
+        if (!dip.open[k] && trust(a, b) >= OPEN_TRUST + lev[a * LEVERS + L.openTrust] && danger(a, b) <= OPEN_DANGER + lev[a * LEVERS + L.openDanger] && sim.war.foe[k] === 0) {
           dip.open[k] = 1;
           dip.bordersVersion++;
           addMood(dip, b, a, 'Opened their borders to us', EVENT_TRUST, sim.tick);
           record(`The ${name(a)} opened their borders to the ${name(b)}.`, capital(a), false);
-        } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST || danger(a, b) > CLOSE_DANGER)) {
+        } else if (dip.open[k] && (trust(a, b) < CLOSE_TRUST + lev[a * LEVERS + L.closeTrust] || danger(a, b) > CLOSE_DANGER + lev[a * LEVERS + L.closeDanger])) {
           closeBorders(sim, a, b, record);
         }
       }
@@ -604,7 +617,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         const k = pair(a, b);
         const both = dip.open[k] && dip.open[pair(b, a)];
         if (sim.war.foe[k] > 0) continue;
-        if (!dip.freeTrade[k] && both && mutual(a, b, FREE_TRADE_TRUST)) {
+        if (!dip.freeTrade[k] && both && mutualTrade(a, b, FREE_TRADE_TRUST)) {
           setSymmetric(dip.freeTrade, a, b, 1);
           celebrate(dip, a, b, 'Signed free trade with us', sim.tick);
           record(`The ${name(a)} and the ${name(b)} agreed on free trade.`, capital(a), false);
@@ -684,10 +697,10 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
         // Renegotiated, from the hubs that suit best now.
         for (const l of t.legs) l.hub = exportHub(sim, l.supplier, l.buyer, l.good);
         const amounts = second
-          ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier))
-          : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good);
+          ? exchangeAmounts(civWant, civSpare, first.supplier, first.buyer, first.good, second.good, spareVia(dip, civWant, civSpare, first.buyer, second.good, first.supplier), dealMax(sim, t.a, t.b))
+          : agreedAmount(civWant, civSpare, goods, first.supplier, first.buyer, first.good, dealMax(sim, t.a, t.b));
         const ok = second ? amounts !== null : (amounts as number) >= AGREEMENT_MIN_AMOUNT;
-        if (!ok || !mutual(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
+        if (!ok || !mutualTrade(t.a, t.b, second ? EXCHANGE_AGREEMENT_TRUST : TRADE_AGREEMENT_TRUST)) {
           record(`The trade agreement for ${what} ran out.`, capital(first.buyer), false);
           pause(t);
           continue;
@@ -741,11 +754,12 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   for (let ia = firstBuyer; ia < endBuyer; ia++) {
     const a = living[ia];
     for (const b of living) {
-      if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || !mutual(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
+      if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || !mutualTrade(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
-        const amount = agreedAmount(civWant, civSpare, goods, b, a, g);
+        const most = dealMax(sim, a, b);
+        const amount = agreedAmount(civWant, civSpare, goods, b, a, g, most);
         if (amount < AGREEMENT_MIN_AMOUNT) continue;
         const hub = hubFor(b, a);
         if (hub < 0) continue;
@@ -761,7 +775,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           let amounts0: [number, number] | null = null;
           for (let h = 0; h < goods; h++) {
             if (h === g || triedGoods & (1 << h) || !free(a, b, h)) continue;
-            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h, spareVia(dip, civWant, civSpare, a, h, b));
+            const amounts = exchangeAmounts(civWant, civSpare, b, a, g, h, spareVia(dip, civWant, civSpare, a, h, b), most);
             if (amounts && (!amounts0 || amounts[0] > amounts0[0])) {
               h0 = h;
               amounts0 = amounts;
@@ -771,7 +785,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
           tried++;
           triedGoods |= 1 << h0;
           counterHub = hubFor(a, b);
-          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, spareVia(dip, civWant, civSpare, a, h0, b)) : null;
+          const balanced = counterHub >= 0 ? exchangeAmounts(civWant, civSpare, b, a, g, h0, spareVia(dip, civWant, civSpare, a, h0, b), most) : null;
           if (balanced) {
             best = h0;
             bestAmounts = balanced;
@@ -791,7 +805,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
             capital(a),
             false,
           );
-        } else if (mutual(a, b, TRADE_AGREEMENT_TRUST)) {
+        } else if (mutualTrade(a, b, TRADE_AGREEMENT_TRUST)) {
           dip.agreements.push({ a, b, since: sim.tick, legs: [leg(b, a, g, amount, hub)] });
           celebrate(dip, a, b, 'Signed a trade agreement with us', sim.tick);
           record(`The ${name(b)} agreed to deliver ${Math.round(amount)} ${lower(g)} a year to the ${name(a)}.`, capital(a), false);
@@ -812,12 +826,18 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
 
 const agreementKey = (supplier: number, buyer: number, good: number) => (supplier * PAIRS + buyer) * 64 + good;
 
+/** Most units a year of one good in an agreement between `a` and `b`: AGREEMENT_MAX_AMOUNT, more if one of them is led by a Merchant Prince (lever dealAmount). */
+function dealMax(sim: Simulation, a: number, b: number): number {
+  const lev = sim.leaders.lev;
+  return AGREEMENT_MAX_AMOUNT * Math.max(lev[a * LEVERS + L.dealAmount], lev[b * LEVERS + L.dealAmount]);
+}
+
 /** Units a year `supplier` can deliver of `good` to `buyer`: what the buyer lacks and the supplier spares, at most AGREEMENT_MAX_AMOUNT. */
-function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, supplier: number, buyer: number, good: number): number {
+function agreedAmount(want: Float32Array, spare: Float32Array, goods: number, supplier: number, buyer: number, good: number, max = AGREEMENT_MAX_AMOUNT): number {
   if (supplier * goods + good >= want.length || buyer * goods + good >= want.length) return 0;
   const lacks = want[buyer * goods + good] - spare[buyer * goods + good];
   const extra = spare[supplier * goods + good] - want[supplier * goods + good];
-  return Math.min(lacks, extra, AGREEMENT_MAX_AMOUNT);
+  return Math.min(lacks, extra, max);
 }
 
 /**
@@ -848,11 +868,12 @@ export function exchangeAmounts(
   good: number,
   counter: number,
   fromThird = 0,
+  max = AGREEMENT_MAX_AMOUNT,
 ): [number, number] | null {
-  const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good);
+  const there = agreedAmount(want, spare, TRADE_GOODS, supplier, buyer, good, max);
   // The supplier needs only to ask for the counter good somewhere (most
   // peoples lack the same luxuries and spare the same wood and stone).
-  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter] + fromThird, AGREEMENT_MAX_AMOUNT);
+  const back = Math.min(want[supplier * TRADE_GOODS + counter], spare[buyer * TRADE_GOODS + counter] - want[buyer * TRADE_GOODS + counter] + fromThird, max);
   if (there < AGREEMENT_MIN_AMOUNT || back < AGREEMENT_MIN_AMOUNT) return null;
   const value = Math.min(there * PRICE[good], back * PRICE[counter]);
   const a = value / PRICE[good];
@@ -883,6 +904,7 @@ export function closeBorders(sim: Simulation, a: number, b: number, record: Reco
   setSymmetric(dip.migration, a, b, 0);
   dip.agreements = dip.agreements.filter((t) => !between(t, a, b));
   addMood(dip, b, a, 'Closed their borders to us', CLOSED_TRUST, sim.tick);
+  leaderEvent(sim, a, Ev.BorderClosed);
   dip.peace[pair(b, a)] = 0;
   rebuildPartners(dip);
   record(`The ${sim.civs[a]!.name} closed their borders to the ${sim.civs[b]!.name}.`, sim.civs[a]!.capital, true);
@@ -910,7 +932,7 @@ function refreshRelations(sim: Simulation, living: number[]): void {
 export function trustValue(sim: Simulation, a: number, b: number): number {
   const dip = sim.diplomacy;
   const k = pair(a, b);
-  let sum = TRUST_BASE + dip.peace[k];
+  let sum = TRUST_BASE + sim.leaders.lev[a * LEVERS + L.trustBase] + sim.leaders.lev[a * LEVERS + L.trust] + dip.peace[k];
   if (dip.open[pair(b, a)]) sum += AGREEMENT_TRUST;
   if (dip.freeTrade[k]) sum += AGREEMENT_TRUST;
   if (dip.migration[k]) sum += AGREEMENT_TRUST;
@@ -921,7 +943,10 @@ export function trustValue(sim: Simulation, a: number, b: number): number {
   }
   if (sim.war.pactCount > 0) sum += pactTrust(sim, a, b);
   const moods = dip.moods.get(k);
-  if (moods) for (const m of moods) sum += moodNow(m, sim.tick);
+  if (moods) {
+    const years = moodYears(sim, a);
+    for (const m of moods) sum += moodNow(m, sim.tick, years);
+  }
   return clamp100(sum);
 }
 
@@ -930,7 +955,7 @@ export function dangerValue(sim: Simulation, a: number, b: number): number {
   const civA = sim.civs[a];
   const civB = sim.civs[b];
   if (!civA || !civB) return 0;
-  const size = strengthSize(sim, a, b, DANGER_SCALE);
+  const size = strengthSize(sim, a, b, DANGER_SCALE) * sim.leaders.lev[a * LEVERS + L.dangerMul];
   return clamp100(size * nearness(sim.diplomacy.distance[pair(a, b)]));
 }
 

@@ -5,8 +5,9 @@ import { isWaterBiome } from '../world/biomes';
 import { Deposit } from '../world/deposits';
 import { addRoad, stepCost } from '../world/roads';
 import { BUILDINGS } from './buildings';
-import { BO, BI, Defense, fightBattle, givesUp, remainingSoldiers } from './battle';
+import { BATTLE, BATTLE_LEADER, BO, BI, Defense, fightBattle, givesUp, remainingSoldiers } from './battle';
 import { ALLY, Pact, foeStrength, mayOutweigh } from './pacts';
+import { Ev, L, LEVERS, beatenBy, leaderBeaten, leaderEvent, warChance, warRatio } from './leaders';
 import { checkRebellion, continueRebellion, countRestless } from './rebellion';
 import { breakAlliances, endPact, formAlliance, updateAlliances } from './alliance';
 import { PAIRS, addMood, rebuildPartners } from './diplomacy';
@@ -751,9 +752,9 @@ function reviewWar(sim: Simulation, s: number, later = false): void {
   }
   const sa = sideStrength(sim, s, 0);
   const sd = sideStrength(sim, s, 1);
-  if (defenderGivesUp(w, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
-  else if (attackerGivesUp(w, s, sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
-  else if (sim.tick - w.wLastGain[s] >= WAR.exhaustYears * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
+  if (defenderGivesUp(sim, s, sd, sa)) endWar(sim, s, EndType.GaveUp);
+  else if (attackerGivesUp(sim, s, sa, sd)) endWar(sim, s, EndType.AttackerGaveUp);
+  else if (sim.tick - w.wLastGain[s] >= exhaustYears(sim, att, def) * TICKS_PER_YEAR) endWar(sim, s, EndType.Exhausted);
   else if (later) raiseLater(w, s);
   else {
     reraise(sim, s, att);
@@ -779,8 +780,22 @@ export function sideStrength(sim: Simulation, s: number, side: number): number {
 }
 
 /** Whether the attacker gives up: below BATTLE.giveUp of the other side; the mother of a rebellion never does. */
-function attackerGivesUp(w: WarState, s: number, sa: number, sd: number): boolean {
-  return w.wRebel[s] === 0 && givesUp(sa, sd);
+function attackerGivesUp(sim: Simulation, s: number, sa: number, sd: number): boolean {
+  const w = sim.war;
+  return w.wRebel[s] === 0 && givesUpAt(sim, w.wAtt[s], sa, sd);
+}
+
+/** A side of strength `own` gives up below the share of the enemy's strength its leader allows (BATTLE.giveUp with the leader's shift). */
+function givesUpAt(sim: Simulation, civ: number, own: number, enemy: number): boolean {
+  const shift = sim.leaders.lev[civ * LEVERS + L.giveUp];
+  if (shift === 0) return givesUp(own, enemy);
+  return own < Math.max(0, Math.min(0.95, BATTLE.giveUp + shift)) * enemy;
+}
+
+/** Years without an attacker success before peace by exhaustion: WAR.exhaustYears, longer for the more stubborn of the two peoples. */
+function exhaustYears(sim: Simulation, att: number, def: number): number {
+  const lev = sim.leaders.lev;
+  return WAR.exhaustYears + Math.max(lev[att * LEVERS + L.exhaust], lev[def * LEVERS + L.exhaust]);
 }
 
 /**
@@ -788,9 +803,10 @@ function attackerGivesUp(w: WarState, s: number, sa: number, sd: number): boolea
  * BATTLE.giveUp of the attacker's strength; rebels once one of their seats
  * is occupied (then the mother has won).
  */
-function defenderGivesUp(w: WarState, s: number, sd: number, sa: number): boolean {
+function defenderGivesUp(sim: Simulation, s: number, sd: number, sa: number): boolean {
+  const w = sim.war;
   const taken = w.wRebel[s] === 1 ? rebelSeatTaken(w, s) : w.wOccupied[s] === 1;
-  return taken && givesUp(sd, sa);
+  return taken && givesUpAt(sim, w.wDef[s], sd, sa);
 }
 
 /** Whether the mother has occupied a seat of rebellion `s` (the current goal or an earlier one). */
@@ -892,7 +908,7 @@ function reraise(sim: Simulation, s: number, civ: number): void {
   const main = civ === w.wAtt[s] || civ === w.wDef[s] || group;
   const cap = !main ? ALLY.armies : civ === w.wAtt[s] ? WAR.mainArmies : WAR.reliefArmies;
   const two = onTwoFronts(w, s, civ);
-  const share = !main ? ALLY.send : two ? rebelFrontShare() : WAR.sendShare;
+  const share = !main ? ALLY.send : two ? rebelFrontShare() : WAR.sendShare + sim.leaders.lev[civ * LEVERS + L.sendShare];
   // One front again after a split (splitFronts): besides her army against the rebels the mother raises one
   // reinforcement army with what the full share still allows; it gathers and marches like any army.
   const reinforce = w.wRebel[s] === 1 && civ === w.wAtt[s] && !two && w.wSplit[s] === 1;
@@ -925,9 +941,13 @@ function findNeighbors(sim: Simulation): number {
   return civs;
 }
 
+/** Set by markCandidates: some candidate beat the people lately (revenge). */
+let revengeTarget = false;
+
 /** Marks in `candidate` the peoples `a` may declare war on (findNeighbors first); false if none or `a` is at war. */
 function markCandidates(sim: Simulation, a: number, civs: number): boolean {
   const w = sim.war;
+  revengeTarget = false;
   const m = sim.military;
   candidate.fill(0);
   // Only a people at peace starts a war (neither a main party nor an ally in one).
@@ -939,7 +959,10 @@ function markCandidates(sim: Simulation, a: number, civs: number): boolean {
     if (b === a || !sim.civs[b] || !openToAttack(w, b) || adj[a * civs + b] === 0 || inTruce(sim, a, b)) continue;
     // Allies never attack each other.
     if (w.pact[a * PAIRS + b] === Pact.Alliance) continue;
-    if (!mayOutweigh(sim, a, b, WAR.ratio)) continue;
+    // A Grudge-bearer's revenge: against a people that beat it lately the 2x check is lower and the war roll higher.
+    const revenge = beatenBy(sim, a, b);
+    if (!mayOutweigh(sim, a, b, warRatio(sim, a, w.enemy[b] !== 0 || w.motherBusy[b] > 0, WAR.ratio, revenge))) continue;
+    if (revenge) revengeTarget = true;
     candidate[b] = 1;
     any = true;
   }
@@ -966,7 +989,7 @@ function declareWars(sim: Simulation, from: number): number {
   const w = sim.war;
   const civs = findNeighbors(sim);
   for (let a = from; a < civs; a++) {
-    if (!markCandidates(sim, a, civs) || w.rng() >= WAR.chance) continue;
+    if (!markCandidates(sim, a, civs) || w.rng() >= warChance(sim, a, WAR.chance, revengeTarget)) continue;
     if (worldRoom(w) < 2 || w.wars >= MAX_WARS) {
       w.stats.capBlocked++;
       continue;
@@ -998,6 +1021,9 @@ export function chooseGoal(sim: Simulation, att: number, candidates: Uint8Array)
     touched = new Int32Array(n);
   }
   const soldiers = sim.military.soldiers;
+  // The attacker's leader weighs inhabitants (Expansion) and deposits (Prospector) differently.
+  const popMul = sim.leaders.lev[att * LEVERS + L.warPop];
+  const resMul = WAR.resMul * sim.leaders.lev[att * LEVERS + L.resMul];
   let count = 0;
   for (let c = 0; c < n; c++) {
     const b = owner[c];
@@ -1008,7 +1034,7 @@ export function chooseGoal(sim: Simulation, att: number, candidates: Uint8Array)
     bCells[d]++;
     bPop[d] += sim.cellPop[c];
     const dep = world.deposit[c];
-    if (dep !== 0) bRes[d] += DOUBLE_DEPOSIT[dep] ? WAR.resMul : 1;
+    if (dep !== 0) bRes[d] += DOUBLE_DEPOSIT[dep] ? resMul : 1;
     bDef[d] += soldiers[c * TROOP_TYPES] + soldiers[c * TROOP_TYPES + 1] + soldiers[c * TROOP_TYPES + 2];
     if (!bBorder[d]) {
       for (let k = 0; k < DIRECTION_COUNT; k++) {
@@ -1025,7 +1051,7 @@ export function chooseGoal(sim: Simulation, att: number, candidates: Uint8Array)
   for (let i = 0; i < count; i++) {
     const d = touched[i];
     if (bBorder[d]) {
-      const v = (bPop[d] + WAR.resPop * bRes[d]) / (1 + bDef[d]);
+      const v = (bPop[d] * popMul + WAR.resPop * bRes[d]) / (1 + bDef[d]);
       if (v > bestValue || (v === bestValue && d < best)) {
         bestValue = v;
         best = d;
@@ -1081,6 +1107,8 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
   w.version++;
   const st = w.stats;
   st.declared++;
+  sim.leaders.declared[att]++;
+  if (beatenBy(sim, att, def)) sim.leaders.stats.revengeWars++;
   if (rebelWar >= 0) {
     st.vsRebelMother++;
     splitFronts(sim, rebelWar, def);
@@ -1158,7 +1186,8 @@ function joinAllies(sim: Simulation, s: number): void {
   const okA = sumA > foeStrength(sim, def, att);
   for (let p = 1; p <= max; p++) {
     if (!candA[p]) continue;
-    if (!okA) st.joinWeak++;
+    // An Oathkeeper joins its ally's war without the strength check.
+    if (!okA && sim.leaders.lev[p * LEVERS + L.oath] <= 0) st.joinWeak++;
     else joinMember(sim, s, p, 0);
   }
 }
@@ -1199,6 +1228,8 @@ function joinMember(sim: Simulation, s: number, p: number, side: number): void {
   if (worldRoom(w) < 1 || countArmies(w, p) >= WAR.maxArmies) w.stats.joinNoRoom++;
   addMember(sim, s, p, side);
   w.stats.joins++;
+  // An experience of its leader ("joined a war as an ally").
+  leaderEvent(sim, p, Ev.Pact);
   const main = side === 0 ? w.wAtt[s] : w.wDef[s];
   record(sim, `The ${sim.civs[p]!.name} joined the ${sim.civs[main]!.name} in the war against the ${sim.civs[side === 0 ? w.wDef[s] : w.wAtt[s]]!.name}.`, w.wGoal[s]);
 }
@@ -1354,7 +1385,7 @@ function newArmy(sim: Simulation, s: number, civ: number, cell: number): number 
   w.aPathPos[a] = 0;
   for (let t = 0; t < TROOP_TYPES; t++) {
     w.aN[a * TROOP_TYPES + t] = 0;
-    w.aFac[a * TROOP_TYPES + t] = 1 + (MIL.factor - 1) * (sold[t] > 0 ? cov[t] / sold[t] : 0);
+    w.aFac[a * TROOP_TYPES + t] = (1 + (MIL.factor - 1) * (sold[t] > 0 ? cov[t] / sold[t] : 0)) * sim.leaders.lev[civ * LEVERS + L.strength];
   }
   w.armies++;
   w.stats.armiesRaised++;
@@ -1997,6 +2028,13 @@ function fight(sim: Simulation, s: number, cell: number, na: number, nb: number)
     for (let i = 0; i < nb; i++) if (w.aSince[groupB[i]] < sim.tick) garrison = true;
     defense = garrison ? Defense.SeatArmy : Defense.Seat;
   }
+  // Leaders: Cautious Strategist takes fewer losses, a Xenophobe defends its own land better.
+  const lev = sim.leaders.lev;
+  const civA = w.aCiv[groupA[0]];
+  const civB = w.aCiv[groupB[0]];
+  BATTLE_LEADER.takenA = lev[civA * LEVERS + L.lossTaken];
+  BATTLE_LEADER.takenB = lev[civB * LEVERS + L.lossTaken];
+  BATTLE_LEADER.extraB = sim.world.owner[cell] === civB ? lev[civB * LEVERS + L.defExtra] : 0;
   const result = fightBattle(inp, defense, out);
   if (seat) {
     if (w.wSiegeStart[s] < 0 && besiegerStrength(sim, s) > 0) startSiege(sim, s);
@@ -2021,8 +2059,8 @@ function fight(sim: Simulation, s: number, cell: number, na: number, nb: number)
   // Giving up after the battle: the sides with the allies that joined.
   const sa = sideStrength(sim, s, 0);
   const sd = sideStrength(sim, s, 1);
-  if (defenderGivesUp(w, s, sd, sa)) w.wEnd[s] = EndType.GaveUp;
-  else if (attackerGivesUp(w, s, sa, sd)) w.wEnd[s] = EndType.AttackerGaveUp;
+  if (defenderGivesUp(sim, s, sd, sa)) w.wEnd[s] = EndType.GaveUp;
+  else if (attackerGivesUp(sim, s, sa, sd)) w.wEnd[s] = EndType.AttackerGaveUp;
 }
 
 /** Scales the group's armies to what is left of `side` after the battle and kills the difference in the cells. */
@@ -2063,10 +2101,16 @@ function applyLosses(sim: Simulation, group: Int32Array, count: number, side: nu
 // ---------------------------------------------------------------------------
 // Siege
 
+/** Weeks of siege before the first occupation check: WAR.occupyWeeks, longer for a stubborn defender (lever occupy). */
+function occupyWeeks(sim: Simulation, s: number): number {
+  return WAR.occupyWeeks * sim.leaders.lev[sim.war.wDef[s] * LEVERS + L.occupy];
+}
+
 /** Defenders must fight when an occupation check is at most WAR.forceWeeks away. */
 function forced(sim: Simulation, s: number): boolean {
   const age = sim.tick - sim.war.wSiegeStart[s];
-  const next = age <= WAR.occupyWeeks ? WAR.occupyWeeks : WAR.occupyWeeks + Math.ceil((age - WAR.occupyWeeks) / WAR.occupyCheck) * WAR.occupyCheck;
+  const first = occupyWeeks(sim, s);
+  const next = age <= first ? first : first + Math.ceil((age - first) / WAR.occupyCheck) * WAR.occupyCheck;
   return next - age <= WAR.forceWeeks;
 }
 
@@ -2090,6 +2134,8 @@ function startSiege(sim: Simulation, s: number): void {
   for (const kind of SIEGE_KINDS) mods.push({ kind, label: SUPPLY_LABEL, amount: -0.5, percent: true });
   sim.supplyModifiers.set(goal, mods);
   updateCellSupply(sim, goal);
+  // An experience of the besieged people's leader ("seat besieged").
+  leaderEvent(sim, sim.world.owner[goal], Ev.WarLost);
   record(sim, `The ${sim.civs[w.wAtt[s]]!.name} besieged a seat of government of the ${sim.civs[w.wDef[s]]!.name}.`, goal);
 }
 
@@ -2152,10 +2198,11 @@ function updateSiege(sim: Simulation, s: number): void {
   if (w.wSiegeStrength[s] < here) w.wSiegeStrength[s] = here;
   if (w.wOccupied[s]) return;
   const age = sim.tick - w.wSiegeStart[s];
-  if (age < WAR.occupyWeeks || (age - WAR.occupyWeeks) % WAR.occupyCheck !== 0) return;
+  const first = occupyWeeks(sim, s);
+  if (age < first || (age - first) % WAR.occupyCheck !== 0) return;
   const cell = w.wGoal[s];
   const sat = sim.satisfaction[cell];
-  if (age === WAR.occupyWeeks) {
+  if (age === first) {
     w.stats.checks++;
     w.stats.checkSat += sat;
     w.stats.checkTarget += satisfactionTarget(sim, cell, sim.civs[sim.world.owner[cell]] ?? null);
@@ -2168,6 +2215,11 @@ function updateSiege(sim: Simulation, s: number): void {
     w.wLastGain[s] = sim.tick;
     w.wOccupied[s] = 1;
     w.version++;
+    if (w.wRebel[s] === 0) {
+      leaderEvent(sim, w.wAtt[s], Ev.WarWon);
+      leaderEvent(sim, w.wDef[s], Ev.WarLost);
+      leaderBeaten(sim, w.wDef[s], w.wAtt[s]);
+    }
     if (w.wRebel[s] === 1) {
       // The occupied seat stays occupied to the war's end; the nearest rebel seat left is next.
       w.stats.rebOcc++;
@@ -2609,14 +2661,29 @@ export function endWar(sim: Simulation, s: number, type: number): void {
   rebelFront(w, def);
   // One front again: a reinforcement army gathers and marches to her army against the rebels.
   if (w.motherBusy[def] > 0 && w.civWar[def] >= 0 && w.wRebel[w.civWar[def]] === 1) reraise(sim, w.civWar[def], def);
-  w.truce[pairKey(att, def)] = sim.tick + WAR.truceYears * TICKS_PER_YEAR;
+  const lev = sim.leaders.lev;
+  w.truce[pairKey(att, def)] = sim.tick + (WAR.truceYears + lev[att * LEVERS + L.truce]) * TICKS_PER_YEAR;
   if (sim.civs[att] && sim.civs[def]) {
-    addMood(sim.diplomacy, att, def, 'War', -WAR.trustLoss, sim.tick);
-    addMood(sim.diplomacy, def, att, 'War', -WAR.trustLoss, sim.tick);
+    // The war's trust loss is each people's own (a grudge-bearer takes a war harder).
+    addMood(sim.diplomacy, att, def, 'War', -WAR.trustLoss + lev[att * LEVERS + L.warTrust], sim.tick);
+    addMood(sim.diplomacy, def, att, 'War', -WAR.trustLoss + lev[def * LEVERS + L.warTrust], sim.tick);
     sever(sim, att, def);
+  }
+  // Experiences of the leaders: the side that gave up lost (the winner conquered a district when the defender gave up).
+  if (type === EndType.GaveUp) {
+    // A war won as the attacker (the goal Glory), with or without a district to take.
+    if (sim.leaders.has[att]) sim.leaders.wonAttack[att]++;
+    leaderEvent(sim, att, Ev.WarWon);
+    leaderEvent(sim, def, Ev.WarLost);
+    leaderBeaten(sim, def, att);
+  } else if (type === EndType.AttackerGaveUp) {
+    leaderEvent(sim, def, Ev.WarWon);
+    leaderEvent(sim, att, Ev.WarLost);
+    leaderBeaten(sim, att, def);
   }
   if (type === EndType.GaveUp && sim.civs[att] && sim.civs[def] && sim.world.owner[goal] === def) {
     const whole = transferDistrict(sim, s);
+    if (sim.leaders.has[att]) sim.leaders.conquests[att]++;
     record(sim, whole ? `The ${defName} gave up: the ${attName} conquered all their land.` : `The ${defName} gave up: the ${attName} conquered their seat of government.`, goal, true);
   } else if (type === EndType.AttackerGaveUp) {
     record(sim, `The ${attName} gave up their war against the ${defName}.`, goal, true);

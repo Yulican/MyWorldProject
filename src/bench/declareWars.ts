@@ -5,10 +5,10 @@ import { empowerGovernment } from './empowerGovernment';
 import { stirUnrest } from './stirUnrest';
 
 // The "war" benchmark scenario: the most the war shows on the map at once.
-// The armies' caps make 32 armies on the map out of reach (one war per
+// The armies' caps keep most worlds below 32 armies on the map (one war per
 // people, per war the attacker's 1 main army and the defender's relief armies
-// from up to 3 other seats with soldiers), so the setup makes as many wars and
-// seats as it can: first the unrest scenario's uprisings (stirUnrest: the most
+// from up to 3 other seats with soldiers; with leaders the larger worlds field
+// 21 to 32), so the setup makes as many wars and seats as it can: first the unrest scenario's uprisings (stirUnrest: the most
 // peoples), then the government scenario's seats and military buildings with
 // a year of training (empowerGovernment: soldiers and seats everywhere). Then
 // the three strongest realms face a rebellion of all their other settlements
@@ -19,7 +19,8 @@ import { stirUnrest } from './stirUnrest';
 // attackers stand on their goal seats, so every war has a siege: army
 // markers, siege frames and red dashed war borders all over the map. A few
 // weeks run so the sieges begin and the relief armies march. armyDecoys.ts
-// fills the map up to 32 army markers.
+// fills the map up to 32 army markers. Peoples founded here (stirUnrest, the
+// rebellions) have no leader until the year's end: they act by the base rules.
 //
 // Aged worlds rarely have peoples with adjacent settlements (the game's rule
 // for a declaration), so pairs ignore it; the goal is the seat chooseGoal

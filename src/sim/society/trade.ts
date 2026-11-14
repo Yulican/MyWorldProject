@@ -1,3 +1,4 @@
+import { L, LEVERS } from './leaders';
 import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
@@ -287,8 +288,10 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
   for (let m = 0; m < MATERIAL_COUNT; m++) {
     const stock = economy.stock[cell * MATERIAL_COUNT + m];
     const goal = economy.goal[cell * MATERIAL_COUNT + m];
-    const upkeep = upkeepOf(economy, cell, m);
-    const reserve = Math.max(RESERVE_MIN, RESERVE_YEARS * upkeep);
+    const upkeep = upkeepOf(economy, cell, m) * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.upkeepAll];
+    // A frugal leader's settlements keep more years of upkeep (lever reserve).
+    const reserveYears = RESERVE_YEARS * sim.leaders.lev[sim.world.owner[cell] * LEVERS + L.reserve];
+    const reserve = Math.max(RESERVE_MIN, reserveYears * upkeep);
     // Upkeep its own harvest doesn't cover (e.g. a seat the realm wants): a
     // supply route, it asks for RESERVE_YEARS of the shortfall.
     const good = m === 0 ? Good.Wood : Good.Stone;
@@ -306,7 +309,7 @@ export function updateTradeNeeds(sim: Simulation, cell: number, adults: number, 
       if (order > 0) seatOrders |= 1 << m;
       continue;
     }
-    const shortfall = yearly * RESERVE_YEARS;
+    const shortfall = yearly * reserveYears;
     trade.want[t + m] = Math.max(0, goal + shortfall - stock - trade.incoming[t + m]);
     trade.surplus[t + m] = Math.max(0, stock - goal - reserve);
   }
@@ -702,13 +705,14 @@ function crossingToll(sim: Simulation, cell: number, owner: number, civ: number)
 function rollKeep(sim: Simulation, to: number, from: number, back: boolean): number {
   const { world, trade } = sim;
   let keep = 1;
+  const spare = sim.leaders.lev[sim.world.owner[from] * LEVERS + L.lossTrade];
   // Walk the path from `to` back to the start; on the way back the hexes entered are the predecessors.
   let c = to;
   while (c !== from && c >= 0) {
     const entered = back ? wayPrev[c] : c;
     if (entered >= 0) {
       const chance = (isWaterBiome(world.biome[entered]) ? LOSS_WATER : LOSS_LAND) + LOSS_DANGER * world.danger[entered];
-      if (trade.rng() < chance) keep *= 1 - LOSS_SHARE;
+      if (trade.rng() < chance) keep *= 1 - LOSS_SHARE * spare;
     }
     c = wayPrev[c];
   }
@@ -731,7 +735,9 @@ function planDeal(sim: Simulation, home: number, target: number): number {
   const { trade, economy: eco } = sim;
   dealSell.fill(0);
   dealBuy.fill(0);
-  let load = MERCHANT_LOAD;
+  const lev = sim.leaders.lev;
+  const maxLoad = MERCHANT_LOAD * lev[sim.world.owner[home] * LEVERS + L.load];
+  let load = maxLoad;
   let worth = 0;
   dealPriority = 0;
   dealOwed = false;
@@ -760,7 +766,7 @@ function planDeal(sim: Simulation, home: number, target: number): number {
     dealPriority += amount * PRICE[g] * unhappyTarget * lacking(eco, target, g) * (focus > 0 ? focus : 1);
   }
   let money = eco.money[home];
-  let backLoad = MERCHANT_LOAD;
+  let backLoad = maxLoad;
   for (const g of BY_VALUE) {
     if (g === TradeGood.Money || backLoad <= 0 || money <= 0) continue;
     const amount = Math.min(trade.want[home * TRADE_GOODS + g], trade.surplus[target * TRADE_GOODS + g], backLoad / WEIGHT[g], money / PRICE[g]);
@@ -892,7 +898,7 @@ function agreementFirst(sim: Simulation, supplier: number, buyer: number): numbe
 function bestTrip(sim: Simulation, owner: Uint8Array, home: number, assume: number, out: TripChoice): number {
   const { trade, economy } = sim;
   const civ = owner[home];
-  const reached = searchWays(sim, owner, home, MAX_TRIP_COST, assume);
+  const reached = searchWays(sim, owner, home, MAX_TRIP_COST * sim.leaders.lev[civ * LEVERS + L.tripRange], assume);
   let best = -1;
   let bestRate = 0;
   // Deliveries a trade agreement still owes this year come before any other trip.
@@ -1104,6 +1110,9 @@ export function advanceTrips(sim: Simulation): void {
         const arrived = amount * keep;
         trade.lost[g] += amount - arrived;
         trade.delivered[g] += arrived;
+        // Yearly trade value per people (the goal Wealth): both ends of the delivery count.
+        sim.leaders.tradeValue[owner[target]] += arrived * PRICE[g];
+        if (deal) sim.leaders.tradeValue[owner[home]] += arrived * PRICE[g];
         addStock(economy, target, g, arrived);
         if (deal) {
           trade.abroad[g] += arrived;
@@ -1121,7 +1130,7 @@ export function advanceTrips(sim: Simulation): void {
         money += paid;
         owed -= paid;
         // Buy what home asked for with the money, or take it as payment for the rest.
-        let load = MERCHANT_LOAD;
+        let load = MERCHANT_LOAD * sim.leaders.lev[owner[home] * LEVERS + L.load];
         for (let g = 0; g < TRADE_GOODS; g++) load -= trade.tripCargo[cargo + g] * WEIGHT[g];
         for (const g of BY_VALUE) {
           if (g === TradeGood.Money || load <= 0) continue;
@@ -1208,7 +1217,7 @@ export function wantedTradeBuilding(sim: Simulation, cell: number, has: (good: n
   if (!has(Good.Merchants)) {
     const target = bestTrip(sim, owner, cell, -1, tripOut);
     resetWays();
-    if (target >= 0 && tripOut.rate * (2 * tripOut.cost + 1) >= CENTER_MIN_VALUE) return TYPE_OF[Good.Merchants];
+    if (target >= 0 && tripOut.rate * (2 * tripOut.cost + 1) >= CENTER_MIN_VALUE * sim.leaders.lev[civ * LEVERS + L.centerMin]) return TYPE_OF[Good.Merchants];
   }
   if (!has(Good.Harbor) && isCoast(world, cell)) {
     const now = tradeRate(sim, cell);

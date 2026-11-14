@@ -27,12 +27,14 @@ type Props = {
   onDiplomacy: () => void;
   /** Opens the government panel. */
   onGovernment: () => void;
+  /** Opens the leader panel. */
+  onLeader: () => void;
   /** Opens the war panel. */
   onWar: () => void;
 };
 
 /** Bottom panel listing the living peoples, how faith in the player develops, and the chronicle. */
-export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onWar }: Props) {
+export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onLeader, onWar }: Props) {
   // The player's people first, then by size.
   const civs = livingCivilizations(sim).sort(
     (a, b) => Number(b.worshipsPlayer) - Number(a.worshipsPlayer) || b.population - a.population,
@@ -48,18 +50,17 @@ export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onWar }: Pro
             Year {simulationYear(sim)} · {sim.pop.count} people · {sim.believers} believe in you
           </Text>
         </View>
-        <Pressable onPress={onGovernment} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
-          <Text style={styles.diplomacyText}>Government ›</Text>
-        </Pressable>
-        <Pressable onPress={onDiplomacy} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
-          <Text style={styles.diplomacyText}>Diplomacy ›</Text>
-        </Pressable>
-        <Pressable onPress={onWar} hitSlop={8} style={({ pressed }) => [styles.diplomacy, pressed && styles.pressed]}>
-          <Text style={styles.diplomacyText}>War ›</Text>
-        </Pressable>
         <Pressable onPress={onClose} hitSlop={12} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
+      </View>
+
+      {/* The submenus: a row of their own, so four of them fit a narrow phone. */}
+      <View style={styles.menus}>
+        <MenuButton label="Leader ›" onPress={onLeader} />
+        <MenuButton label="Government ›" onPress={onGovernment} />
+        <MenuButton label="Diplomacy ›" onPress={onDiplomacy} />
+        <MenuButton label="War ›" onPress={onWar} />
       </View>
 
       <ScrollView style={styles.scroll}>
@@ -78,6 +79,14 @@ export function CivPanel({ sim, onClose, onDiplomacy, onGovernment, onWar }: Pro
         ))}
       </ScrollView>
     </View>
+  );
+}
+
+function MenuButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={6} style={({ pressed }) => [styles.menu, pressed && styles.pressed]}>
+      <Text style={styles.menuText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -208,16 +217,16 @@ const styles = StyleSheet.create({
   title: { color: colors.panelText, fontSize: 20, fontWeight: '700' },
   subtitle: { color: colors.panelMuted, fontSize: 13, marginTop: 2 },
   close: { padding: spacing.xs },
-  diplomacy: {
+  menus: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  menu: {
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.accent,
     paddingHorizontal: spacing.sm,
     height: 32,
     justifyContent: 'center',
-    marginRight: spacing.sm,
   },
-  diplomacyText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  menuText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
   pressed: { opacity: 0.7 },
   closeText: { color: colors.panelMuted, fontSize: 18 },
   scroll: { marginTop: spacing.sm },
