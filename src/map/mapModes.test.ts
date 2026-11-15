@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSimulation, generateWorld, stepSimulation, TICKS_PER_YEAR } from '../sim';
+import { DEPOSITS, SUPPLY_KINDS, createSimulation, generateWorld, stepSimulation, TICKS_PER_YEAR } from '../sim';
 import { MODE_SWITCH_EVERY, modeCycle, modeForSwipe } from '../bench/modeCycle';
 import { BENCHMARK, DIRECTIONS } from '../bench/benchmark';
 import {
@@ -55,7 +55,10 @@ test('every mode has one color per bucket, 8 to 12 buckets', () => {
     assert.equal(modeLegend(mode)!.entries.length, colors.length);
   }
   assert.equal(modeLegend(POLITICAL), null, 'no legend bar in Political');
-  assert.equal(modeLegend({ id: MapModeId.Deposits, sub: 0 })!.entries.length, 4);
+  const kinds = modeLegend({ id: MapModeId.Deposits, sub: 0 })!.entries;
+  assert.equal(kinds.length, DEPOSITS.length - 1, 'every deposit kind in the legend');
+  assert.equal(new Set(kinds.map((e) => e.color)).size, kinds.length, 'one distinct color per kind');
+  assert.equal(modeColors({ id: MapModeId.Deposits, sub: 0 }).length, DEPOSITS.length - 1);
 });
 
 test('mode keys round trip; missing or unknown keys give Political', () => {
@@ -108,6 +111,24 @@ test('the buffer holds buckets, numbers and rebel marks of the settlements', () 
     if (sim.cellPop[c] === 0 && data.bucket[c] > 0) free++;
   }
   assert.ok(free > 0, 'fertility colors free land too');
+
+  // Food and Water show the final yield (buildings and modifiers included, cellSupply), Wood/Stone the resource in percent.
+  data.sub = 0;
+  fillModeData(sim, data);
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (data.bucket[c] === 0) continue;
+    assert.equal(data.bucket[c], bucketOf(sim.cellSupply[c * SUPPLY_KINDS], FERTILITY_EDGES[0]) + 1);
+  }
+  const land = data.bucket.findIndex((b) => b > 0);
+  sim.cellSupply[land * SUPPLY_KINDS] = 1000;
+  assert.ok(fillModeData(sim, data), 'a changed yield (e.g. a new building) refreshes the buffer');
+  assert.equal(data.bucket[land], FERTILITY_EDGES[0].length + 1);
+
+  // Deposits: the bucket is the kind.
+  data.id = MapModeId.Deposits;
+  data.sub = 0;
+  fillModeData(sim, data);
+  for (let c = 0; c < sim.world.cellCount; c++) assert.equal(data.bucket[c], sim.world.deposit[c]);
 });
 
 test('the tile signature follows the mode and its values, Political adds nothing', () => {

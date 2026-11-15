@@ -1,5 +1,5 @@
 import { DEPOSITS, RESOURCE_COUNT, Resource, SUPPLY_KINDS, isWaterBiome, type DepositCategory, type Simulation } from '../sim';
-import { DEPOSIT_COLORS, FERTILITY_SCALES, POPULATION_SCALE, SATISFACTION_SCALE, SUPPLY_SCALE } from './palette';
+import { DEPOSIT_COLORS, DEPOSIT_KIND_COLORS, FERTILITY_SCALES, POPULATION_SCALE, SATISFACTION_SCALE, SUPPLY_SCALE } from './palette';
 
 // Map modes (Requirement Kartenmodi): which value colors the map, its color
 // buckets, the numbers drawn on settlements, and the per-hex buffer the map
@@ -71,9 +71,9 @@ export const POPULATION_EDGES = [10, 20, 35, 50, 65, 80, 100, 125, 150] as const
 /** Supply load in percent (inhabitants / supply of the sub-mode's kind), all sub-modes: 8 buckets, green < 70, yellow 85-105, dark red >= 120. */
 export const SUPPLY_EDGES = [25, 50, 70, 85, 95, 105, 120] as const;
 /**
- * Fertility by sub-mode: Food and Water as the natural yield in people per
- * hex (baseSupply, as in the hex panel), Wood and Stone as the 0..1 resource
- * in percent.
+ * Fertility by sub-mode: Food and Water as the hex's final yield in people
+ * (cellSupply: nature, buildings and every other modifier, the totals the hex
+ * panel shows), Wood and Stone as the 0..1 resource in percent.
  */
 export const FERTILITY_EDGES: readonly (readonly number[])[] = [
   [10, 20, 30, 45, 60, 80, 100, 130], // Food (people)
@@ -81,7 +81,7 @@ export const FERTILITY_EDGES: readonly (readonly number[])[] = [
   [5, 10, 20, 30, 50, 70, 90], // Wood (%)
   [10, 15, 20, 30, 50, 70, 90], // Stone (%)
 ];
-/** Deposit categories in legend order; bucket = index + 1. */
+/** Deposit categories in legend order (the kinds are listed grouped by them); a deposit's bucket is its id. */
 export const DEPOSIT_ORDER: readonly DepositCategory[] = ['metal', 'mineral', 'bounty', 'mystic'];
 
 /** Bucket of `v` for ascending `edges`: the number of edges <= v. */
@@ -103,7 +103,8 @@ export function modeColors(mode: MapMode): readonly string[] {
     case MapModeId.Fertility:
       return FERTILITY_SCALES[mode.sub] ?? FERTILITY_SCALES[0];
     case MapModeId.Deposits:
-      return DEPOSIT_ORDER.map((c) => DEPOSIT_COLORS[c]);
+      // Index = deposit id - 1: one color per kind.
+      return DEPOSITS.slice(1).map((d) => DEPOSIT_KIND_COLORS[d.name] ?? DEPOSIT_COLORS[d.category]);
     default:
       return [];
   }
@@ -144,12 +145,12 @@ export function modeLegend(mode: MapMode): Legend | null {
     return {
       title,
       unit: '',
-      entries: DEPOSIT_ORDER.map((cat, i) => ({
-        color: colors[i],
-        label: `${DEPOSIT_TITLES[cat]} (${DEPOSITS.filter((d, id) => id > 0 && d.category === cat)
-          .map((d) => d.name)
-          .join(', ')})`,
-      })),
+      // Every kind with its color, grouped by category (the category's name before its first kind).
+      entries: DEPOSIT_ORDER.flatMap((cat) =>
+        DEPOSITS.map((d, id) => ({ d, id }))
+          .filter(({ d, id }) => id > 0 && d.category === cat)
+          .map(({ d, id }, k) => ({ color: colors[id - 1], label: k === 0 ? `${DEPOSIT_TITLES[cat]}: ${d.name}` : d.name })),
+      ),
     };
   }
   const edges = modeEdges(mode);
@@ -287,14 +288,14 @@ export function fillModeData(sim: Simulation, data: MapModeData): boolean {
         if (!isWaterBiome(world.biome[c])) {
           const value =
             sub < 2
-              ? sim.baseSupply[c * SUPPLY_KINDS + sub]
+              ? sim.cellSupply[c * SUPPLY_KINDS + sub]
               : 100 * world.resources[c * RESOURCE_COUNT + (sub === 2 ? Resource.Wood : Resource.Stone)];
           b = bucketOf(value, edges) + 1;
         }
         break;
       case MapModeId.Deposits: {
         const id = world.deposit[c];
-        if (id > 0) b = DEPOSIT_ORDER.indexOf(DEPOSITS[id].category) + 1;
+        if (id > 0) b = id;
         break;
       }
     }

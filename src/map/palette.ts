@@ -24,6 +24,29 @@ export const DEPOSIT_COLORS: Record<DepositCategory, string> = {
   mystic: '#b57cff',
 };
 
+/**
+ * Deposits map mode: one color per deposit kind (by name, so appended kinds
+ * fall back to their category's color), told apart within each category.
+ */
+export const DEPOSIT_KIND_COLORS: Readonly<Record<string, string>> = {
+  Copper: '#d9822b',
+  Tin: '#b8c4cc',
+  Iron: '#8c4a32',
+  Gold: '#ffd700',
+  Salt: '#ffffff',
+  Flint: '#4b4f58',
+  Marble: '#e8d9c4',
+  Gems: '#21c7c7',
+  'Fishing grounds': '#1f6fe0',
+  'Wild horses': '#a0612d',
+  Floodplain: '#5fd35f',
+  Spices: '#e2384d',
+  'Holy spring': '#9fe8ff',
+  'Sacred grove': '#2f8f3a',
+  Meteorite: '#b57cff',
+  'Ancient ruins': '#ff7ad9',
+};
+
 export const RIVER_COLOR = '#4a8fd6';
 export const START_COLOR = '#ff4d4d';
 export const SELECTION_COLOR = '#ffffff';
