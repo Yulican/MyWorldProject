@@ -30,6 +30,31 @@ adb logcat -c
 TOP_PID=$!
 trap 'kill $TOP_PID 2>/dev/null || true; adb logcat -d > "$OUT/logcat-full.txt" 2>/dev/null || true' EXIT
 adb shell am start -W -a android.intent.action.VIEW -d "myworld://benchmark?scenario=$SCENARIO" "$PACKAGE"
+APP_PID=$(adb shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)
+echo "App pid: ${APP_PID:-unknown}"
+
+# When the app stops early or hangs: all logcat buffers, native crash dumps
+# from the dropbox and the newest tombstone (if the emulator allows root),
+# then the crash cause in the job log and summary (scripts/crash-report.sh).
+report_crash() {
+  local dir="$OUT/crash"
+  mkdir -p "$dir"
+  timeout 60 adb logcat -d -b all > "$OUT/logcat-crash.txt" 2>/dev/null \
+    || timeout 60 adb logcat -d > "$OUT/logcat-crash.txt" 2>/dev/null || true
+  local tag
+  for tag in data_app_native_crash SYSTEM_TOMBSTONE data_app_crash data_app_anr; do
+    timeout 30 adb shell dumpsys dropbox --print "$tag" 2>/dev/null | head -c 2000000 > "$dir/dropbox-$tag.txt" || true
+  done
+  local newest
+  newest=$(timeout 15 adb shell "su 0 ls -t /data/tombstones 2>/dev/null || ls -t /data/tombstones 2>/dev/null" \
+    | tr -d '\r' | grep -v '\.pb$' | head -n 1 || true)
+  if [[ -n "$newest" ]]; then
+    timeout 30 adb shell "su 0 cat /data/tombstones/$newest 2>/dev/null || cat /data/tombstones/$newest" \
+      > "$dir/tombstone-$newest.txt" 2>/dev/null || true
+  fi
+  "$(dirname "$0")/crash-report.sh" "$OUT/logcat-crash.txt" "$APP_PID" "$dir" \
+    "Crash report ($SCENARIO): $1" | tee "$OUT/crash-report.txt"
+}
 
 # Wait for the summary line, or for the app to die.
 start=$(date +%s)
@@ -38,12 +63,14 @@ while true; do
   if grep -q 'MYWORLD_BENCH_DONE' "$OUT/logcat.txt"; then break; fi
   if ! adb shell pidof "$PACKAGE" > /dev/null; then
     adb logcat -d > "$OUT/logcat-full.txt" || true
-    echo "::error::The app stopped before the benchmark finished (see logcat-full.txt)."
+    echo "::error::The app stopped before the benchmark finished (see logcat-full.txt and the crash report below)."
+    report_crash "the app stopped before the benchmark finished"
     exit 1
   fi
   if (( $(date +%s) - start > TIMEOUT_S )); then
     adb logcat -d > "$OUT/logcat-full.txt" || true
     echo "::error::The benchmark did not finish within ${TIMEOUT_S}s."
+    report_crash "the benchmark did not finish within ${TIMEOUT_S}s"
     exit 1
   fi
   progress=$(grep -c 'MYWORLD_BENCH_SWIPE' "$OUT/logcat.txt" || true)

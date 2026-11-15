@@ -209,6 +209,13 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: scripts/run-benchmark.sh test.apk benchmark-results ${{ matrix.scenario }}
 
+      # A failed job that wrote no crash report itself (e.g. the script broke
+      # off elsewhere): the crash check over the logcat it left, in the job
+      # log and summary, since the artifacts can't always be downloaded.
+      - name: Crash report from logcat
+        if: ${{ failure() && hashFiles('benchmark-results/logcat-full.txt') != '' && hashFiles('benchmark-results/crash-report.txt') == '' }}
+        run: scripts/crash-report.sh benchmark-results/logcat-full.txt "" benchmark-results/crash "Logcat check (${{ matrix.scenario }}) after the failed job"
+
       - name: Upload benchmark results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v5

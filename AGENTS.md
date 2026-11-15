@@ -79,7 +79,7 @@ Rules for every agent and every change:
 - A task is not done, and its branch must not be merged into `main`, until the whole run passes (both `benchmark` jobs). If it fails, keep optimizing and push again; don't hand the task back as finished.
 - Never weaken the thresholds, skip swipes or worlds, or disable the job to get it green. Only the user changes the rules.
 - New features extend the benchmark (new scenarios in `src/bench/`); all scenarios must always pass.
-- The failing swipes, their seeds and directions, and what else happened in the app during them, are in the job summaries and the `benchmark-results-<scenario>` artifacts. The **Bench** button in the app runs the young scenario on a phone, a long press the aged one.
+- The failing swipes, their seeds and directions, and what else happened in the app during them, are in the job summaries and the `benchmark-results-<scenario>` artifacts. When the app crashes or hangs, the crash cause from logcat (exception, signal and backtrace, low-memory kills, ANR, the app's last log lines) is printed to the job log and summary (`scripts/crash-report.sh`). The **Bench** button in the app runs the young scenario on a phone, a long press the aged one.
 
 ## Rules
 
