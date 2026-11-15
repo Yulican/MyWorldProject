@@ -94,3 +94,17 @@ export {
   type Gacha,
   type GodEffect,
 } from './society/gacha';
+export {
+  SAVE_SLICE_WORDS,
+  SAVE_VERSION,
+  continueSave,
+  deserializeWorld,
+  saveBytes,
+  saveVersion,
+  serializeWorld,
+  startSave,
+  type LoadResult,
+  type SaveError,
+  type SaveErrorCode,
+  type SaveJob,
+} from './save';

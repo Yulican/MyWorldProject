@@ -2,8 +2,11 @@ import { useCallback, useRef, useState } from 'react';
 import type { MapController } from '../map/WorldMap';
 import { randomSeed } from '../sim';
 import { gcTotals, logWork, perfEvents, setWorkLogging, workBetween } from '../state/perfStats';
+import { setSaveBenchmark } from '../state/saveGame';
+import { benchSlot } from '../state/saveSlot';
 import { advanceYears, createNewWorld, setBenchTick, setChronicleDialogs, setExtraArmies } from '../state/worldStore';
 import { armyDecoys } from './armyDecoys';
+import { startBenchSaves, type BenchSaves } from './benchSaves';
 import { castGacha, gachaDuringSwipes } from './castGacha';
 import { fillWithBuildings } from './fillBuildings';
 import { openTrade } from './openTrade';
@@ -13,6 +16,7 @@ import { openDiplomacy } from './openDiplomacy';
 import { stirUnrest } from './stirUnrest';
 import {
   BENCHMARK,
+  SAVE_LOAD_AT_SWIPE,
   SCENARIOS,
   evaluateSwipe,
   summarizeBenchmark,
@@ -49,6 +53,8 @@ export function useBenchmark(controller: { current: MapController | null }) {
   const run = useCallback(async (scenario: ScenarioName = 'young') => {
     if (running.current) return;
     running.current = true;
+    // The benchmark never reads or writes the player's save and doesn't autosave.
+    setSaveBenchmark(true);
     // Chronicle dialogs would pause the game; the benchmark keeps it running.
     setChronicleDialogs(false);
     const plan = swipePlan();
@@ -81,12 +87,28 @@ export function useBenchmark(controller: { current: MapController | null }) {
       advanceYears(setup.years, prepare);
       setStatus({ running: true, scenario, world, swipe: 0, failed: results.filter((r) => !r.pass).length });
       await delay(WORLD_SETTLE_MS);
-      const map = controller.current;
+      let map = controller.current;
       if (!map) throw new Error('Benchmark: the map is not ready.');
       map.zoomToCenter(BENCHMARK.zoom);
       await delay(ZOOM_SETTLE_MS);
       await map.swipe(plan[0]);
+      // The save scenario: the autosave runs over and over during the swipes (benchSaves.ts).
+      const saves: BenchSaves | null = setup.save ? startBenchSaves(benchSlot()) : null;
       for (let i = 0; i < plan.length; i++) {
+        if (saves && i === SAVE_LOAD_AT_SWIPE) {
+          // Once per world, while the map rests: the last save loaded back as "Load" does; the map is built anew.
+          const t0 = performance.now();
+          const load = await saves.loadLatest();
+          logWork('bench save loaded', t0, performance.now() - t0);
+          console.log(`${LOG}_SAVE ${JSON.stringify({ world, seed, ...load, ...saves.counts() })}`);
+          await delay(WORLD_SETTLE_MS);
+          const again = controller.current;
+          if (!again) throw new Error('Benchmark: the map is not ready.');
+          map = again;
+          map.zoomToCenter(BENCHMARK.zoom);
+          await delay(ZOOM_SETTLE_MS);
+          await map.swipe(plan[0]);
+        }
         await delay(PAUSE_MS);
         const before = { ...perfEvents, ...gcStats() };
         const swipeStart = performance.now();
@@ -111,6 +133,10 @@ export function useBenchmark(controller: { current: MapController | null }) {
         console.log(`${LOG}_SWIPE ${JSON.stringify(result)}`);
         setStatus({ running: true, scenario, world, swipe: i + 1, failed: results.filter((r) => !r.pass).length });
       }
+      if (saves) {
+        saves.stop();
+        console.log(`${LOG}_SAVE ${JSON.stringify({ world, seed, end: true, ...saves.counts() })}`);
+      }
     }
     stopMonitor();
     const summary = { ...summarizeBenchmark(results), scenario };
@@ -119,6 +145,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
     setExtraArmies(null);
     setBenchTick(null);
     setChronicleDialogs(true);
+    setSaveBenchmark(false);
     running.current = false;
   }, [controller]);
 

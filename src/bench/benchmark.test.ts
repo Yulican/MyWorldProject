@@ -45,6 +45,8 @@ test('the benchmark link picks the scenario, young by default', () => {
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=trade'), 'trade');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=government'), 'government');
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=war'), 'war');
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=save'), 'save');
+  assert.deepEqual(SCENARIOS.save, { years: 300, save: true });
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=bogus'), 'young');
 });
 

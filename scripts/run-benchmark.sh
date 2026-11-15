@@ -2,7 +2,7 @@
 # Runs the map benchmark on a connected Android device or emulator and fails
 # unless every swipe passes (rules in src/bench/benchmark.ts).
 #
-# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest|trade|diplomacy|government|war|gacha]
+# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest|trade|diplomacy|government|war|gacha|save]
 # The app is opened with the link myworld://benchmark?scenario=..., which
 # starts the benchmark; it logs MYWORLD_BENCH_* lines.
 set -euo pipefail
@@ -52,6 +52,8 @@ while true; do
 done
 
 grep -o 'MYWORLD_BENCH_SWIPE .*' "$OUT/logcat.txt" | sed 's/^MYWORLD_BENCH_SWIPE //' > "$OUT/swipes.jsonl"
+# The save scenario: its saves and the load once per world (src/bench/benchSaves.ts).
+grep -o 'MYWORLD_BENCH_SAVE .*' "$OUT/logcat.txt" | sed 's/^MYWORLD_BENCH_SAVE //' > "$OUT/saves.jsonl" || true
 grep -o 'MYWORLD_BENCH_DONE .*' "$OUT/logcat.txt" | tail -n 1 | sed 's/^MYWORLD_BENCH_DONE //' > "$OUT/summary.json"
 
 node - "$OUT" "$SCENARIO" <<'EOF'
@@ -68,6 +70,7 @@ const scenarioText = {
   government: 'worlds after 300 years, seats of government and government buildings everywhere',
   war: 'worlds after 300 years, uprisings, seats and soldiers everywhere, three rebellions and two blocks of allies at war, 32 army markers, 6 siege frames',
   gacha: 'worlds after 300 years, charges of all 25 abilities cast, fires burning, biomes shifting and rivers springing during the swipes',
+  save: 'worlds after 300 years, the sliced autosave running over and over during the swipes, the save loaded back once per world',
 }[scenario] ?? scenario;
 const summary = JSON.parse(fs.readFileSync(`${out}/summary.json`, 'utf8'));
 const swipes = fs.readFileSync(`${out}/swipes.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -119,10 +122,28 @@ if (withEvents.length > 0) {
     }
   }
 }
+// The save scenario: saves per world and the load back (it must give the world saved).
+const saveLines = fs.existsSync(`${out}/saves.jsonl`)
+  ? fs.readFileSync(`${out}/saves.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  : [];
+const loads = saveLines.filter((l) => !l.end);
+const badLoads = loads.filter((l) => !l.ok);
+if (saveLines.length > 0) {
+  lines.push('', '### Saves and loads', '', '| World | Seed | Step | Loaded | Load ms | Bytes | Saves | Written | Skipped | Note |', '|---|---|---|---|---|---|---|---|---|---|');
+  for (const l of saveLines) {
+    lines.push(
+      `| ${l.world + 1} | ${l.seed} | ${l.end ? 'end' : 'load'} | ${l.end ? '' : l.ok ? 'yes' : 'NO'} | ${l.ms !== undefined ? l.ms.toFixed(0) : ''} | ${l.bytes ?? ''} | ${l.saves} | ${l.written} | ${l.skipped} | ${(l.message ?? '').replace(/\|/g, '/')} |`,
+    );
+  }
+}
 const text = lines.join('\n') + '\n';
 fs.writeFileSync(`${out}/summary.md`, text);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
 console.log(text);
+if (scenario === 'save' && (loads.length < 5 || badLoads.length > 0)) {
+  console.log(`::error::Save benchmark: ${badLoads.length} of ${loads.length} loads did not give the world saved (one per world expected).`);
+  process.exit(1);
+}
 if (!summary.pass) {
   console.log(`::error::Map benchmark (${scenarioText}) failed: ${summary.failed}/${summary.swipes} swipes below 60 fps or with a frame over 25 ms.`);
   process.exit(1);

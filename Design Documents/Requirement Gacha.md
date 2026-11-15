@@ -211,6 +211,7 @@ Ressourcenverluste durch Exhausted Soil, Wild Fire und Biome Shift sind **dauerh
 - Spielerzustand (nicht Teil des Hexfeld-Zustands): `faith` (`Float64`), `pulls` (Anzahl bisheriger Ziehungen für den Preis, `Int32`), `charges` (`Int32Array`, 25 Einträge), Zufallsgenerator „gacha“.
 - Gott-Schicht: Effektliste (Abschnitt 7.1), `godLev` (Volk × Hebel, `Float32Array`), `godDevotion` (je Volk), `ageShift`, `honed` (je Anführer), `heirInherits`, `youngHeir` (je Volk), `slotMod` (je Hexfeld), Feuerliste (Abschnitt 7.3), Zähler für den Teilwert „Divine“.
 - Fähigkeitstabelle: `ABILITIES` mit Id, Name, Kategorie, Stufe, Zielart, Fläche, Dauer, Zielprüfer, Wirkung (eine reine Funktion je Fähigkeit im Kern, kein React). Kern und Zufall sind **portierbar** (flache Arrays, deterministisch pro Seed).
+- **Speichern/Laden** (`Requirement Speichern und Laden.md`): der gesamte Gottes-Zustand dieses Abschnitts (Faith, `pulls`, `charges`, Zufallsgenerator „gacha“, Effektliste mit Restdauer, `godLev`, `godDevotion`, `ageShift`, `honed`, `heirInherits`, `youngHeir`, `slotMod`, Feuerliste, „Divine“-Zähler) ist Teil des Spielstands; neue Felder hier müssen dort aufgenommen und die Formatversion erhöht werden. Nicht gespeichert: Einsatz-Modus/Zielwahl der Anzeige.
 - Faith-Zufluss läuft **je Tick** im Kern; die Ziehung selbst ist ein Aufruf des Kerns (`pullGacha(sim)`), kein Zeitgeber der App.
 
 ## 10. Performance, Benchmark, Simulation

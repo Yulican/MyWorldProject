@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { scenarioFromUrl } from '../bench/benchmark';
 import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
@@ -10,6 +10,7 @@ import { CivPanel } from '../components/CivPanel';
 import { DiplomacyPanel } from '../components/DiplomacyPanel';
 import { GovernmentPanel } from '../components/GovernmentPanel';
 import { LeaderPanel } from '../components/LeaderPanel';
+import { MenuPanel, OverwriteDialog } from '../components/MenuPanel';
 import { WarPanel } from '../components/WarPanel';
 import { HexInfoPanel, hexWar, strategicStock } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
@@ -36,7 +37,6 @@ import {
   armyStore,
   shownAfter,
   shownInDialog,
-  createNewWorld,
   landStore,
   mapArmies,
   mapWar,
@@ -45,6 +45,23 @@ import {
   snapshotStore,
   useGameState,
 } from '../state/worldStore';
+import {
+  answerOverwrite,
+  closeMenu,
+  continueAfterTap,
+  dismissSaveMessage,
+  loadFromMenu,
+  newWorldFromMenu,
+  onAppActive,
+  onAppBackground,
+  openMenu,
+  saveFromMenu,
+  setSaveBenchmark,
+  startNewWorld,
+  startSaveGame,
+  useSaveState,
+} from '../state/saveGame';
+import { fileSlot } from '../state/saveSlot';
 import { colors, spacing } from '../theme';
 
 // Set by the CI build (branch · commit) so testers can see which build is installed.
@@ -81,18 +98,45 @@ export function WorldScreen() {
   const benchmark = useBenchmark(mapController);
   const benchmarkRunning = benchmark.status?.running === true;
 
-  useEffect(() => {
-    if (!sim) createNewWorld();
-  }, [sim]);
+  const save = useSaveState();
+  // The menu and the overwrite question pause the game: the controls around the map wait.
+  const modal = save.menuOpen || save.askOverwrite;
 
+  // App start: the saved world continues (paused until the first tap), else a new world.
+  // Opened by the benchmark link, the save isn't read: the benchmark makes its own worlds.
   const runBenchmark = benchmark.run;
-  const hasWorld = sim !== null;
+  const started = useRef(false);
   useEffect(() => {
-    if (!hasWorld) return;
-    Linking.getInitialURL().then((url) => {
-      if (url?.startsWith(BENCHMARK_URL)) runBenchmark(scenarioFromUrl(url));
+    if (started.current) return;
+    started.current = true;
+    Linking.getInitialURL().then(
+      (url) => {
+        const bench = url?.startsWith(BENCHMARK_URL) === true;
+        // The benchmark's world is never autosaved into the player's slot.
+        if (bench) setSaveBenchmark(true);
+        startSaveGame(fileSlot(), { skipSave: bench });
+        if (bench && url) runBenchmark(scenarioFromUrl(url));
+      },
+      () => startSaveGame(fileSlot()),
+    );
+  }, [runBenchmark]);
+
+  // Autosave when the app goes to the background; the overwrite question skipped there comes on return.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'background') onAppBackground();
+      else if (next === 'active') onAppActive();
     });
-  }, [hasWorld, runBenchmark]);
+    return () => subscription.remove();
+  }, []);
+
+  // Save messages (load failed, could not save) show like the note after a cast.
+  useEffect(() => {
+    if (!save.message) return;
+    const timer = setTimeout(dismissSaveMessage, NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [save.message]);
+  const shownNotice = save.message ?? notice;
 
   // Stable per world, so the map doesn't re-render with every simulation update.
   const territory = useMemo<TerritorySource>(
@@ -106,10 +150,18 @@ export function WorldScreen() {
     [sim],
   );
 
-  const newWorld = () => {
+  /** Loading and a new world close panels and the cast mode (Requirement Speichern und Laden 4). */
+  const resetView = () => {
     setPanel({ kind: 'none' });
     setCast(null);
-    createNewWorld();
+  };
+  const newWorld = () => {
+    resetView();
+    startNewWorld();
+  };
+  const showMenu = () => {
+    resetView();
+    openMenu();
   };
 
   // While casting: the valid targets, checked again when the ability, the direction or the year changes (validTargets allocates).
@@ -204,7 +256,7 @@ export function WorldScreen() {
         {/* Faith and the next pull's price, always in view; green when a pull is affordable. */}
         <Pressable
           style={({ pressed }) => [styles.gacha, affordable && styles.gachaReady, pressed && styles.buttonPressed]}
-          disabled={!sim || benchmarkRunning}
+          disabled={!sim || benchmarkRunning || modal}
           onPress={() => {
             setCast(null);
             setPanel(panel.kind === 'gacha' ? { kind: 'none' } : { kind: 'gacha' });
@@ -217,7 +269,7 @@ export function WorldScreen() {
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.button, styles.benchButton, pressed && styles.buttonPressed]}
-          disabled={benchmarkRunning}
+          disabled={benchmarkRunning || modal}
           onPress={() => {
             setPanel({ kind: 'none' });
             runBenchmark('young');
@@ -232,10 +284,10 @@ export function WorldScreen() {
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-          disabled={benchmarkRunning}
-          onPress={newWorld}
+          disabled={benchmarkRunning || !sim || modal}
+          onPress={showMenu}
         >
-          <Text style={styles.buttonText}>New world</Text>
+          <Text style={styles.buttonText}>Menu</Text>
         </Pressable>
       </View>
 
@@ -278,9 +330,9 @@ export function WorldScreen() {
             onCancel={() => setCast(null)}
           />
         )}
-        {notice && (
+        {shownNotice && (
           <View style={styles.notice} pointerEvents="none">
-            <Text style={styles.noticeText}>{notice}</Text>
+            <Text style={styles.noticeText}>{shownNotice}</Text>
           </View>
         )}
         {sim && panel.kind === 'peoples' && (
@@ -306,6 +358,27 @@ export function WorldScreen() {
             onCloseAll={closeAllChronicle}
           />
         )}
+        {save.waitingForTap && !save.menuOpen && (
+          <Pressable style={styles.tapToContinue} onPress={() => continueAfterTap()}>
+            <View style={styles.tapBadge}>
+              <Text style={styles.tapText}>Tap to continue</Text>
+            </View>
+          </Pressable>
+        )}
+        {save.menuOpen && (
+          <MenuPanel
+            save={save}
+            onSave={saveFromMenu}
+            onLoad={async () => {
+              if (await loadFromMenu()) resetView();
+            }}
+            onNewWorld={async (saveFirst) => {
+              if (await newWorldFromMenu(saveFirst)) resetView();
+            }}
+            onClose={closeMenu}
+          />
+        )}
+        {save.askOverwrite && <OverwriteDialog onAnswer={answerOverwrite} />}
         {sim?.gameOver && (
           <View style={styles.gameOver}>
             <Text style={styles.gameOverTitle}>Nobody prays to you anymore</Text>
@@ -321,11 +394,12 @@ export function WorldScreen() {
         {/* While a chronicle entry is open, the controls choose the speed the game continues at. */}
         <TimeControls
           speed={entry ? resumeSpeed : speed}
-          onChange={entry ? setResumeSpeed : setSpeed}
-          disabled={!sim || sim.gameOver}
+          onChange={entry ? setResumeSpeed : save.waitingForTap ? continueAfterTap : setSpeed}
+          disabled={!sim || sim.gameOver || modal}
         />
         <Pressable
           style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
+          disabled={modal}
           onPress={() => setPanel(panel.kind === 'peoples' ? { kind: 'none' } : { kind: 'peoples' })}
         >
           <Text style={styles.secondaryText}>Peoples</Text>
@@ -450,4 +524,20 @@ const styles = StyleSheet.create({
   gameOverTitle: { color: colors.panelText, fontSize: 20, fontWeight: '700', textAlign: 'center' },
   gameOverText: { color: colors.panelMuted, fontSize: 14, textAlign: 'center', marginBottom: spacing.sm },
   build: { color: colors.panelMuted, fontSize: 10, textAlign: 'center', paddingVertical: 2 },
+  tapToContinue: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tapBadge: {
+    backgroundColor: 'rgba(20,23,31,0.85)',
+    borderRadius: 12,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  tapText: { color: colors.panelText, fontSize: 16, fontWeight: '700' },
 });

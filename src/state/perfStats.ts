@@ -25,6 +25,9 @@ export const perfEvents = {
   armyPictures: 0,
   /** Text updates of the on-screen performance meter. */
   meterUpdates: 0,
+  /** Frames that did a slice of a sliced save (autosave; the game clock stands still in them), and saves finished. */
+  saveSlices: 0,
+  saves: 0,
 };
 export type PerfEvents = typeof perfEvents;
 
