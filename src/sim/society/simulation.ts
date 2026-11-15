@@ -1238,7 +1238,10 @@ function refreshSnapshot(sim: Simulation): void {
         owner = id;
       }
     }
+    const was = world.owner[c];
     world.owner[c] = owner;
+    // A hex that changed hands under a Golden Harvest (the food lever of either people): its food anew.
+    if (was !== owner && sim.leaders.lev[was * LEVERS + L.food] !== sim.leaders.lev[owner * LEVERS + L.food]) updateCellSupply(sim, c);
     if (owner) territory[owner]++;
     if (sim.hasBuildings[c]) {
       world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);

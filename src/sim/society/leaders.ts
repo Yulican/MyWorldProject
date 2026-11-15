@@ -151,12 +151,14 @@ export const L = {
   connection: 58,
   tradeFirst: 59,
   capitalFirst: 60,
+  /** Food harvest of the people's hexes (only the god's Golden Harvest sets it; supply in economy.ts updateCellSupply). */
+  food: 61,
 } as const;
-export const LEVERS = 61;
+export const LEVERS = 62;
 export const LEVER_NAMES = Object.keys(L) as (keyof typeof L)[];
 /** 1 for the multiplicative levers. */
 export const LEVER_KIND = new Uint8Array(LEVERS);
-for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge, L.dealAmount, L.reserve]) LEVER_KIND[k] = 1;
+for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge, L.dealAmount, L.reserve, L.food]) LEVER_KIND[k] = 1;
 
 /** Experiments: 1 for levers (L index) whose effect is switched off, to see which lever causes a difference (tools only; all 0 in the game). */
 export const MUTE = new Uint8Array(LEVERS);

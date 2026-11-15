@@ -126,7 +126,7 @@ export const ABILITIES: readonly Ability[] = [
   { id: 3, name: 'Cramped Ground', tier: Tier.Rare, category: Category.Land, target: TargetKind.Hex, radius: 0, years: 0, about: '−1 building slot on a hex, for good; never below the slots in use.' },
   { id: 4, name: 'Drought', tier: Tier.Rare, category: Category.Land, target: TargetKind.Hex, radius: 3, years: 20, about: 'Moisture −0.25 on 37 hexes for 20 years: less rain water.' },
   { id: 5, name: 'Rich Vein', tier: Tier.Rare, category: Category.Land, target: TargetKind.Hex, radius: 0, years: 0, about: 'A metal or mineral deposit fitting the land appears on a hex without one.' },
-  { id: 6, name: 'Great River', tier: Tier.Legendary, category: Category.Land, target: TargetKind.Hex, radius: -1, years: 0, about: 'A river springs from a land hex and flows downhill, up to 12 hexes; in a basin it ends in a lake.' },
+  { id: 6, name: 'Great River', tier: Tier.Legendary, category: Category.Land, target: TargetKind.Hex, radius: -1, years: 0, about: 'A river springs from a land hex and flows downhill, up to 12 hexes; in a basin it ends in a lake and floods it. On a river, the river grows down to its mouth.' },
   { id: 7, name: 'Wild Fire', tier: Tier.Epic, category: Category.Land, target: TargetKind.Hex, radius: -1, years: 0, about: 'A forest, jungle or savanna burns and the fire spreads (up to 40 hexes): wood gone, buildings ruined, the land turns to plains.' },
   { id: 8, name: 'Biome Shift', tier: Tier.Legendary, category: Category.Land, target: TargetKind.Hex, radius: 1, years: 0, about: 'The land of 7 hexes turns one step wetter or drier.' },
   { id: 9, name: 'Fruitful Waters', tier: Tier.Common, category: Category.People, target: TargetKind.People, radius: 0, years: 30, about: 'Birth rate +10 % for 30 years.' },
@@ -136,7 +136,7 @@ export const ABILITIES: readonly Ability[] = [
   { id: 13, name: 'Wanderlust', tier: Tier.Common, category: Category.People, target: TargetKind.People, radius: 0, years: 15, about: 'Settlers set out earlier (overload factor −0.05) and travel farther (travel cost ×0.8) for 15 years.' },
   { id: 14, name: "Prophet's Light", tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 10, about: 'Faith in you +0.15 for everyone at once, and devotion +0.03 a year for 10 years.' },
   { id: 15, name: 'Doubt', tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 10, about: 'Faith in all gods −0.15 for everyone at once, and −0.03 a year for 10 years.' },
-  { id: 16, name: 'Golden Harvest', tier: Tier.Epic, category: Category.People, target: TargetKind.People, radius: 0, years: 20, about: 'Yield of mines and deposits and merchant load +15 % for 20 years.' },
+  { id: 16, name: 'Golden Harvest', tier: Tier.Epic, category: Category.People, target: TargetKind.People, radius: 0, years: 20, about: 'Food harvest, yield of mines and deposits and merchant load +15 % for 20 years.' },
   { id: 17, name: 'Gift of Trait', tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The leader gains a random trait, beyond the 3.' },
   { id: 18, name: 'Mark of Weakness', tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The leader gains a random weakening trait: Craven, Weak Hand, Tyrant, Tax Hawk, Xenophobe or Stubborn.' },
   { id: 19, name: 'Long Life', tier: Tier.Rare, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The leader dies later: death is rolled as if 10 years younger.' },
@@ -498,9 +498,12 @@ export function canCast(sim: Simulation, ability: number, target: number, option
       return hasLeader(sim, target) && godTraitChoices(sim, target, WEAKENING) > 0;
     case Ab.LongLife:
     case Ab.BrittleCrown:
-    case Ab.YoungHeir:
-    case Ab.DynastysHeir:
       return hasLeader(sim, target);
+    // The flag waits for the next successor: once set, a second charge would do nothing.
+    case Ab.YoungHeir:
+      return hasLeader(sim, target) && sim.leaders.youngHeir[target] === 0;
+    case Ab.DynastysHeir:
+      return hasLeader(sim, target) && sim.leaders.heirInherits[target] === 0;
     case Ab.HonedMind:
       return hasLeader(sim, target) && traitCount(sim, target) > 0;
     case Ab.RerollDestiny:
@@ -802,12 +805,19 @@ function recomputeGod(sim: Simulation, civ: number): void {
     else if (a === Ab.GoldenHarvest) {
       g.godLev[o + L.harvest] *= 1.15;
       g.godLev[o + L.load] *= 1.15;
+      g.godLev[o + L.food] *= 1.15;
     }
   }
   // Prophet's Light belongs to the casting god (the player's); Doubt acts on every god.
   for (let god = 0; god < GODS; god++) g.godDevotion[civ * GODS + god] = -doubt + (god === PLAYER_GOD ? light : 0);
   g.divine[civ] = clamp(divine, -GACHA.divineCap, GACHA.divineCap);
+  const food = sim.leaders.lev[o + L.food];
   combineLevers(sim, civ);
+  // Golden Harvest began or ended: the food of the people's hexes anew.
+  if (sim.leaders.lev[o + L.food] !== food) {
+    const owner = sim.world.owner;
+    for (let c = 0; c < sim.world.cellCount; c++) if (owner[c] === civ) updateCellSupply(sim, c);
+  }
 }
 
 /** Prophet's Light (+) or Doubt (-): every inhabitant's faith of people `civ` changes once, booked in the faith ledger. */
@@ -924,26 +934,27 @@ const pathCells = new Int32Array(16);
 
 /**
  * Great River (Requirement 7.2): from the target downhill until the sea, a lake or a river (it flows into it);
- * a target on a river extends it from its end. Without an outlet (no lower neighbor, or GACHA.riverMax hexes)
+ * a target on a river strengthens it: flow +1 from there down to its mouth. Without an outlet (no lower neighbor, or GACHA.riverMax hexes)
  * the last hex becomes a lake, flooding a settlement on it (its buildings fall to ruins).
  */
 function greatRiver(sim: Simulation, target: number): void {
   const w = sim.world;
-  let start = target;
-  // A river through the target: its end downstream.
-  for (let guard = 0; w.riverFlow[start] > 0 && guard < w.cellCount; guard++) {
-    const d = w.riverDir[start];
-    const next = d >= 0 ? w.neighbors[start * DIRECTION_COUNT + d] : -1;
-    if (next < 0 || isWaterBiome(w.biome[next])) break;
-    start = next;
+  if (w.riverFlow[target] > 0) {
+    // A river through the target grows: flow +1 from the target down to its mouth.
+    let c = target;
+    for (let guard = 0; c >= 0 && w.riverFlow[c] > 0 && !isWaterBiome(w.biome[c]) && guard < w.cellCount; guard++) {
+      w.riverFlow[c] += GACHA.streamFlow;
+      refreshCapacity(sim, c);
+      updateCellSupply(sim, c);
+      landChanged(sim, c);
+      const d = w.riverDir[c];
+      c = d >= 0 ? w.neighbors[c * DIRECTION_COUNT + d] : -1;
+    }
+    return;
   }
   let n = 0;
   let outlet = -1;
-  if (w.riverFlow[start] > 0) {
-    // The river's end already flows into the sea or a lake: nothing to extend.
-    return;
-  }
-  let c = start;
+  let c = target;
   while (n < GACHA.riverMax) {
     pathCells[n++] = c;
     const next = downhill(sim, c);
@@ -975,6 +986,9 @@ function greatRiver(sim: Simulation, target: number): void {
     w.riverFlow[lake] = 0;
     w.riverDir[lake] = -1;
     ruinBuildings(sim, lake);
+    // The flood: everyone on the hex dies (decided: nobody stays, nobody flees).
+    const pop = sim.pop;
+    for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.cell[i] === lake) killInhabitant(sim, i);
     setBiome(sim, lake, Biome.Lake);
   }
 }

@@ -36,8 +36,9 @@ import {
 import { ATTRS } from './leaderRules';
 import { ATTR_SLOTS, Goal, L, LEADER, LEVERS, NATURAL_SLOTS } from './leaders';
 import { satisfactionTarget, satisfactionTerms } from './satisfaction';
-import { BELIEVER_FAITH, TICKS_PER_YEAR, TickPart, createSimulation, livingCivilizations, stepSimulation, stepSimulationPart, type Simulation } from './simulation';
+import { BELIEVER_FAITH, TICKS_PER_YEAR, hexSupplyTerms, TickPart, createSimulation, livingCivilizations, stepSimulation, stepSimulationPart, type Simulation } from './simulation';
 import { createRng } from '../rng';
+import { sumTerms } from '../terms';
 
 // Gacha ("Design Documents/Requirement Gacha.md"): Faith, price, pulls, the 25 abilities with their targets,
 // the god layer, worship, fire, river, lake, slots and leaders beyond 3 attributes.
@@ -343,10 +344,22 @@ test('Great River in a basin: the last hex becomes a lake and floods the settlem
   assert.equal(w.biome[c], Biome.Lake);
   assert.equal(eco.state[c * eco.slots], SlotState.Ruin);
   assert.equal(sim.cellCapacity[c], 0);
-  // The people leave or die out by the usual rules (which let a lone inhabitant or two stay: crowding counts a capacity of at least 1).
-  const people = sim.cellPop[c];
-  for (let t = 0; t < 10 * TICKS_PER_YEAR; t++) stepSimulation(sim);
-  assert.ok(sim.cellPop[c] <= Math.min(2, people), `${sim.cellPop[c]} left of ${people}`);
+  assert.equal(sim.cellPop[c], 0, 'the flood kills everyone on the hex');
+});
+
+test('Great River on a river: flow +1 from the target down to the mouth, with its water', () => {
+  const sim = aged();
+  const w = sim.world;
+  const c = firstCell(sim, (x) => w.riverFlow[x] > 0 && !isWaterBiome(w.biome[x]) && w.riverFlow[x] < 5);
+  const path: number[] = [];
+  for (let x = c; x >= 0 && w.riverFlow[x] > 0 && !isWaterBiome(w.biome[x]); x = w.riverDir[x] >= 0 ? w.neighbors[x * DIRECTION_COUNT + w.riverDir[x]] : -1) path.push(x);
+  const flows = path.map((x) => w.riverFlow[x]);
+  const water = sim.cellSupply[c * 3 + 1];
+  const total = sim.gacha.landTotal;
+  cast(sim, Ab.GreatRiver, c);
+  path.forEach((x, i) => assert.ok(Math.abs(w.riverFlow[x] - flows[i] - 1) < 1e-6));
+  assert.ok(sim.cellSupply[c * 3 + 1] > water, 'more river water');
+  assert.equal(sim.gacha.landTotal - total, path.length, 'the map redraws the river');
 });
 
 test('Wild Fire: burns 6 weeks, spreads, at most 40 hexes; burnt land is plains without wood, buildings ruined', () => {
@@ -446,6 +459,7 @@ test('Fruitful Waters, Lean Years, Wanderlust, Golden Harvest: the god layer com
   assert.ok(Math.abs(lev[o + L.travel] - own[L.travel] * 0.8) < 1e-6);
   assert.ok(Math.abs(lev[o + L.harvest] - own[L.harvest] * 1.15) < 1e-6);
   assert.ok(Math.abs(lev[o + L.load] - own[L.load] * 1.15) < 1e-6);
+  assert.ok(Math.abs(lev[o + L.food] - 1.15) < 1e-6);
   cast(sim, Ab.LeanYears, civ);
   assert.ok(Math.abs(lev[o + L.birth] - own[L.birth] * 1.1 * 0.9) < 1e-6);
   const fx = peopleEffects(sim, civ).map((e) => `${e.name} ${e.yearsLeft}`).sort();
@@ -453,6 +467,21 @@ test('Fruitful Waters, Lean Years, Wanderlust, Golden Harvest: the god layer com
   endEffectsNow(sim);
   for (const k of [L.birth, L.settleOver, L.travel, L.harvest, L.load]) assert.equal(lev[o + k], sim.leaders.own[o + k]);
   assert.equal(peopleEffects(sim, civ).length, 0);
+});
+
+test('Golden Harvest: food of the people\'s hexes +15 %, shown as a supply term, back after its years', () => {
+  const sim = aged();
+  const civ = startCiv(sim);
+  const c = firstCell(sim, (x) => sim.world.owner[x] === civ && sim.cellPop[x] > 0 && sim.cellSupply[x * 3] > 0);
+  const food = sim.cellSupply[c * 3];
+  cast(sim, Ab.GoldenHarvest, civ);
+  assert.ok(Math.abs(sim.cellSupply[c * 3] - food * 1.15) < 1e-3);
+  const terms = hexSupplyTerms(sim, c)[0];
+  assert.ok(terms.some((t) => t.label === 'Golden Harvest +15 %'));
+  assert.ok(Math.abs(sumTerms(terms) - sim.cellSupply[c * 3]) < 1e-3, 'terms explain the supply');
+  endEffectsNow(sim);
+  assert.equal(sim.leaders.lev[civ * LEVERS + L.food], 1);
+  assert.ok(!hexSupplyTerms(sim, c)[0].some((t) => t.label.startsWith('Golden Harvest')));
 });
 
 test('Grateful Hearts and Restless Spirits: the satisfaction part "Divine"', () => {
@@ -596,6 +625,9 @@ test('Long Life and Brittle Crown shift the age of the death roll; Young Heir an
     cast(sim, Ab.YoungHeir, civ2);
     cast(sim, Ab.DynastysHeir, civ2);
     assert.deepEqual(leaderEffects(sim, civ2).map((e) => e.name), ['Young Heir', "Dynasty's Heir"]);
+    assert.equal(canCast(sim, Ab.YoungHeir, civ2), false, 'flag set already');
+    assert.equal(canCast(sim, Ab.DynastysHeir, civ2), false, 'flag set already');
+    assert.ok(!validTargets(sim, Ab.YoungHeir).includes(civ2));
     LEADER.inherit = 0;
     const before = sim.leaders.counter[civ2];
     yearEnd();
@@ -605,6 +637,7 @@ test('Long Life and Brittle Crown shift the age of the death roll; Young Heir an
     assert.equal(sim.leaders.youngHeir[civ2], 0);
     assert.equal(sim.leaders.heirInherits[civ2], 0);
     assert.equal(sim.leaders.ageShift[civ2], 0, 'the shift ends with the leader');
+    assert.ok(canCast(sim, Ab.YoungHeir, civ2) && canCast(sim, Ab.DynastysHeir, civ2), 'for the next successor again');
   } finally {
     Object.assign(LEADER, saved);
   }

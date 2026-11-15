@@ -117,6 +117,7 @@ const LEVER_TEXT: Record<number, [label: string, unit: Unit]> = {
   [L.buildTime]: ['Building time', 'factor'],
   [L.upkeepAll]: ['Upkeep of all buildings', 'factor'],
   [L.harvest]: ['Yield of mines and special deposits', 'factor'],
+  [L.food]: ['Food harvest', 'factor'],
   [L.load]: ['Merchant load', 'factor'],
   [L.centerMin]: ['Trade needed for a trade center', 'factor'],
   [L.lossTrade]: ['Merchant losses', 'factor'],

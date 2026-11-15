@@ -134,9 +134,13 @@ export function updateCellSupply(sim: Simulation, cell: number): void {
     sums,
   );
   let capacity = Infinity;
+  // The god's Golden Harvest: the owner's food harvest (lever food, 1 = none).
+  const owner = sim.world.owner[cell];
+  const food = owner > 0 ? sim.leaders.lev[owner * LEVERS + L.food] : 1;
   for (let k = 0; k < SUPPLY_KINDS; k++) {
-    sim.baseSupply[cell * SUPPLY_KINDS + k] = Math.max(0, sums[k]);
-    const v = sim.hasBuildings[cell] ? withBuildings(sim.economy, cell, k, sums[k]) : Math.max(0, sums[k]);
+    const f = k === 0 ? food : 1;
+    sim.baseSupply[cell * SUPPLY_KINDS + k] = Math.max(0, sums[k]) * f;
+    const v = (sim.hasBuildings[cell] ? withBuildings(sim.economy, cell, k, sums[k]) : Math.max(0, sums[k])) * f;
     sim.cellSupply[cell * SUPPLY_KINDS + k] = v;
     capacity = Math.min(capacity, v);
   }
@@ -154,7 +158,11 @@ function otherModifiers(sim: Simulation, cell: number): readonly SupplyModifier[
 
 /** Every supply modifier of a hex, as the simulation uses them (for the hex info). */
 export function cellModifiers(sim: Simulation, cell: number): SupplyModifier[] {
-  return [...otherModifiers(sim, cell), ...buildingSupplyModifiers(sim.economy, cell)];
+  const mods = [...otherModifiers(sim, cell), ...buildingSupplyModifiers(sim.economy, cell)];
+  const owner = sim.world.owner[cell];
+  const food = owner > 0 ? sim.leaders.lev[owner * LEVERS + L.food] : 1;
+  if (food !== 1) mods.push({ kind: 0, label: `Golden Harvest ${food > 1 ? '+' : '−'}${Math.round(Math.abs(food - 1) * 100)} %`, amount: food - 1, percent: true });
+  return mods;
 }
 
 /** People a hex would support with its standing buildings plus up to two extra types. */
