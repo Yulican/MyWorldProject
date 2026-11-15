@@ -14,6 +14,7 @@ import { MenuPanel, OverwriteDialog } from '../components/MenuPanel';
 import { WarPanel } from '../components/WarPanel';
 import { HexInfoPanel, hexWar, strategicStock } from '../components/HexInfoPanel';
 import { TimeControls } from '../components/TimeControls';
+import { MapModeBar, MapModeList } from '../components/MapModePanel';
 import { castArea, peopleHexes } from '../map/castArea';
 import { WorldMap, type MapController, type MapHighlight, type TerritorySource } from '../map/WorldMap';
 import {
@@ -40,10 +41,13 @@ import {
   landStore,
   mapArmies,
   mapWar,
+  modeStore,
+  setMapMode,
   setResumeSpeed,
   setSpeed,
   snapshotStore,
   useGameState,
+  useMapMode,
 } from '../state/worldStore';
 import {
   answerOverwrite,
@@ -77,13 +81,15 @@ type OpenPanel =
   | { kind: 'government' }
   | { kind: 'leader' }
   | { kind: 'war' }
-  | { kind: 'gacha' };
+  | { kind: 'gacha' }
+  | { kind: 'modes' };
 
 /** How long the note after a cast stays on screen. */
 const NOTICE_MS = 3500;
 
 export function WorldScreen() {
   const { sim, speed, chronicleSeen, resumeSpeed, chronicleDialogs } = useGameState();
+  const mapMode = useMapMode();
   const world = sim?.world ?? null;
   const [panel, setPanel] = useState<OpenPanel>({ kind: 'none' });
   // A charge being cast (target choice on the map), and the note after a cast.
@@ -145,6 +151,7 @@ export function WorldScreen() {
       civColor: (id) => sim?.civs[id]?.color ?? '#ffffff',
       war: mapWar,
       land: landStore,
+      mode: modeStore,
       armies: { ...armyStore, markers: mapArmies },
     }),
     [sim],
@@ -302,6 +309,8 @@ export function WorldScreen() {
             controller={mapController}
           />
         )}
+        {/* The active map mode's name and legend, with a quick way back to Political (Requirement Kartenmodi 2). */}
+        {sim && <MapModeBar mode={mapMode} onMode={setMapMode} />}
         {benchmark.status && <BenchmarkBanner status={benchmark.status} />}
         {sim && panel.kind === 'hex' && (
           <HexInfoPanel
@@ -343,6 +352,16 @@ export function WorldScreen() {
             onGovernment={() => setPanel({ kind: 'government' })}
             onLeader={() => setPanel({ kind: 'leader' })}
             onWar={() => setPanel({ kind: 'war' })}
+          />
+        )}
+        {sim && panel.kind === 'modes' && (
+          <MapModeList
+            mode={mapMode}
+            onMode={(m) => {
+              setMapMode(m);
+              closePanel();
+            }}
+            onClose={closePanel}
           />
         )}
         {sim && panel.kind === 'diplomacy' && <DiplomacyPanel sim={sim} onClose={closePanel} />}
@@ -397,13 +416,22 @@ export function WorldScreen() {
           onChange={entry ? setResumeSpeed : save.waitingForTap ? continueAfterTap : setSpeed}
           disabled={!sim || sim.gameOver || modal}
         />
-        <Pressable
-          style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
-          disabled={modal}
-          onPress={() => setPanel(panel.kind === 'peoples' ? { kind: 'none' } : { kind: 'peoples' })}
-        >
-          <Text style={styles.secondaryText}>Peoples</Text>
-        </Pressable>
+        <View style={styles.bottomButtons}>
+          <Pressable
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
+            disabled={modal}
+            onPress={() => setPanel(panel.kind === 'peoples' ? { kind: 'none' } : { kind: 'peoples' })}
+          >
+            <Text style={styles.secondaryText}>Peoples</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
+            disabled={modal || !sim}
+            onPress={() => setPanel(panel.kind === 'modes' ? { kind: 'none' } : { kind: 'modes' })}
+          >
+            <Text style={styles.secondaryText}>Map</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Text style={styles.build}>
@@ -470,7 +498,8 @@ const styles = StyleSheet.create({
   gachaLabelReady: { color: '#ffffff' },
   notice: {
     position: 'absolute',
-    top: spacing.sm,
+    // Below the map mode's legend bar.
+    top: spacing.sm + 48,
     left: spacing.md,
     right: spacing.md,
     backgroundColor: 'rgba(20,23,31,0.92)',
@@ -501,6 +530,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  bottomButtons: { flexDirection: 'row', gap: spacing.sm },
   secondaryButton: {
     borderRadius: 10,
     borderWidth: 1,

@@ -1,6 +1,6 @@
 # Requirement: Kartenmodi
 
-Stand: vom Nutzer entschieden (UI, Reihenfolge, Speichern, Benchmark); noch nicht simuliert und nicht umgesetzt. Offene Punkte stehen in Abschnitt 11. Zahlen sind Startwerte. Spieltexte sind Englisch. Ablauf: Design → Umsetzung (keine Spielregel ändert sich, daher keine Simulationsstufe; nur Messung im Benchmark).
+Stand: vom Nutzer entschieden (UI, Reihenfolge, Speichern, Benchmark, Eimergrenzen Runde 1); Runde 1 umgesetzt (`src/map/mapModes.ts`, Eimergrenzen dort an einer Stelle, Farben in `palette.ts`), Runde 2 offen. Offene Punkte stehen in Abschnitt 11. Die Eimergrenzen von Runde 1 sind aus der Spreizung gealterter Welten gemessen (`tools/modeBucketStats.ts`) und mit dem Nutzer festgelegt; übrige Zahlen sind Startwerte. Spieltexte sind Englisch. Ablauf: Design → Umsetzung (keine Spielregel ändert sich, daher keine Simulationsstufe; nur Messung im Benchmark).
 
 Baut auf allen Systemen auf, deren Werte gezeigt werden: Zufriedenheit, Regionale Rohstoffe (Versorgung, Bauplätze, Stadtstufen, Vorkommen), Diplomatie, Krieg, Zentralregierung, Handel (`Requirement *.md`). Ein Kartenmodus liest nur vorhandene Werte; er erfindet keine neue Regel.
 
@@ -33,11 +33,11 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 | Modus (Eintrag) | Wert und Quelle | Skala | Zahl im Hex |
 |---|---|---|---|
 | **Political** | Standardkarte | – | – |
-| **Satisfaction** | Zufriedenheit −100…+100 je bewohntem Hex (`Requirement Zufriedenheit.md` §1) | divergierend, 10 Stufen, Nullpunkt bei 0; Legende −100 … 0 … +100 | der Wert, auf ganze Zahlen gerundet. **„May rebel“-Marker:** Siedlungen mit Wert < 0 (unzufrieden im Sinn von `Requirement Krieg.md` §8, Hauptstadt nie) bekommen einen kleinen roten Rand um die Zahl; so ist erkennbar, was bei Stärke zur Rebellion führen kann |
-| **Population** (density) | Einwohner je Hex | sequenziell, 8 Stufen (Grenzen in Legende: z. B. 1, 5, 10, 20, 35, 50, 75, ≥100; Startwerte, an Tragfähigkeit der Welt anpassen) | Einwohnerzahl |
-| **Supply** (load) | Einwohner / Tragfähigkeit des Hex (`Requirement Regionale Rohstoffe.md`, Versorgung) in drei **Untermodi** Food, Water, Space (Umschalter in der Legendenleiste, Standard Food) | divergierend (grün ≤ 70 %, gelb um 100 %, rot ≥ 150 %), 10 Stufen | Last in Prozent (z. B. „120“) |
-| **Fertility** (Soil, Resources) | Bodenfruchtbarkeit / Nahrungsertrag je Hex, **auch ohne Volk**; Untermodi Food, Water, Wood, Stone (Standard Food) aus den Hex-Erträgen | sequenziell, 8 Stufen | keine Zahl im Standard (zu viele Hexe, Abschnitt 9) |
-| **Deposits** | Sonder-Vorkommen (`world/deposits.ts`: Eisen, Feuerstein, Luxusarten, Gold nur als Geld usw.), **kategorisch**: eine Farbe je Art | Farbliste, Legende nennt alle Arten | keine Zahl; ein kleiner Farbpunkt/Symbol im Hex statt Füllung, Gelände nur leicht gedimmt (bleibt lesbar, auch außerhalb von Gebieten) |
+| **Satisfaction** | Zufriedenheit −100…+100 je bewohntem Hex (`Requirement Zufriedenheit.md` §1) | divergierend, 10 Stufen, untere Grenzen −20, −10, −5, 0, 5, 10, 15, 20, 30; 0 ist die Grenze rot/grün (vier rote Stufen unter 0); Legende etwa −30 … +40 | der Wert, auf ganze Zahlen gerundet. **„May rebel“-Marker:** Siedlungen mit Wert < 0 (unzufrieden im Sinn von `Requirement Krieg.md` §8, Hauptstadt nie) bekommen einen kleinen roten Rand um die Zahl; so ist erkennbar, was bei Stärke zur Rebellion führen kann |
+| **Population** (density) | Einwohner je Hex | sequenziell, 10 Stufen, untere Grenzen 10, 20, 35, 50, 65, 80, 100, 125, 150 | Einwohnerzahl |
+| **Supply** (load) | Einwohner / Tragfähigkeit des Hex (`Requirement Regionale Rohstoffe.md`, Versorgung) in drei **Untermodi** Food, Water, Space (Umschalter in der Legendenleiste, Standard Food) | divergierend, 8 Stufen, untere Grenzen 25, 50, 70, 85, 95, 105, 120 % (alle Untermodi): grün < 70 %, gelb 85–105 %, dunkelrot ab 120 % | Last in Prozent (z. B. „120“) |
+| **Fertility** (Soil, Resources) | Natürlicher Ertrag je Hex, **auch ohne Volk** (alle Land-Hexe); Untermodi (Standard Food): *Food* und *Water* als Ertrag in Personen je Hex ohne Gebäude (`baseSupply`, wie im Hex-Panel), *Wood* und *Stone* als Rohstoffwert 0–1 in Prozent (`resources`) | sequenziell; Food 9 Stufen (10, 20, 30, 45, 60, 80, 100, 130), Water 9 Stufen (10, 20, 35, 50, 70, 90, 120, 160), Wood 8 Stufen (5, 10, 20, 30, 50, 70, 90 %), Stone 8 Stufen (10, 15, 20, 30, 50, 70, 90 %) | keine Zahl im Standard (zu viele Hexe, Abschnitt 9) |
+| **Deposits** | Sonder-Vorkommen (`world/deposits.ts`: Eisen, Feuerstein, Luxusarten, Gold nur als Geld usw.), **kategorisch**: eine Farbe je Kategorie (Metal, Mineral, Bounty, Mystic; die vorhandenen `DEPOSIT_COLORS`) | Farbliste, Legende nennt jede Kategorie mit allen ihren Arten | keine Zahl; ein kleiner Farbpunkt/Symbol im Hex statt Füllung, Gelände nur leicht gedimmt (bleibt lesbar, auch außerhalb von Gebieten) |
 
 ### Runde 2
 
@@ -83,7 +83,7 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 
 - Grenze: **jeder Swipe ≥ 60 fps, kein Frame über 25 ms**, unverändert.
 - **Zahlen im Hex (Regel):**
-  - Zahlen werden in die **Kachelbilder** gezeichnet (Glyphen aus einem vorgerenderten Zahlenatlas, kein Live-Text im Frame).
+  - Zahlen werden in die **Kachelbilder** gezeichnet (Glyphen aus einem vorgerenderten Zahlenatlas, kein Live-Text im Frame). Umsetzung: Ziffern, Minus und „k“ als fest hinterlegte Vektorstriche (`GLYPHS` in `mapModes.ts`), je Kachel ein Pfad für alle Zahlen (dunkle Kontur, weiße Linie), keine Schriftart und kein Bild-Atlas nötig.
   - **Nur ab Detailstufe 1 (Zoom ≥ 1,15)**; darunter nur Farbe. Der Benchmark läuft bei Zoom ×2, die Zahlen sind also dabei.
   - **Nur für Siedlungs-Hexe** (bewohnte Hexe): Satisfaction, Population, Supply, Military, Government, Economy, Diplomacy. Es gibt je Welt höchstens einige hundert.
   - **Für Flächen-Modi** (Fertility, alle Hexe) **keine Zahl** im Standard; die Legende gibt die Stufengrenzen. (Zahl ab Zoom ≥ 3 ist offen, Abschnitt 11.)
@@ -104,8 +104,8 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 ## 11. Offene Punkte
 
 - **Offen: Zahlenregel (Zoom).** Empfehlung wie Abschnitt 9: Zahlen nur bei Siedlungs-Hexen und ab Zoom ≥ 1,15, Flächen-Modi ohne Zahl. Alternative: Fertility-Zahlen ab Zoom ≥ 3 (Tier 2) einführen, falls Messung im Benchmark Luft zeigt.
-- **Offen: Eimergrenzen.** Population und Supply: Stufengrenzen sind Startwerte; Empfehlung: Skala aus der Spreizung der gealterten Welten (`economyStats.ts`) festlegen.
+- **Entschieden: Eimergrenzen.** Runde 1 gemessen über gealterte Welten (`tools/modeBucketStats.ts`) und festgelegt, siehe Tabelle in Abschnitt 4.
 - **Offen: Gedimmtes Gelände.** 50 % Helligkeit und 35 % Symboldeckkraft sind Startwerte, per Sichtprüfung auf dem Handy abstimmen.
 - **Offen: Volkswahl per Karte.** Empfehlung wie Abschnitt 5 (Antippen setzt Auswahl und öffnet das Hex-Panel). Alternative: erst Antippen = Auswahl, zweites Antippen desselben Hex = Panel.
 - **Offen: Political-Eintrag.** Eigener Eintrag als erster in der Liste (Entscheidung des Nutzers); ob zusätzlich ein Kurzknopf auf der Karte nötig ist, nach dem ersten Test auf dem Handy.
-- **Offen: „Fertility“-Untermodi.** Genaue Liste (Food, Water, Wood, Stone) anhand der Hex-Erträge in `terrain`/`biomes` bestätigen.
+- **Entschieden: „Fertility“-Untermodi.** Food und Water als Ertrag in Personen je Hex (`baseSupply`), Wood und Stone als Rohstoffwert in Prozent (Abschnitt 4).

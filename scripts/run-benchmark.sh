@@ -2,7 +2,7 @@
 # Runs the map benchmark on a connected Android device or emulator and fails
 # unless every swipe passes (rules in src/bench/benchmark.ts).
 #
-# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest|trade|diplomacy|government|war|gacha|save]
+# Usage: scripts/run-benchmark.sh <apk> [output dir] [scenario: young|aged|cities|unrest|trade|diplomacy|government|war|gacha|save|modes]
 # The app is opened with the link myworld://benchmark?scenario=..., which
 # starts the benchmark; it logs MYWORLD_BENCH_* lines.
 set -euo pipefail
@@ -71,6 +71,7 @@ const scenarioText = {
   war: 'worlds after 300 years, uprisings, seats and soldiers everywhere, three rebellions and two blocks of allies at war, 32 army markers, 6 siege frames',
   gacha: 'worlds after 300 years, charges of all 25 abilities cast, fires burning, biomes shifting and rivers springing during the swipes',
   save: 'worlds after 300 years, the sliced autosave running over and over during the swipes, the save loaded back once per world',
+  modes: 'worlds after 300 years, the map mode cycling through all modes and sub-modes during the swipes (colors and numbers in the tiles)',
 }[scenario] ?? scenario;
 const summary = JSON.parse(fs.readFileSync(`${out}/summary.json`, 'utf8'));
 const swipes = fs.readFileSync(`${out}/swipes.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));

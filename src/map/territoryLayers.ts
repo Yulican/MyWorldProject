@@ -8,8 +8,10 @@ import {
 } from '@shopify/react-native-skia';
 import { DIRECTION_COUNT, DIRECTION_OFFSETS, hexCenterX, hexCenterY, isWaterBiome, type World } from '../sim';
 import { HEX_PX } from './mapGeometry';
+import { MODES, MapModeId, type MapModeData } from './mapModes';
 import { BuilderSet, keptBuilder, sharedFillPaint, sharedStrokePaint } from './paints';
-import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
+import { MODE_ICON_ALPHA, withAlpha } from './palette';
+import { cellsInRange, drawModeOverview, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
 
 /**
  * Territory overview resolution in pixels per hex size. Lower than the
@@ -18,12 +20,18 @@ import { cellsInRange, renderTileWith, tileCells, type WorldLayers } from './wor
  */
 const OVERVIEW_PX_PER_HEX = 12;
 const ROAD_COLOR = 'rgba(92,65,40,0.9)';
+const ROAD_DIM = `rgba(92,65,40,${0.9 * MODE_ICON_ALPHA})`;
 /** Settlement dot radius in hex sizes, by dotSize class. */
 const DOT_RADIUS = [0.14, 0.21, 0.28];
 
 const RUIN_COLOR = '#9a9284';
 const OUTLINE_COLOR = '#1b1b1b';
 const ANCHOR_COLOR = '#1f3b63';
+/** Icons in fill modes (Requirement Kartenmodi 3): roads, dots, cities, ruins and anchors at MODE_ICON_ALPHA. */
+const RIM_DIM = withAlpha('#1b1b1b', MODE_ICON_ALPHA);
+const RUIN_DIM = withAlpha(RUIN_COLOR, MODE_ICON_ALPHA);
+const OUTLINE_DIM = withAlpha(OUTLINE_COLOR, MODE_ICON_ALPHA);
+const ANCHOR_DIM = withAlpha(ANCHOR_COLOR, MODE_ICON_ALPHA);
 /** Flags of seats of government and capitals (world.seats). */
 const SEAT_COLOR = '#e3b23c';
 const CAPITAL_COLOR = '#b3262e';
@@ -41,6 +49,11 @@ const FIRE_CORE = '#ffd23f';
  * while it burns (Wild Fire, Requirement Gacha 7.3), copied with the same snapshot.
  */
 export type MapWar = { readonly foe: Uint8Array; readonly siege: Uint8Array; readonly burning: Uint8Array };
+
+/** Whether a map mode fills hexes: territories then lose their tint and their icons are dimmed (Requirement Kartenmodi 3). */
+export function modeDims(mode: MapModeData | undefined): boolean {
+  return mode !== undefined && mode.id !== MapModeId.Political && MODES[mode.id]?.fill === true;
+}
 
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
@@ -78,6 +91,7 @@ export function buildTerritoryOverview(
   colorOf: (civ: number) => string,
   terrain: WorldLayers,
   war: MapWar,
+  mode?: MapModeData,
 ): TerritoryOverview {
   const rect = terrain.overviewRect;
   const k = OVERVIEW_PX_PER_HEX / HEX_PX;
@@ -86,7 +100,11 @@ export function buildTerritoryOverview(
   const picture = createPicture((canvas) => {
     canvas.scale(k, k);
     canvas.translate(-rect.x, -rect.y);
-    drawTerritory(canvas, world, all, colorOf, war);
+    // Zoomed out, the map mode's colors (no numbers) lie under the territories.
+    if (mode && mode.id !== MapModeId.Political && mode.bucket.length === world.cellCount) {
+      drawModeOverview(canvas, world, all, mode, Skia.XYWHRect(rect.x, rect.y, rect.width, rect.height));
+    }
+    drawTerritory(canvas, world, all, colorOf, war, modeDims(mode));
   }, size);
   const image = drawAsImageFromPicture(picture, size);
   if (!image) throw new Error('Could not render the territory overview.');
@@ -104,11 +122,13 @@ export function territoryTileSignature(
   chunkCols: number,
   colorOf: (civ: number) => string,
   war: MapWar,
+  dimmed = false,
 ): number {
   let h = 0x811c9dc5;
   const mix = (v: number) => {
     h = Math.imul(h ^ v, 0x01000193);
   };
+  mix(dimmed ? 1 : 0);
   for (const { cells } of tileCells(world, chunk, chunkCols)) {
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
@@ -169,12 +189,13 @@ export function renderTerritoryTile(
   pxPerUnit: number,
   colorOf: (civ: number) => string,
   war: MapWar,
+  dimmed = false,
 ): SkImage | null {
   const settled = tileCells(world, chunk, chunkCols).some(({ cells }) =>
     cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0 || world.ruins[c] !== 0 || war.burning[c] !== 0),
   );
   if (!settled) return null;
-  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf, war)]);
+  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf, war, dimmed)]);
 }
 
 /**
@@ -195,12 +216,20 @@ const ruinPath = keptBuilder();
 const anchorPath = keptBuilder();
 const warPath = keptBuilder();
 const seatFlagPath = keptBuilder();
+const polePath = keptBuilder();
 const capitalFlagPath = keptBuilder();
 const fireTintPath = keptBuilder();
 const flamePath = keptBuilder();
 const flameCorePath = keptBuilder();
 
-function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string, war: MapWar) {
+function drawTerritory(
+  canvas: SkCanvas,
+  world: World,
+  cells: Int32Array,
+  colorOf: (civ: number) => string,
+  war: MapWar,
+  dimmed = false,
+) {
   const tints = tintPaths;
   const borders = borderPaths;
   const dots = dotPaths;
@@ -214,6 +243,8 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   // Flag poles go with the outlines; the pennants are only drawn on tiles that have seats.
   const seatFlags = seatFlagPath();
   const capitalFlags = capitalFlagPath();
+  // Flag poles apart from the outlines: flags stay at full strength in fill modes.
+  const poles = polePath();
   let seats = 0;
   let capitals = 0;
   const fireTints = fireTintPath();
@@ -251,7 +282,7 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
       continue;
     }
 
-    addHex(pathFor(tints, owner), x, y, HEX_PX + 0.5);
+    if (!dimmed) addHex(pathFor(tints, owner), x, y, HEX_PX + 0.5);
 
     // Border on every edge towards a hex that isn't ours, slightly inset so
     // two neighboring civilizations both show their line; dashed where we
@@ -293,10 +324,10 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
     }
     if (world.harbors[c]) addAnchor(anchors, world, c, x, y);
     if (world.seats[c] === 2) {
-      addFlag(outlines, capitalFlags, x, y, true);
+      addFlag(poles, capitalFlags, x, y, true);
       capitals++;
     } else if (world.seats[c]) {
-      addFlag(outlines, seatFlags, x, y, false);
+      addFlag(poles, seatFlags, x, y, false);
       seats++;
     }
     // City tier from the core (share of used slots): 0 tribe dot, 1 small, 2 big city.
@@ -312,14 +343,17 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   }
 
   tints.drawAll((civ, path) => canvas.drawPath(path.detach(), sharedFillPaint(withAlpha(colorOf(civ), 0.28))));
-  canvas.drawPath(roads.detach(), sharedStrokePaint(ROAD_COLOR, HEX_PX * 0.1));
+  canvas.drawPath(roads.detach(), sharedStrokePaint(dimmed ? ROAD_DIM : ROAD_COLOR, HEX_PX * 0.1));
   borders.drawAll((civ, path) => canvas.drawPath(path.detach(), sharedStrokePaint(colorOf(civ), HEX_PX * 0.12)));
   if (wars > 0) canvas.drawPath(warLines.detach(), sharedStrokePaint(WAR_COLOR, HEX_PX * 0.14));
-  canvas.drawPath(rim.detach(), sharedFillPaint('#1b1b1b'));
-  canvas.drawPath(ruins.detach(), sharedFillPaint(RUIN_COLOR));
-  dots.drawAll((civ, path) => canvas.drawPath(path.detach(), sharedFillPaint(colorOf(civ))));
-  canvas.drawPath(outlines.detach(), sharedStrokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
-  canvas.drawPath(anchors.detach(), sharedStrokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
+  canvas.drawPath(rim.detach(), sharedFillPaint(dimmed ? RIM_DIM : '#1b1b1b'));
+  canvas.drawPath(ruins.detach(), sharedFillPaint(dimmed ? RUIN_DIM : RUIN_COLOR));
+  dots.drawAll((civ, path) =>
+    canvas.drawPath(path.detach(), sharedFillPaint(dimmed ? withAlpha(colorOf(civ), MODE_ICON_ALPHA) : colorOf(civ))),
+  );
+  canvas.drawPath(outlines.detach(), sharedStrokePaint(dimmed ? OUTLINE_DIM : OUTLINE_COLOR, HEX_PX * 0.05));
+  canvas.drawPath(poles.detach(), sharedStrokePaint(OUTLINE_COLOR, HEX_PX * 0.05));
+  canvas.drawPath(anchors.detach(), sharedStrokePaint(dimmed ? ANCHOR_DIM : ANCHOR_COLOR, HEX_PX * 0.07));
   if (seats > 0) canvas.drawPath(seatFlags.detach(), sharedFillPaint(SEAT_COLOR));
   if (capitals > 0) canvas.drawPath(capitalFlags.detach(), sharedFillPaint(CAPITAL_COLOR));
   // Fires above everything else on the hex, so a burning city shows it.
@@ -434,9 +468,4 @@ function addHex(path: SkPathBuilder, x: number, y: number, r: number) {
   path.lineTo(x - r / 2, y - h);
   path.lineTo(x + r / 2, y - h);
   path.close();
-}
-
-function withAlpha(hex: string, alpha: number): string {
-  const v = parseInt(hex.slice(1), 16);
-  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${alpha})`;
 }

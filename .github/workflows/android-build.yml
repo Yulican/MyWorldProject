@@ -159,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [young, aged, cities, unrest, trade, diplomacy, government, war, gacha, save]
+        scenario: [young, aged, cities, unrest, trade, diplomacy, government, war, gacha, save, modes]
     steps:
       - uses: actions/checkout@v5
 
