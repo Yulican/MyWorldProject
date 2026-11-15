@@ -52,4 +52,5 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | `Requirement Anführer.md` | leaders: attributes, goals, succession, panel "Leader ›" (implemented; numbers measured in round 3, fine tuning left to implementation) |
 | `Requirement Gacha.md` | gacha: Faith, price, pull, inventory, rarities, 25 abilities, new subsystems, god interventions on leaders (draft, numbers preliminary) |
 | `Requirement Krieg.md` | war: soldiers, strategic goods, battles, sieges, alliances, rebel wars (draft, 5 phases) |
+| `Requirement Speichern und Laden.md` | save/load: one slot, autosave, menu panel, versioned save, deterministic continue (draft) |
 | `sim-prototyp/` | old standalone load prototype, placeholder rules |
