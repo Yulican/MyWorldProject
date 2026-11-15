@@ -1,6 +1,6 @@
 # Requirement: Speichern und Laden
 
-Stand: mit dem Nutzer abgestimmt (alle Entscheidungen eingearbeitet); Abschnitt 9 nennt nur noch Randfälle der Überschreib-Rückfrage.
+Stand: mit dem Nutzer abgestimmt (alle Entscheidungen eingearbeitet); keine offenen Punkte.
 Grundlage: Diskussion mit dem Nutzer. Betrifft alle Teilsysteme, die Zustand halten (Gesellschaft, Handel, Diplomatie, Regierung,
 Anführer, Krieg, Gacha; siehe Abschnitt 8). Es gibt noch keine Zahlen aus der Simulation; alle Zeiten sind Startwerte.
 
@@ -70,9 +70,11 @@ Die Welt läuft nach dem Laden so weiter, wie sie ohne Unterbrechung weitergelau
   **„Overwrite“** und **„Keep old save“**:
   - „Overwrite“: der Spielstand wird mit der neuen Welt überschrieben, Autospeichern läuft ab jetzt normal.
   - „Keep old save“: der Spielstand bleibt unverändert; für diese Welt läuft kein Autospeichern mehr, bis der Spieler manuell speichert
-    (Save im Panel überschreibt ohne Rückfrage und schaltet Autospeichern wieder ein) oder die Rückfrage später bejaht (Punkt 9.1).
+    (Save im Panel überschreibt ohne Rückfrage und schaltet Autospeichern wieder ein); es gibt keine spätere Rückfrage, nur manuelles Speichern schaltet Autospeichern wieder ein.
   - Die Rückfrage kommt auch nach „Save & New World“ (der alte Spielstand ist dann die eben gespeicherte Welt), einmal je neuer Welt.
-  - Solange die Rückfrage offen ist, pausiert die Simulation.
+  - Solange die Rückfrage offen ist, pausiert die Simulation. Im Hintergrund kann kein Dialog erscheinen: ein Hintergrund-Wechsel speichert dann nicht, die Rückfrage kommt beim Zurückkehren in die App.
+  - Nach „Load“ läuft Autospeichern sofort wieder normal, ohne Rückfrage (die geladene Welt ist der Spielstand).
+  - Ein manuelles „Save“ nach „New World“ überschreibt ohne Rückfrage und schaltet Autospeichern ein.
 - Beim Laden und bei „New World“ werden offene Panels, Auswahl und Gacha-Einsatz-Modus geschlossen; die Karte wird neu aufgebaut.
 - „New World“ allein überschreibt den Spielstand nicht; das tun nur „Save“, „Save & New World“ und ein bejahtes „Overwrite“.
 
@@ -92,12 +94,13 @@ Die Welt läuft nach dem Laden so weiter, wie sie ohne Unterbrechung weitergelau
 
 - Die Simulation läuft ohne React; der Zustand liegt in flachen typisierten Arrays. Gespeichert wird deshalb als **Binärabbild** dieser
   Arrays (nicht als JSON je Einwohner), das gilt als Richtung, die Umsetzung entscheidet `sim-engineer`.
+- Das Autospeichern ist ein **in Scheiben geteiltes Speichern**: der Abzug wird über etwa 20 Frames verteilt, die Spielzeit der Simulation steht in diesen Frames still (so bleibt der Zustand tick-konsistent).
 - Autospeichern darf keinen Frame über 25 ms verursachen und keinen Swipe unter 60 fps drücken. Kopieren und Schreiben werden deshalb auf
   Teile verteilt oder zwischen Ticks/Frames ausgeführt (wie der Spieluhr-Tick in Teilen); der Schreibvorgang selbst läuft nicht auf dem
   UI-Thread. Beim Wechsel in den Hintergrund darf der Vorgang dagegen am Stück erfolgen.
 - Der Zustand wird zum Zeitpunkt eines **Tick-Rands** festgehalten (nie mitten in einem Tick), damit die Kopie konsistent ist. Ein Tick,
   der gerade in Teilen läuft, wird vorher fertig berechnet.
-- Benchmark: neues Szenario `save` (gealterte Welt, Autospeichern während der Swipes mit verkürztem Intervall, plus Laden einer
+- Benchmark: neues Szenario `save` (gealterte Welt, Autospeicher-Scheiben laufen während der Swipes (verkürztes Intervall, Spielzeit steht je Autospeichern ca. 20 Frames still), plus Laden einer
   gespeicherten Welt und Prüfung, dass sie unverändert weiterläuft). Alle bisherigen Szenarien bleiben unverändert und müssen bestehen.
 - Messen vor der Freigabe: Größe des Spielstands und Schreibdauer für „young“ und die größte Welt (Szenarien `cities`, `war`).
 
@@ -117,16 +120,6 @@ Die Welt läuft nach dem Laden so weiter, wie sie ohne Unterbrechung weitergelau
 - Zufriedenheit §5 (Chronik-Dialog pausiert das Spiel): wartende Meldungen werden mitgespeichert; ein Panel/Dialog dieses Requirements pausiert ebenfalls.
 - Benchmark: neues Szenario `save` (Abschnitt 6).
 
-## 9. Offene Punkte (zu entscheiden)
+## 9. Offene Punkte
 
-Alle früheren Punkte (ungültiger Spielstand, Migration, Pause, Chronik, Tick-Rand, Rückmeldung, Panel-Inhalt, Start-Pause, Undo) sind
-entschieden und oben eingearbeitet. Es bleiben Randfälle der Überschreib-Rückfrage (Abschnitt 4):
-
-1. **Wann kommt die Rückfrage nach „Keep old save“ erneut?** Lesart des Nutzers: Autospeichern bleibt für diese Welt aus, bis der Spieler
-   manuell speichert. Offen: gibt es zusätzlich eine spätere Rückfrage (z. B. beim nächsten Hintergrund-Wechsel oder nach 10 Minuten)?
-   Empfehlung: nein, nur manuelles Speichern schaltet Autospeichern wieder ein (sonst nervt die Rückfrage).
-2. **Rückfrage beim Hintergrund-Wechsel.** Im Hintergrund kann kein Dialog erscheinen. Empfehlung: dann wird nicht gespeichert, und die
-   Rückfrage erscheint beim Zurückkehren in die App (oder bei der nächsten periodischen Gelegenheit).
-3. **Nach „Load“.** Die geladene Welt ist der Spielstand; Empfehlung: Autospeichern läuft sofort wieder normal ohne Rückfrage, auch wenn
-   vorher „Keep old save“ gewählt wurde.
-4. **Manuelles „Save“ nach „New World“** überschreibt ohne Rückfrage und schaltet Autospeichern ein (so oben beschrieben); bestätigen lassen.
+Keine. Alle Entscheidungen sind in den Abschnitten 2-6 eingearbeitet.
