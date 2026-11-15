@@ -309,6 +309,8 @@ Entscheidung für den Krieg (`Requirement Krieg.md`, Abschnitt 2). Phase 0 und 1
 **Offen:** nichts zu strategischen Gütern.
 
 ## 11. Stadtstufen nach belegten Bauplätzen
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Die Modi „Supply“ (Last Einwohner/Tragfähigkeit), „Fertility“, „Deposits“ (auch unbesiedelt) und „Economy“ (belegte Bauplätze, Stadtstufe) lesen die Werte dieses Dokuments.
+
 
 Die Stufe einer Siedlung (Stamm, kleine Stadt, große Stadt) richtet sich nach
 dem Anteil der belegten Bauplätze ihres Hex. Sie ersetzt die alte feste

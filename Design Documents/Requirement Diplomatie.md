@@ -191,6 +191,8 @@ Wege und Verluste.
   viele, melde ich mich, bevor ich etwas ändere.
 
 ## 5. Performance und Benchmark
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Der Modus „Diplomacy“ zeigt für ein gewähltes Volk Vertrauen oder Beziehungsart zu allen anderen (Runde 2).
+
 
 - Jährliche Rechnung pro Volkspaar.
 - Kontaktentfernungen über einen Dijkstra-Lauf pro Volk und Jahr.

@@ -177,6 +177,8 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
    liegen (11 Abbaugebäude in 12 Welten).
 
 ## 11. Benchmark und Darstellung
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Ein Modus „Trade“ (zunächst ohne Routenlinien) ist für später vorgesehen; Händler bleiben sonst unsichtbar.
+
 
 - Neues Szenario `trade`: 300 Jahre, danach bekommt jede Siedlung ein
   Handelszentrum, jede Küstensiedlung einen Hafen und einen Vorrat eines

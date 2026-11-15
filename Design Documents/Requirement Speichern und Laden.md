@@ -17,6 +17,7 @@ Die Welt läuft nach dem Laden so weiter, wie sie ohne Unterbrechung weitergelau
   Anführer, Gacha), damit eine geladene Welt **deterministisch** exakt weiterläuft wie die gespeicherte (gleiche Folge von Ereignissen).
 - Außerdem: die **Spielgeschwindigkeit** (Einstellung) und der **Zustand des Gottes** (Faith, Inventar an Ladungen/Fähigkeiten,
   laufende Effekte der Götterebene mit ihrer Restdauer).
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Der aktive Kartenmodus (mit Untermodus) und das ausgewählte Volk (Diplomacy/War) werden im Text-Trailer der App gespeichert (nicht im Simulationszustand) und beim Laden wiederhergestellt; fehlt das Feld, gilt „Political“.
 - Nicht gespeichert: reine Anzeige (Kartenposition, Zoom, offene Panels, Auswahl, Ziel-Modus eines Gacha-Einsatzes). Beim Laden startet die
   Karte in der Standardansicht.
 - Chronik-Meldungen, die noch auf Bestätigung warten, gehören zum Simulationszustand und werden mitgespeichert; nach dem Laden bleibt das Spiel pausiert, bis sie bestätigt sind.

@@ -185,6 +185,8 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 Jede Phase wird mit 12 Welten simuliert (Kettenreaktionen von Aufständen, Kriege je Welt, Bevölkerung, Handel, Rechenzeit) und vor der Umsetzung mit dem Nutzer abgestimmt.
 
 ## 11. Performance und Benchmark
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Der Modus „War“ zeigt die Seiten A/B des gewählten Volks, besetzte Hexe schraffiert; „Military“ zeigt Soldaten je Hex (Runde 2). Armeen, Belagerungsrahmen und Kriegsgrenzen bleiben in allen Modi sichtbar.
+
 
 - Stärke und Gefahr jährlich pro Volkspaar (Zähler); Schlachten pro Schlacht, nicht pro Soldat; Armeen als wenige Zähler.
 - Ziel: ein simuliertes Jahr höchstens 1,3-mal so teuer wie heute.

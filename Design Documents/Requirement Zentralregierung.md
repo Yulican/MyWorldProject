@@ -139,6 +139,8 @@ Sicherheitsabstand im ganzen Volk.
 - Die Hexfeld-Info zeigt den Bezirk und die Regierungsplätze.
 
 ## 10. Benchmark
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Der Modus „Government“ zeigt die Entfernung zum Sitz je Hex (Runde 2).
+
 
 Neues Szenario `government`: gealterte Welten mit vielen Sitzen,
 Regierungsgebäuden und Regierungshändlern unterwegs.
