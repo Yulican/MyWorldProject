@@ -11,9 +11,14 @@ import {
   stepSimulationPart,
   TickPart,
   castAbility,
+  continueSave,
   landChanges,
   pullGacha,
+  saveBytes,
+  serializeWorld,
+  startSave,
   type ChronicleEntry,
+  type SaveJob,
   type Simulation,
   type World,
 } from '../sim';
@@ -222,6 +227,7 @@ function publish(changes: Partial<GameState>) {
 
 /** Generates a new world (random seed if none given), settles the tribe and starts the clock. */
 export function createNewWorld(seed: number = randomSeed()): World {
+  cancelSave();
   const sim = createSimulation(generateWorld({ seed }));
   syncSnapshot(sim);
   pendingTicks = 0;
@@ -315,7 +321,10 @@ export function pullCharges(): number[] | null {
   const { sim } = state;
   if (!sim || sim.gameOver) return null;
   const drawn = pullGacha(sim);
-  if (drawn) publish({});
+  if (drawn) {
+    noteOutsideChange();
+    publish({});
+  }
   return drawn;
 }
 
@@ -329,6 +338,7 @@ export function castCharge(ability: number, target: number, option = 0): 'now' |
   if (!sim || sim.gameOver) return 'invalid';
   const between = sim.part === TickPart.Start;
   if (!castAbility(sim, ability, target, option)) return 'invalid';
+  noteOutsideChange();
   if (between) {
     // It took effect at once: the map shows it now (also while paused), the fire with the territories and the land in the terrain.
     sim.snapshotVersion++;
@@ -478,9 +488,18 @@ function runFrame(now: number) {
   const ticksPerSecond = SPEEDS[speed];
   const betweenTicks = sim.part === TickPart.Start;
 
+  // A save in progress (or wanted, once the running tick is complete) has the frame to itself: the game clock stands still.
+  if (saveRequest && betweenTicks) {
+    lastFrameTime = now;
+    stepSave(sim, now);
+    frame = requestAnimationFrame(runFrame);
+    return;
+  }
+
   // Cap the step after long pauses (e.g. the app was in the background).
   const seconds = Math.min(0.25, (now - lastFrameTime) / 1000);
   lastFrameTime = now;
+  if (ticksPerSecond > 0 && !sim.gameOver) runMs += seconds * 1000;
 
   // A new snapshot (complete after its tick) gets a frame of its own, once the map rests (or has waited long enough).
   if (
@@ -521,7 +540,7 @@ function runFrame(now: number) {
   for (;;) {
     // A new tick only while the speed asks for one and nothing notable happened in this frame (or is waiting to be shown).
     if (sim.part === TickPart.Start) {
-      if (pendingTicks < 1 || sim.gameOver || ticksPerSecond === 0 || sim.chronicle.length !== entries) break;
+      if (pendingTicks < 1 || sim.gameOver || ticksPerSecond === 0 || sim.chronicle.length !== entries || saveRequest) break;
       if (state.chronicleDialogs && nextShown(sim, state.chronicleSeen) < sim.chronicle.length) break;
     }
     const key = partKey(sim);
@@ -568,5 +587,193 @@ function runFrame(now: number) {
 
   // Game over: the last snapshot is still shown in the next frame.
   const more = sim.gameOver ? sim.snapshotVersion !== notifiedSnapshot : ticksPerSecond > 0;
-  if (sim.part !== TickPart.Start || more) frame = requestAnimationFrame(runFrame);
+  if (sim.part !== TickPart.Start || more || saveRequest) frame = requestAnimationFrame(runFrame);
 }
+
+// ---------------------------------------------------------------- saving
+// (Requirement Speichern und Laden 3, 6.) The autosave is a sliced save:
+// at a tick boundary the store takes the simulation's small data at once
+// (startSave) and then encodes its arrays a slice per frame (continueSave);
+// in those frames the game clock stands still, so the state stays
+// consistent. The policy (when to save, the slot, the dialogs) is in saveGame.ts.
+
+/** JS time a save slice aims at per frame (ms); the slice size follows the measured speed. */
+const SAVE_SLICE_MS = 2;
+const SAVE_MIN_UNITS = 4096;
+const SAVE_MAX_UNITS = 1 << 18;
+/** Work units per slice (see continueSave), adapted to SAVE_SLICE_MS. */
+let saveUnits = 16384;
+/**
+ * The longest recent startSave (ms, decaying). It isn't sliced: while it is
+ * expected to take longer than a tick part may while the map moves, it waits
+ * for the map to rest (at most HOLD_MS), like a long tick part. Unknown at first.
+ */
+let saveStartMs = MOVING_PART_MS + 1;
+
+/** The sliced save's result: the save game, or null when it was cancelled (a new world, a load) or failed (`error`). */
+export type SaveCallback = (bytes: Uint8Array | null, error?: unknown) => void;
+let saveRequest: SaveCallback | null = null;
+let saveJob: SaveJob | null = null;
+/** Changes to the simulation outside its ticks (casts, pulls): a save in progress begins again. */
+let outsideChanges = 0;
+/** Real time the game clock has run (ms, speed above pause), for the periodic autosave. */
+let runMs = 0;
+
+function noteOutsideChange() {
+  outsideChanges++;
+  // Its copy would mix the state before and after the change.
+  saveJob = null;
+}
+
+/**
+ * Asks for a sliced save of the current world (the autosave): it begins at
+ * the next tick boundary (a running tick is completed first, also while
+ * paused) and takes about 20 frames, in which the simulation doesn't run.
+ * False if a save is already under way.
+ */
+export function requestSlicedSave(done: SaveCallback): boolean {
+  if (saveRequest || !state.sim) return false;
+  saveRequest = done;
+  startClock();
+  return true;
+}
+
+/** Whether a sliced save is wanted or under way. */
+export function saving(): boolean {
+  return saveRequest !== null;
+}
+
+/** Drops a sliced save in progress (its callback gets null). */
+export function cancelSave() {
+  const done = saveRequest;
+  saveRequest = null;
+  saveJob = null;
+  done?.(null);
+}
+
+function finishSave(bytes: Uint8Array | null, error?: unknown) {
+  const done = saveRequest;
+  saveRequest = null;
+  saveJob = null;
+  done?.(bytes, error);
+}
+
+/** One frame of the sliced save: its start, or a slice. */
+function stepSave(sim: Simulation, now: number) {
+  if (!saveJob) {
+    if (holdForMap(now, saveStartMs)) return;
+    if (saveStartMs > MOVING_PART_MS) heldSince = 0;
+    const t0 = performance.now();
+    try {
+      saveJob = startSave(sim);
+    } catch (e) {
+      finishSave(null, e);
+      return;
+    }
+    const ms = performance.now() - t0;
+    saveStartMs = Math.max(ms, saveStartMs * 0.9);
+    logWork('save start', t0, ms);
+    return;
+  }
+  const t0 = performance.now();
+  let done: boolean;
+  try {
+    done = continueSave(saveJob, saveUnits);
+  } catch (e) {
+    finishSave(null, e);
+    return;
+  }
+  const ms = performance.now() - t0;
+  countEvent('saveSlices');
+  logWork('save slice', t0, ms);
+  if (!done && ms > 0.05) {
+    const factor = Math.min(2, Math.max(0.5, SAVE_SLICE_MS / ms));
+    saveUnits = Math.min(SAVE_MAX_UNITS, Math.max(SAVE_MIN_UNITS, Math.round(saveUnits * factor)));
+  }
+  if (!done) return;
+  countEvent('saves');
+  finishSave(saveBytes(saveJob));
+}
+
+/**
+ * Tests: runs the sliced save wanted (requestSlicedSave) to its end without
+ * frames, as the clock would between ticks; the map counts as resting.
+ */
+export function finishSlicedSaveNow() {
+  while (advanceSlicedSave());
+}
+
+/** Tests: one frame's worth of the sliced save wanted (a running tick is completed first); false once none is under way. */
+export function advanceSlicedSave(): boolean {
+  const sim = state.sim;
+  if (!sim || !saveRequest) return false;
+  while (sim.part !== TickPart.Start) stepSimulationPart(sim);
+  const moving = mapMoving;
+  mapMoving = false;
+  stepSave(sim, performance.now());
+  mapMoving = moving;
+  return saveRequest !== null;
+}
+
+/**
+ * The current world as a save game, in one call (the app goes to the
+ * background, Requirement 3): a running tick is completed first, a sliced
+ * save in progress is dropped. Null without a world.
+ */
+export function saveNow(): Uint8Array | null {
+  const sim = state.sim;
+  if (!sim) return null;
+  cancelSave();
+  while (sim.part !== TickPart.Start) stepSimulationPart(sim);
+  return serializeWorld(sim);
+}
+
+/** What a save of now would hold, to skip saving an unchanged world: the simulation, its tick and the changes outside ticks. */
+export function worldStamp(): { sim: Simulation | null; tick: number; outside: number } {
+  return { sim: state.sim, tick: state.sim?.tick ?? -1, outside: outsideChanges };
+}
+
+/** Real time the game clock has run at a speed above pause (ms). */
+export function runningMs(): number {
+  return runMs;
+}
+
+/** What the app stores alongside the simulation in a save (GameState). */
+export type SavedAppState = { speed: number; resumeSpeed: number; chronicleSeen: number };
+
+/** The app part of the current game state, for a save. */
+export function appState(): SavedAppState {
+  return { speed: state.speed, resumeSpeed: state.resumeSpeed, chronicleSeen: state.chronicleSeen };
+}
+
+/**
+ * Shows a loaded simulation (a save game) in place of the current world:
+ * the store's caches start over (snapshot, war, armies, land, benchmark
+ * hooks), the map builds its tiles and overview anew for the new world, and
+ * the game continues at `app.speed` (paused while a chronicle entry waits).
+ */
+export function loadSimulation(sim: Simulation, app: SavedAppState) {
+  cancelSave();
+  notifiedSnapshot = -1;
+  syncedWar = -1;
+  syncedTick = -1;
+  landSim = null;
+  syncedLand = -1;
+  extraArmies = null;
+  benchTick = null;
+  pendingTicks = 0;
+  heldSince = 0;
+  lastNotify = 0;
+  lastArmyNotify = 0;
+  syncSnapshot(sim);
+  const speed = clampSpeed(app.speed);
+  const resumeSpeed = clampSpeed(app.resumeSpeed);
+  const from = Math.max(0, Math.min(sim.chronicle.length, Math.floor(app.chronicleSeen) || 0));
+  const seen = state.chronicleDialogs ? nextShown(sim, from) : sim.chronicle.length;
+  const waiting = seen < sim.chronicle.length;
+  publish({ sim, speed: waiting ? 0 : speed, resumeSpeed: waiting && speed > 0 ? speed : resumeSpeed, chronicleSeen: seen });
+  startClock();
+  collectOldWorld();
+}
+
+const clampSpeed = (speed: number) => (Number.isInteger(speed) && speed >= 0 && speed < SPEEDS.length ? speed : DEFAULT_SPEED);

@@ -17,10 +17,12 @@
  * attackers besieging their goal seats (army markers, siege frames, red
  * dashed war borders; declareWars.ts), and where the god cast charges of
  * all 25 abilities and keeps fires burning, biomes shifting and rivers
- * springing during the swipes (terrain tiles redrawn, fires; castGacha.ts).
+ * springing during the swipes (terrain tiles redrawn, fires; castGacha.ts),
+ * and where the autosave runs over and over during the swipes, and the
+ * save is loaded back once per world while the map rests (benchSaves.ts).
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war' | 'gacha',
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war' | 'gacha' | 'save',
   {
     years: number;
     buildings?: boolean;
@@ -30,6 +32,7 @@ export const SCENARIOS: Record<
     government?: boolean;
     war?: boolean;
     gacha?: boolean;
+    save?: boolean;
   }
 > = {
   young: { years: 0 },
@@ -41,7 +44,11 @@ export const SCENARIOS: Record<
   government: { years: 300, government: true },
   war: { years: 300, war: true },
   gacha: { years: 300, gacha: true },
+  save: { years: 300, save: true },
 };
+
+/** The save scenario loads its last save back after this many swipes of each world (while the map rests). */
+export const SAVE_LOAD_AT_SWIPE = 40;
 export type ScenarioName = keyof typeof SCENARIOS;
 
 export function scenarioFromUrl(url: string): ScenarioName {
