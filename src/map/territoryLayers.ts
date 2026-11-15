@@ -29,13 +29,18 @@ const SEAT_COLOR = '#e3b23c';
 const CAPITAL_COLOR = '#b3262e';
 /** Borders between peoples at war (dashed) and the frame around a besieged seat. */
 const WAR_COLOR = '#e01e1e';
+/** A burning hex (Wild Fire): an ember tint and a flame. */
+const FIRE_TINT = 'rgba(255,96,16,0.35)';
+const FIRE_COLOR = '#ff7a1a';
+const FIRE_CORE = '#ffd23f';
 
 /**
  * The war as the map draws it (a copy taken with each society snapshot, see
  * worldStore.mapWar): per people pair (a * 256 + b) the wars they fight on
- * opposite sides (allies too), per cell 1 while besieged.
+ * opposite sides (allies too), per cell 1 while besieged; and per cell 1
+ * while it burns (Wild Fire, Requirement Gacha 7.3), copied with the same snapshot.
  */
-export type MapWar = { readonly foe: Uint8Array; readonly siege: Uint8Array };
+export type MapWar = { readonly foe: Uint8Array; readonly siege: Uint8Array; readonly burning: Uint8Array };
 
 /** Settlement dots come in three sizes by population. */
 function dotSize(people: number): number {
@@ -110,6 +115,7 @@ export function territoryTileSignature(
       const owner = world.owner[c];
       mix(world.roads[c]);
       mix(owner);
+      mix(war.burning[c]);
       if (!owner) {
         mix(world.ruins[c] > 0 ? 1 : 0);
         continue;
@@ -165,7 +171,7 @@ export function renderTerritoryTile(
   war: MapWar,
 ): SkImage | null {
   const settled = tileCells(world, chunk, chunkCols).some(({ cells }) =>
-    cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0 || world.ruins[c] !== 0),
+    cells.some((c) => world.owner[c] !== 0 || world.roads[c] !== 0 || world.ruins[c] !== 0 || war.burning[c] !== 0),
   );
   if (!settled) return null;
   return renderTileWith(world, chunk, chunkCols, pxPerUnit, [(canvas, cells) => drawTerritory(canvas, world, cells, colorOf, war)]);
@@ -190,6 +196,9 @@ const anchorPath = keptBuilder();
 const warPath = keptBuilder();
 const seatFlagPath = keptBuilder();
 const capitalFlagPath = keptBuilder();
+const fireTintPath = keptBuilder();
+const flamePath = keptBuilder();
+const flameCorePath = keptBuilder();
 
 function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorOf: (civ: number) => string, war: MapWar) {
   const tints = tintPaths;
@@ -207,17 +216,27 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   const capitalFlags = capitalFlagPath();
   let seats = 0;
   let capitals = 0;
+  const fireTints = fireTintPath();
+  const flames = flamePath();
+  const flameCores = flameCorePath();
+  let fires = 0;
   const pathFor = (paths: BuilderSet<number>, civ: number) => paths.get(civ);
 
   for (let i = 0; i < cells.length; i++) {
     const c = cells[i];
     const owner = world.owner[c];
     const roadBits = world.roads[c];
-    if (!owner && !roadBits && !world.ruins[c]) continue;
+    const burning = war.burning[c];
+    if (!owner && !roadBits && !world.ruins[c] && !burning) continue;
     const col = c % world.width;
     const row = (c - col) / world.width;
     const x = hexCenterX(col) * HEX_PX;
     const y = hexCenterY(col, row) * HEX_PX;
+    if (burning) {
+      addHex(fireTints, x, y, HEX_PX + 0.5);
+      addFlame(flames, flameCores, x, y);
+      fires++;
+    }
     for (let d = 0; d < DIRECTION_COUNT; d++) {
       if (!(roadBits & (1 << d))) continue;
       const [dx, dy] = DIRECTION_OFFSETS[d];
@@ -303,6 +322,30 @@ function drawTerritory(canvas: SkCanvas, world: World, cells: Int32Array, colorO
   canvas.drawPath(anchors.detach(), sharedStrokePaint(ANCHOR_COLOR, HEX_PX * 0.07));
   if (seats > 0) canvas.drawPath(seatFlags.detach(), sharedFillPaint(SEAT_COLOR));
   if (capitals > 0) canvas.drawPath(capitalFlags.detach(), sharedFillPaint(CAPITAL_COLOR));
+  // Fires above everything else on the hex, so a burning city shows it.
+  if (fires > 0) {
+    canvas.drawPath(fireTints.detach(), sharedFillPaint(FIRE_TINT));
+    canvas.drawPath(flames.detach(), sharedFillPaint(FIRE_COLOR));
+    canvas.drawPath(flameCores.detach(), sharedFillPaint(FIRE_CORE));
+  }
+}
+
+/** A flame in the hex's upper right: an outer tongue and a yellow core. */
+function addFlame(outer: SkPathBuilder, core: SkPathBuilder, x: number, y: number) {
+  const u = HEX_PX * 0.22;
+  const fx = x + HEX_PX * 0.35;
+  const fy = y - HEX_PX * 0.2;
+  outer.moveTo(fx, fy - u * 2);
+  outer.quadTo(fx + u * 1.4, fy - u * 0.4, fx + u * 0.9, fy + u * 0.8);
+  outer.quadTo(fx, fy + u * 1.3, fx - u * 0.9, fy + u * 0.8);
+  outer.quadTo(fx - u * 1.3, fy - u * 0.2, fx - u * 0.3, fy - u * 0.9);
+  outer.quadTo(fx - u * 0.1, fy - u * 0.3, fx, fy - u * 2);
+  outer.close();
+  core.moveTo(fx, fy - u * 0.7);
+  core.quadTo(fx + u * 0.6, fy + u * 0.1, fx + u * 0.4, fy + u * 0.6);
+  core.quadTo(fx, fy + u * 0.9, fx - u * 0.4, fy + u * 0.6);
+  core.quadTo(fx - u * 0.6, fy + u * 0.1, fx, fy - u * 0.7);
+  core.close();
 }
 
 /** A seat of government's flag in the hex's upper left: a pole and a pennant (larger for a capital). */

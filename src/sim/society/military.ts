@@ -251,7 +251,7 @@ export function armingWanted(sim: Simulation, seat: number): boolean {
 /** Whether the cell has a building (any state but empty or ruin) making `good`. */
 function hasBuildingOf(sim: Simulation, cell: number, good: number): boolean {
   const eco = sim.economy;
-  for (let q = cell * SLOTS, end = q + SLOTS; q < end; q++) {
+  for (let q = cell * eco.slots, end = q + eco.slots; q < end; q++) {
     const st = eco.state[q];
     if (st !== SlotState.Empty && st !== SlotState.Ruin && BUILDINGS[eco.type[q]].good === good) return true;
   }
@@ -363,7 +363,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
     m.cap[base + 1] = 0;
     m.cap[base + 2] = 0;
     if (sim.hasBuildings[c]) {
-      for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+      for (let s = c * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
         const st = eco.state[s];
         if (st !== SlotState.Standing && st !== SlotState.Construction) continue;
         const t = TROOP_OF_TYPE[eco.type[s]];

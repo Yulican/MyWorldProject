@@ -261,3 +261,41 @@ test('the war scenario draws 32 armies: real ones plus map-only decoys that keep
     assert.ok(sim.world.seats[c] > 0 && (sim.war.enemy[o] !== 0 || sim.war.allyWarsOf[o] > 0), 'decoy frame on a seat at war');
   }
 });
+
+test('the gacha scenario casts all kinds of abilities and keeps the land changing during the swipes', async () => {
+  const { createSimulation, generateWorld, livingCivilizations, peopleEffects, stepSimulationPart, stepSimulation, TICKS_PER_YEAR } = await import('../sim');
+  const { castGacha, gachaDuringSwipes } = await import('./castGacha');
+  const sim = createSimulation(generateWorld({ seed: 5 }));
+  for (let t = 0; t < 80 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  const biomes = sim.world.biome.slice();
+  const rivers = sim.world.riverFlow.slice();
+  const slots = sim.economy.half;
+  castGacha(sim);
+  assert.ok(sim.gacha.fireCount > 0, 'fires burn');
+  assert.ok(sim.gacha.landTotal > 0, 'the land changed');
+  let shifted = 0;
+  let river = 0;
+  for (let c = 0; c < sim.world.cellCount; c++) {
+    if (sim.world.biome[c] !== biomes[c]) shifted++;
+    if (sim.world.riverFlow[c] > 0 && rivers[c] <= 0) river++;
+  }
+  assert.ok(shifted > 0 && river > 0, 'biomes shifted and new rivers flow');
+  assert.ok(sim.economy.half > slots, 'the slot arrays grew');
+  for (const civ of livingCivilizations(sim)) assert.ok(peopleEffects(sim, civ.id).length > 0, `${civ.name} has god effects`);
+  assert.equal(SCENARIOS.gacha.gacha, true);
+  assert.equal(scenarioFromUrl('myworld://benchmark?scenario=gacha'), 'gacha');
+
+  // As the game clock runs it: tick parts, the hook after each complete tick.
+  const hook = gachaDuringSwipes();
+  let burningWeeks = 0;
+  const before = sim.gacha.landTotal;
+  for (let t = 0; t < 2 * TICKS_PER_YEAR; ) {
+    if (stepSimulationPart(sim)) {
+      t++;
+      hook(sim);
+      if (sim.gacha.fireCount > 0) burningWeeks++;
+    }
+  }
+  assert.ok(burningWeeks > 1.5 * TICKS_PER_YEAR, `fires burn most weeks (${burningWeeks})`);
+  assert.ok(sim.gacha.landTotal - before > 50, 'the land keeps changing');
+});

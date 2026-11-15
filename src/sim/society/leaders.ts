@@ -17,6 +17,13 @@ import type { Simulation } from './simulation';
 
 /** Peoples the tables have room for (MAX_CIV_ID + 1). */
 export const LEADER_CIVS = 256;
+/**
+ * Attribute slots per leader: 0..NATURAL_SLOTS-1 are the 1st (takeover), 2nd (years in office) and 3rd
+ * (goal) attribute; the god's Gift of Trait and Mark of Weakness add theirs from NATURAL_SLOTS on, beyond the
+ * 3 (Requirement Gacha 7.8: no limit, for now 8 slots).
+ */
+export const ATTR_SLOTS = 8;
+export const NATURAL_SLOTS = 3;
 /** Years of trade value kept per people. */
 export const TRADE_HISTORY = 10;
 
@@ -73,6 +80,10 @@ export const LEADER = {
   goalScale: 1,
   /** Years a defeat is remembered (Grudge-bearer). */
   revengeYears: 30,
+  /** Honed Mind (Requirement Gacha 7.8): the strengthened attribute's additive deviation x this, its factor ^this. */
+  honed: 1.5,
+  /** Long Life / Brittle Crown: years subtracted from / added to the age of the death roll. */
+  ageShift: 10,
   /** Experiments: every new leader starts with this attribute (1..25, 0 = off), so one attribute can be compared with another on the same worlds. */
   forceAttr: 0,
 };
@@ -140,12 +151,14 @@ export const L = {
   connection: 58,
   tradeFirst: 59,
   capitalFirst: 60,
+  /** Food harvest of the people's hexes (only the god's Golden Harvest sets it; supply in economy.ts updateCellSupply). */
+  food: 61,
 } as const;
-export const LEVERS = 61;
+export const LEVERS = 62;
 export const LEVER_NAMES = Object.keys(L) as (keyof typeof L)[];
 /** 1 for the multiplicative levers. */
 export const LEVER_KIND = new Uint8Array(LEVERS);
-for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge, L.dealAmount, L.reserve]) LEVER_KIND[k] = 1;
+for (const k of [L.warChanceMul, L.dangerMul, L.sold, L.strength, L.tollPay, L.tollAsk, L.govUpkeep, L.travel, L.settleOver, L.rebel, L.resMul, L.warPop, L.occupy, L.lossTaken, L.birth, L.buildCost, L.buildTime, L.upkeepAll, L.harvest, L.load, L.centerMin, L.lossTrade, L.tripRange, L.revenge, L.dealAmount, L.reserve, L.food]) LEVER_KIND[k] = 1;
 
 /** Experiments: 1 for levers (L index) whose effect is switched off, to see which lever causes a difference (tools only; all 0 in the game). */
 export const MUTE = new Uint8Array(LEVERS);
@@ -215,8 +228,18 @@ export type Leaders = {
   counter: Uint16Array;
   age0: Uint8Array;
   start: Int32Array;
-  /** Attributes (1..25, 0 = empty): civ * 3 + slot. */
+  /** Attributes (1..25, 0 = empty): civ * ATTR_SLOTS + slot. */
   attr: Uint8Array;
+  /**
+   * God interventions (Requirement Gacha 7.8): years added to the age the death roll uses (Long Life -10,
+   * Brittle Crown +10), the attribute slot + 1 Honed Mind strengthens (0 = none); both end with the leader.
+   * Per people, until its next successor takes office: Dynasty's Heir (the successor surely inherits) and
+   * Young Heir (the successor takes office at LEADER.ageMin).
+   */
+  ageShift: Int8Array;
+  honed: Uint8Array;
+  heirInherits: Uint8Array;
+  youngHeir: Uint8Array;
   /** Goal (Goal), 1 once reached, and the tick it was reached. */
   goal: Uint8Array;
   goalDone: Uint8Array;
@@ -237,8 +260,10 @@ export type Leaders = {
   lastPacts: Int32Array;
   /** Settlements at the last yearly pass (the Expansion goal's progress). */
   settlements: Int32Array;
-  /** The lever set, people x LEVERS. */
+  /** The lever set the decisions read, people x LEVERS: the leader's (`own`) combined with the god's (`sim.gacha.godLev`, combineLevers). */
   lev: Float32Array;
+  /** The leader's own lever set (attributes and goal), people x LEVERS. */
+  own: Float32Array;
   /** Satisfaction part "Leader" of the people and what its leader adds to the connection part; together capped at LEADER.capSatisfaction. */
   sat: Float32Array;
   conn: Float32Array;
@@ -290,7 +315,11 @@ export type Leaders = {
 
 export function createLeaders(seed: number): Leaders {
   const lev = new Float32Array(LEADER_CIVS * LEVERS);
-  for (let c = 0; c < LEADER_CIVS; c++) setIdentity(lev, c);
+  const own = new Float32Array(LEADER_CIVS * LEVERS);
+  for (let c = 0; c < LEADER_CIVS; c++) {
+    setIdentity(lev, c);
+    setIdentity(own, c);
+  }
   return {
     rng: createRng(deriveSeed(seed, 'leader')),
     enabled: LEADER.enabled,
@@ -299,7 +328,11 @@ export function createLeaders(seed: number): Leaders {
     counter: new Uint16Array(LEADER_CIVS),
     age0: new Uint8Array(LEADER_CIVS),
     start: new Int32Array(LEADER_CIVS),
-    attr: new Uint8Array(LEADER_CIVS * 3),
+    attr: new Uint8Array(LEADER_CIVS * ATTR_SLOTS),
+    ageShift: new Int8Array(LEADER_CIVS),
+    honed: new Uint8Array(LEADER_CIVS),
+    heirInherits: new Uint8Array(LEADER_CIVS),
+    youngHeir: new Uint8Array(LEADER_CIVS),
     goal: new Uint8Array(LEADER_CIVS),
     goalDone: new Uint8Array(LEADER_CIVS),
     goalTick: new Int32Array(LEADER_CIVS),
@@ -314,6 +347,7 @@ export function createLeaders(seed: number): Leaders {
     lastPacts: new Int32Array(LEADER_CIVS),
     settlements: new Int32Array(LEADER_CIVS),
     lev,
+    own,
     sat: new Float32Array(LEADER_CIVS),
     conn: new Float32Array(LEADER_CIVS),
     tradeValue: new Float64Array(LEADER_CIVS),
@@ -357,13 +391,34 @@ export function setIdentity(lev: Float32Array, civ: number): void {
   for (let k = 0; k < LEVERS; k++) lev[o + k] = LEVER_KIND[k];
 }
 
-/** A people with a reused id starts over: no leader, the neutral lever set (leaderRules.ts: resetLeaderCiv closes the old term first). */
+/**
+ * A people without a leader (its leader's term ended with the people, or the id is reused; leaderRules.ts:
+ * resetLeaderCiv closes the old term first): the neutral lever set of its own, the god's layer stays.
+ */
 export function clearLeader(sim: Simulation, civ: number): void {
   const s = sim.leaders;
   s.has[civ] = 0;
   s.sat[civ] = 0;
   s.conn[civ] = 0;
-  setIdentity(s.lev, civ);
+  s.ageShift[civ] = 0;
+  s.honed[civ] = 0;
+  s.heirInherits[civ] = 0;
+  s.youngHeir[civ] = 0;
+  setIdentity(s.own, civ);
+  combineLevers(sim, civ);
+}
+
+/**
+ * The lever set the decisions read for `civ`: the leader's own (`own`) with the god's layer
+ * (`sim.gacha.godLev`, Requirement Gacha 7.1) on top, additive levers added, multiplicative ones multiplied.
+ * Only when one of them changed (a leader's recompute, a god effect's start or end).
+ */
+export function combineLevers(sim: Simulation, civ: number): void {
+  const o = civ * LEVERS;
+  const lev = sim.leaders.lev;
+  const own = sim.leaders.own;
+  const god = sim.gacha ? sim.gacha.godLev : null;
+  for (let k = 0; k < LEVERS; k++) lev[o + k] = god === null ? own[o + k] : LEVER_KIND[k] ? own[o + k] * god[o + k] : own[o + k] + god[o + k];
 }
 
 /** An experience of the leader of `civ` (war won, uprising ...); counted only while it has one. */

@@ -13,12 +13,14 @@
  * borders to every other and trades freely (dashed borders, merchants
  * abroad; openDiplomacy.ts), and where seats of government and government
  * buildings stand everywhere (flags, government traders, soldiers; empowerGovernment.ts),
- * and where all peoples are at war in pairs, their armies out and the
+ * where all peoples are at war in pairs, their armies out and the
  * attackers besieging their goal seats (army markers, siege frames, red
- * dashed war borders; declareWars.ts).
+ * dashed war borders; declareWars.ts), and where the god cast charges of
+ * all 25 abilities and keeps fires burning, biomes shifting and rivers
+ * springing during the swipes (terrain tiles redrawn, fires; castGacha.ts).
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war',
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war' | 'gacha',
   {
     years: number;
     buildings?: boolean;
@@ -27,6 +29,7 @@ export const SCENARIOS: Record<
     diplomacy?: boolean;
     government?: boolean;
     war?: boolean;
+    gacha?: boolean;
   }
 > = {
   young: { years: 0 },
@@ -37,6 +40,7 @@ export const SCENARIOS: Record<
   diplomacy: { years: 300, diplomacy: true },
   government: { years: 300, government: true },
   war: { years: 300, war: true },
+  gacha: { years: 300, gacha: true },
 };
 export type ScenarioName = keyof typeof SCENARIOS;
 

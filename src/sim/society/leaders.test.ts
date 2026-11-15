@@ -5,7 +5,7 @@ import { generateWorld } from '../world/generate';
 import { PAIRS } from './diplomacy';
 import { effectText, leaderOf, leaderTrait } from './leaderInfo';
 import { ATTRS, ATTR_COUNT, GOAL_FX, dismissLeaders, excludes, expansionTarget, goalExcludes, leaderTerms, recompute, updateLeaders } from './leaderRules';
-import { EVENTS, Ev, GOALS, Goal, L, LEADER, LEADER_CIVS, LEADER_STEMS, LEVERS, LEVER_KIND, leaderName, lever, warChance, warRatio } from './leaders';
+import { ATTR_SLOTS, EVENTS, Ev, GOALS, Goal, L, LEADER, LEADER_CIVS, LEADER_STEMS, LEVERS, LEVER_KIND, leaderName, lever, warChance, warRatio } from './leaders';
 import { Pact } from './pacts';
 import { satisfactionTarget, satisfactionTerms } from './satisfaction';
 import { TICKS_PER_YEAR, createSimulation, foundCivilization, livingCivilizations, stepSimulation, type Simulation } from './simulation';
@@ -44,7 +44,7 @@ function setLeader(sim: Simulation, civ: number, years: number, attrs: number[],
   assert.equal(s.has[civ], 1);
   s.age0[civ] = 20;
   s.start[civ] = sim.tick - years * TICKS_PER_YEAR;
-  for (let i = 0; i < 3; i++) s.attr[civ * 3 + i] = attrs[i] ?? 0;
+  for (let i = 0; i < ATTR_SLOTS; i++) s.attr[civ * ATTR_SLOTS + i] = attrs[i] ?? 0;
   s.goal[civ] = goal;
   s.goalDone[civ] = 0;
   s.goalBase[civ] = 1e9;
@@ -56,7 +56,7 @@ function setLeader(sim: Simulation, civ: number, years: number, attrs: number[],
   recompute(sim, civ);
 }
 
-const attrsOf = (sim: Simulation, civ: number) => [0, 1, 2].map((i) => sim.leaders.attr[civ * 3 + i]).filter((a) => a !== 0);
+const attrsOf = (sim: Simulation, civ: number) => [0, 1, 2, 3, 4, 5, 6, 7].map((i) => sim.leaders.attr[civ * ATTR_SLOTS + i]).filter((a) => a !== 0);
 
 /** The values of LEADER changed for one test. */
 function withNumbers(values: Partial<typeof LEADER>, body: () => void): void {

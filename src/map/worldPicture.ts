@@ -64,22 +64,61 @@ export function buildWorldLayers(world: World): WorldLayers {
   // The overview reaches one hex beyond the wrap width, so neighboring map
   // copies overlap and the seam stays closed.
   const overviewRect = { x: -HEX_PX, y: -HEX_PX, width: width + 2 * HEX_PX, height: height + 2 * HEX_PX };
-  const k = Math.min(OVERVIEW_PX_PER_HEX / HEX_PX, MAX_OVERVIEW_PX / Math.max(overviewRect.width, overviewRect.height));
-  const size = { width: Math.ceil(overviewRect.width * k), height: Math.ceil(overviewRect.height * k) };
+  const overview = buildTerrainOverview(world, overviewRect, all);
+
+  const chunkCols = Math.ceil(width / CHUNK_W);
+  const chunkRows = Math.ceil(height / CHUNK_H);
+  return { overview, overviewRect, chunkCols, chunkRows, width, height };
+}
+
+/**
+ * The whole map's terrain as one image over `rect` (picture space). Built
+ * with the world, and again after the god changed the land (biomes, rivers,
+ * lakes), only once the map has rested a while (WorldMap).
+ */
+export function buildTerrainOverview(
+  world: World,
+  rect: WorldLayers['overviewRect'],
+  all: Int32Array = cellsInRange(world, 0, world.width, 0, world.height),
+): SkImage {
+  const k = Math.min(OVERVIEW_PX_PER_HEX / HEX_PX, MAX_OVERVIEW_PX / Math.max(rect.width, rect.height));
+  const size = { width: Math.ceil(rect.width * k), height: Math.ceil(rect.height * k) };
   const overviewPicture = createPicture((canvas) => {
     canvas.scale(k, k);
-    canvas.translate(-overviewRect.x, -overviewRect.y);
+    canvas.translate(-rect.x, -rect.y);
     drawFills(canvas, world, all);
     drawFeatures(canvas, world, all);
   }, size);
   const image = drawAsImageFromPicture(overviewPicture, size);
   if (!image) throw new Error('Could not render the map overview.');
   // A plain (non-GPU) copy can be drawn by any Skia canvas.
-  const overview = image.makeNonTextureImage() ?? image;
+  return image.makeNonTextureImage() ?? image;
+}
 
-  const chunkCols = Math.ceil(width / CHUNK_W);
-  const chunkRows = Math.ceil(height / CHUNK_H);
-  return { overview, overviewRect, chunkCols, chunkRows, width, height };
+/**
+ * A fingerprint of everything a terrain tile shows (biome, elevation shade,
+ * rivers, deposits, the icons' inputs). Equal fingerprints draw the same
+ * image, so after a change of the land only the tiles that look different
+ * are rendered again (Requirement Gacha 8).
+ */
+export function terrainTileSignature(world: World, chunk: number, chunkCols: number): number {
+  let h = 0x811c9dc5;
+  const mix = (v: number) => {
+    h = Math.imul(h ^ v, 0x01000193);
+  };
+  for (const { cells } of tileCells(world, chunk, chunkCols)) {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      mix(world.biome[c]);
+      const e = world.elevation[c];
+      mix((e >= 0 ? 0 : 4) + shadeStep(e));
+      mix(world.riverDir[c] + 1);
+      const flow = world.riverFlow[c];
+      mix(flow <= 0 ? 0 : flow < 2 ? 1 : flow < 5 ? 2 : 3);
+      mix(world.deposit[c]);
+    }
+  }
+  return h >>> 0;
 }
 
 /**

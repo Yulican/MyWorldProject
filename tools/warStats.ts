@@ -9,7 +9,7 @@
 // The same file runs on the code before the war work (no military.ts): then it prints only the shared figures.
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
-import { BUILDINGS, SLOTS, STORED_COUNT, SlotState } from '../src/sim/society/buildings';
+import { BUILDINGS, STORED_COUNT, SlotState } from '../src/sim/society/buildings';
 import { GOV_TUNING } from '../src/sim/society/taxes';
 import { DEPOSITS, Deposit } from '../src/sim/world/deposits';
 import { PAIRS } from '../src/sim/society/diplomacy';
@@ -62,7 +62,7 @@ function measure(sim: Simulation, ms: number, year: number): Row {
     if (sim.cellPop[c] >= 50) towns++;
     treasuries += sim.government.treasury[c];
     if (!sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) {
+    for (let s = c * sim.economy.slots; s < (c + 1) * sim.economy.slots; s++) {
       if (sim.economy.state[s] !== SlotState.Standing) continue;
       const name = BUILDINGS[sim.economy.type[s]].name;
       built[name] = (built[name] ?? 0) + 1;
@@ -112,7 +112,7 @@ function measure(sim: Simulation, ms: number, year: number): Row {
   const goldCiv = new Set<number>();
   for (let c = 0; c < w.cellCount; c++) {
     if (!sim.hasBuildings[c] || !w.owner[c]) continue;
-    for (let q = c * SLOTS; q < (c + 1) * SLOTS; q++) if (sim.economy.state[q] === SlotState.Standing && BUILDINGS[sim.economy.type[q]].name === 'Gold mine') goldCiv.add(w.owner[c]);
+    for (let q = c * sim.economy.slots; q < (c + 1) * sim.economy.slots; q++) if (sim.economy.state[q] === SlotState.Standing && BUILDINGS[sim.economy.type[q]].name === 'Gold mine') goldCiv.add(w.owner[c]);
   }
   const grp = [[0, 0], [0, 0]];
   if (mil) {

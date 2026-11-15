@@ -165,8 +165,12 @@ export const BUILDINGS: readonly BuildingType[] = [
 ];
 
 /**
- * Slots per hex in the arrays: the settlement's (up to SETTLEMENT_SLOTS, see
+ * Slots per hex in the arrays at first: the settlement's (up to SETTLEMENT_SLOTS, see
  * economy.ts: usableSlots) and from GOV_SLOT on as many for the government.
+ * A god's Wide Foundations (Requirement Gacha 7.5) can raise a hex's usable
+ * slots beyond them; the arrays then grow (growSlots): read the stride from
+ * `Economy.slots` and the government's first slot from `Economy.half`, these
+ * constants only give the starting layout.
  */
 export const SETTLEMENT_SLOTS = 6;
 export const GOV_SLOT = SETTLEMENT_SLOTS;
@@ -202,9 +206,16 @@ export function cityTier(used: number, slots: number): number {
 
 /** Wood and stone stock and building slots of every hex. */
 export type Economy = {
+  /** Slots per hex in the slot arrays (2 * half), and the room of each part: settlement slots 0..half-1, government slots from half on. Grow with growSlots. */
+  slots: number;
+  half: number;
+  /** Usable slots changed by the god per hex (Wide Foundations +1, Cramped Ground -1; Requirement Gacha 7.5), no limit. */
+  slotMod: Int8Array;
+  /** Usable slots a hex keeps at least, set when its biome changed under its buildings (Biome Shift, fire, flood). */
+  slotFloor: Uint8Array;
   /** cell * MATERIAL_COUNT + material. Stays on the ground when a hex is lost. */
   stock: Float32Array;
-  /** Building type per slot (cell * SLOTS + slot), -1 = empty. */
+  /** Building type per slot (cell * eco.slots + slot), -1 = empty. */
   type: Int8Array;
   state: Uint8Array;
   /** Construction or repair: years of work left. */
@@ -225,6 +236,10 @@ export type Economy = {
 
 export function createEconomy(cellCount: number): Economy {
   return {
+    slots: SLOTS,
+    half: SETTLEMENT_SLOTS,
+    slotMod: new Int8Array(cellCount),
+    slotFloor: new Uint8Array(cellCount),
     stock: new Float32Array(cellCount * MATERIAL_COUNT),
     type: new Int8Array(cellCount * SLOTS).fill(-1),
     state: new Uint8Array(cellCount * SLOTS),
@@ -236,6 +251,46 @@ export function createEconomy(cellCount: number): Economy {
     goal: new Float32Array(cellCount * MATERIAL_COUNT),
     luxuryCovered: new Uint8Array(cellCount),
   };
+}
+
+/**
+ * Gives every hex room for `half` settlement and as many government slots
+ * (no-op when it has that much): the slot arrays are copied into the wider
+ * layout. Rare (a god's Wide Foundations beyond the room), so the copy is fine.
+ */
+export function growSlots(eco: Economy, half: number): void {
+  if (half <= eco.half) return;
+  const old = eco.slots;
+  const oldHalf = eco.half;
+  const slots = 2 * half;
+  const cellCount = eco.type.length / old;
+  const type = new Int8Array(cellCount * slots).fill(-1);
+  const state = new Uint8Array(cellCount * slots);
+  const work = new Float32Array(cellCount * slots);
+  const unpaid = new Uint8Array(cellCount * slots);
+  for (let c = 0; c < cellCount; c++) {
+    for (let part = 0; part < 2; part++) {
+      const from = c * old + part * oldHalf;
+      const to = c * slots + part * half;
+      type.set(eco.type.subarray(from, from + oldHalf), to);
+      state.set(eco.state.subarray(from, from + oldHalf), to);
+      work.set(eco.work.subarray(from, from + oldHalf), to);
+      unpaid.set(eco.unpaid.subarray(from, from + oldHalf), to);
+    }
+  }
+  eco.type = type;
+  eco.state = state;
+  eco.work = work;
+  eco.unpaid = unpaid;
+  eco.slots = slots;
+  eco.half = half;
+}
+
+/** Slots of a hex's settlement part (0) or government part (1) that are taken: standing, being built, ruined or repaired. */
+export function takenSlots(eco: Economy, cell: number, part: number): number {
+  let n = 0;
+  for (let s = cell * eco.slots + part * eco.half, end = s + eco.half; s < end; s++) if (eco.state[s] !== SlotState.Empty) n++;
+  return n;
 }
 
 /** Wood or stone a hex yields per year by foraging alone. */
@@ -260,7 +315,7 @@ const resourceOf = (good: number) => (good === Good.Wood ? Resource.Wood : Resou
 export function withBuildings(eco: Economy, cell: number, good: number, base: number, extraA = -1, extraB = -1): number {
   let add = 0;
   let mul = 1;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
     if (b.converts === good) add -= b.amount;
@@ -284,7 +339,7 @@ export function withBuildings(eco: Economy, cell: number, good: number, base: nu
 /** The standing buildings' effects on food, water and space, as supply modifiers. */
 export function buildingSupplyModifiers(eco: Economy, cell: number): SupplyModifier[] {
   const mods: SupplyModifier[] = [];
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) {
     if (eco.state[s] !== SlotState.Standing) continue;
     const b = BUILDINGS[eco.type[s]];
     if (b.converts !== undefined) mods.push({ kind: b.converts, label: b.name, amount: -b.amount });
@@ -303,14 +358,14 @@ export function harvestTerms(world: World, eco: Economy, cell: number, good: num
     terms.push({ label: `${GOOD_NAMES[good]} ${resource.toFixed(2)} × ${FORAGE_PER_RESOURCE}`, value: FORAGE_PER_RESOURCE * resource });
   }
   let total = forageYield(world, cell, good);
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) {
     const b = BUILDINGS[eco.type[s]];
     if (eco.state[s] === SlotState.Standing && b.good === good && b.amount) {
       terms.push({ label: b.name, value: b.amount });
       total += b.amount;
     }
   }
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) {
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) {
     const b = BUILDINGS[eco.type[s]];
     if (eco.state[s] === SlotState.Standing && b.good === good && b.percent) {
       terms.push({ label: `${b.name} +${Math.round(b.percent * 100)} %`, value: total * b.percent });
@@ -327,6 +382,6 @@ export function harvestTerms(world: World, eco: Economy, cell: number, good: num
 /** Counts a hex's slots in one state. */
 export function countSlots(eco: Economy, cell: number, state: number): number {
   let n = 0;
-  for (let s = cell * SLOTS, end = s + SLOTS; s < end; s++) if (eco.state[s] === state) n++;
+  for (let s = cell * eco.slots, end = s + eco.slots; s < end; s++) if (eco.state[s] === state) n++;
   return n;
 }

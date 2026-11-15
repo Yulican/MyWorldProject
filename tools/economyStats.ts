@@ -6,7 +6,7 @@
 import { performance } from 'node:perf_hooks';
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { openDiplomacy } from '../src/bench/openDiplomacy';
-import { BUILDINGS, GOV_SLOT, SLOTS, SlotState } from '../src/sim/society/buildings';
+import { BUILDINGS, SlotState } from '../src/sim/society/buildings';
 import { GOV_TUNING } from '../src/sim/society/taxes';
 import { PRICE, TradeGood } from '../src/sim/society/trade';
 import { PAIRS } from '../src/sim/society/diplomacy';
@@ -92,12 +92,12 @@ for (let seed = 1; seed <= worlds; seed++) {
       }
       if (pop >= 50) towns++;
       if (pop >= 150) cities++;
-      for (let s = c * SLOTS; s < (c + 1) * SLOTS; s++) {
+      for (let s = c * sim.economy.slots; s < (c + 1) * sim.economy.slots; s++) {
         if (sim.economy.state[s] === SlotState.Standing) standing++;
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].deposit !== undefined) luxuryShops++;
         if (sim.economy.state[s] === SlotState.Ruin) ruins++;
         if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') seats++;
-        if (s - c * SLOTS >= GOV_SLOT) {
+        if (s - c * sim.economy.slots >= sim.economy.half) {
           if (sim.economy.state[s] === SlotState.Standing) govBuildings++;
           if (sim.economy.state[s] === SlotState.Ruin) govRuins++;
           if (sim.economy.state[s] === SlotState.Standing && BUILDINGS[sim.economy.type[s]].name === 'Seat of government') govSeats++;

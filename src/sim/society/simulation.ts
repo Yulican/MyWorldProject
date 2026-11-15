@@ -74,6 +74,7 @@ import {
   type Diplomacy,
 } from './diplomacy';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
+import { GODS, PLAYER_GOD, advanceGod, createGacha, resetGodCiv, setWorship, startGodTick, updateWorship, type Gacha } from './gacha';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 
 // The living world: inhabitants age, have children and die; when a hex can't
@@ -220,6 +221,8 @@ export type Simulation = {
   leaders: Leaders;
   /** Wars, armies and sieges (see war.ts). */
   war: WarState;
+  /** The player's Faith, pulls and charges, and the god's layer of effects (see gacha.ts). */
+  gacha: Gacha;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -284,6 +287,7 @@ export function createSimulation(world: World): Simulation {
     military: createMilitary(n),
     leaders: createLeaders(world.seed),
     war: createWar(world.seed, n),
+    gacha: createGacha(world.seed, n),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -304,7 +308,7 @@ export function createSimulation(world: World): Simulation {
 
   const start = world.startCell;
   const tribe = foundCivilization(sim, 'start', start, null)!;
-  tribe.worshipsPlayer = true;
+  setWorship(sim, tribe.id, PLAYER_GOD, true);
   for (let i = 0; i < START_TRIBE_SIZE; i++) {
     addInhabitant(sim, start, tribe.id, 2 + Math.floor(sim.rng() * 36), 0.75 + 0.25 * sim.rng());
   }
@@ -382,12 +386,16 @@ export function stepSimulationPart(sim: Simulation): boolean {
   const weekOfYear = sim.tick % TICKS_PER_YEAR;
   switch (sim.part) {
     case TickPart.Start: {
+      // Charges cast while the last tick ran in parts take effect now (gacha.ts).
+      startGodTick(sim);
       const { pop } = sim;
       const end = pop.end;
       for (let i = sim.tick % TICKS_PER_YEAR; i < end; i += TICKS_PER_YEAR) {
         if (pop.alive[i]) updateInhabitant(sim, i);
       }
       sim.tick++;
+      // Faith from the believers, the god's effects that end, the fires.
+      advanceGod(sim);
       // The peoples' year's end gets a part of its own.
       if (sim.tick % TICKS_PER_YEAR === 0) {
         sim.part = TickPart.YearEnd;
@@ -664,6 +672,13 @@ export function dischargeSoldiers(sim: Simulation, cell: number, n: number): voi
   for (let k = 0; k < have; k++) addInhabitant(sim, cell, civ, SOLDIER_RETURN_AGE, faith);
 }
 
+/** Inhabitant `i` dies of something other than age (a god's fire): booked in its people's faith ledger. */
+export function killInhabitant(sim: Simulation, i: number): void {
+  const civ = sim.civs[sim.pop.civ[i]];
+  if (civ && sim.pop.faith[i] >= BELIEVER_FAITH) civ.faithYear.died++;
+  removeInhabitant(sim, i);
+}
+
 function removeInhabitant(sim: Simulation, i: number): void {
   const { pop } = sim;
   const cell = pop.cell[i];
@@ -724,7 +739,8 @@ function updateInhabitant(sim: Simulation, i: number): void {
   const before = pop.faith[i];
   const neighborFaith = world.population[cell] > 0 ? world.faith[cell] : before;
   const pull = (neighborFaith - before) * 0.1;
-  const devotion = civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 + sim.leaders.lev[civId * LEVERS + L.devotion] : 0;
+  // The god's layer (Prophet's Light, Doubt) adds its devotion in every people, worshipping or not.
+  const devotion = (civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 + sim.leaders.lev[civId * LEVERS + L.devotion] : 0) + sim.gacha.godDevotion[civId * GODS + PLAYER_GOD];
   const fading = civ.worshipsPlayer ? 0 : 0.005;
   const faith = clamp(before + pull + devotion - fading, 0, 1);
   pop.faith[i] = faith;
@@ -954,7 +970,7 @@ function captureDeposits(sim: Simulation, owner: Uint8Array): void {
   const makes = new Uint8Array(sim.civSlots);
   for (let c = 0; c < n; c++) {
     if (!owner[c] || !sim.hasBuildings[c]) continue;
-    for (let s = c * SLOTS, end = s + SLOTS; s < end; s++) {
+    for (let s = c * sim.economy.slots, end = s + sim.economy.slots; s < end; s++) {
       const st = economy.state[s];
       if (st === SlotState.Empty || st === SlotState.Ruin) continue;
       const good = BUILDINGS[economy.type[s]].good;
@@ -1222,7 +1238,10 @@ function refreshSnapshot(sim: Simulation): void {
         owner = id;
       }
     }
+    const was = world.owner[c];
     world.owner[c] = owner;
+    // A hex that changed hands under a Golden Harvest (the food lever of either people): its food anew.
+    if (was !== owner && sim.leaders.lev[was * LEVERS + L.food] !== sim.leaders.lev[owner * LEVERS + L.food]) updateCellSupply(sim, c);
     if (owner) territory[owner]++;
     if (sim.hasBuildings[c]) {
       world.buildings[c] = countSlots(sim.economy, c, SlotState.Standing);
@@ -1289,6 +1308,7 @@ function updateCivilizations(sim: Simulation): void {
   }
   tryNewTribe(sim);
   updateLeaders(sim);
+  updateWorship(sim);
 }
 
 function civCells(sim: Simulation, civId: number): { cells: number[]; weights: number[] } {
@@ -1470,6 +1490,7 @@ export function foundCivilization(
   resetCivRelations(sim.diplomacy, id);
   resetWarCiv(sim, id);
   resetLeaderCiv(sim, id);
+  resetGodCiv(sim, id);
   if (parent && origin === 'revolution') {
     leaderEvent(sim, parent.id, Ev.Uprising);
     sim.leaders.uprisings[parent.id]++;
