@@ -28,7 +28,7 @@ Faith ist ein einzelner Zähler (`Float64`) im Spielerzustand, im Kern geführt 
 
 ## 3. Preis und Ziehung
 
-- **Preis:** Die n-te Ziehung kostet **75 · n^1,8** Faith, gerundet (kalibriert, vom Nutzer gewählt): 75, 261, 540, 905, … (n zählt die Ziehungen des Spiels, die n-te kostet den Preis für n). Der Preis **steigt nur**, kein Zurücksetzen, kein Rabatt. Anzeige gerundet.
+- **Preis:** Die n-te Ziehung kostet **75 · n^1,8** Faith, gerundet (kalibriert, vom Nutzer gewählt): 75, 261, 542, 909, … (n zählt die Ziehungen des Spiels, die n-te kostet den Preis für n). Der Preis **steigt nur**, kein Zurücksetzen, kein Rabatt. Anzeige gerundet.
 - **Eine Ziehung** kostet einmal den Preis und liefert **3 Fähigkeiten**. Alle 3 kommen als Ladungen ins Inventar. Kein Wählen, kein Verwerfen.
 - **Mischung:** Die 3 Ziehungen sind unabhängig und stammen aus dem **ganzen Pool aller Kategorien** (Land, Völker, Anführer). Es gibt keinen Slot je Kategorie.
 - **Zufall:** stark, kein Pity-System (Game Design, Abschnitt 10). Eigener Zufallsgenerator „gacha“ (deterministisch pro Seed, verschiebt die Folgen anderer Systeme nicht).
@@ -65,11 +65,11 @@ Alle 25 gehören zu Version 1 (vom Nutzer gesehen und bestätigt, bis auf die zw
 | Nr. | Name | Stufe | Fläche | Wirkung |
 |---|---|---|---|---|
 | 1 | Fertile Blessing | Common | Radius 1 | Fruchtbarkeit sofort auf Kapazität und die natürliche Kapazität der Fruchtbarkeit ×1,25 (höchstens 1) für 20 Jahre; die Ernte steigt über die bestehende Versorgung/Ernte (Gott-Schicht, Abschnitt 7.1) |
-| 2 | Exhausted Soil | Common | 1 Hexfeld | alle Ressourcen des Hexfelds (Fruchtbarkeit, Wild, Fisch, Holz, Stein, Erz) sofort auf 10 % ihres Werts; sie wachsen über das normale Nachwachsen zurück |
+| 2 | Exhausted Soil | Common | 1 Hexfeld | alle Ressourcen des Hexfelds (Fruchtbarkeit, Wild, Fisch, Holz, Stein, Erz) sofort auf 10 % ihres Werts; der Verlust ist **dauerhaft**: es gibt kein Nachwachsen (Abschnitt 7.9) |
 | 3 | Wide Foundations | Rare | 1 Hexfeld | +1 Bauplatz der Siedlung (Abschnitt 7.5); dauerhaft, ohne Grenze |
 | 4 | Cramped Ground | Rare | 1 Hexfeld | −1 Bauplatz, nie unter die belegten Plätze; sind **alle** Plätze des Hexfelds belegt, ist es ein **unzulässiges Ziel** (Abschnitt 7.5); dauerhaft, ohne Grenze |
 | 5 | Drought | Rare | Radius 3 | Feuchtigkeit (`moisture`) −0,25 für 20 Jahre, dadurch weniger Regenwasser in der Versorgung (`supply.ts`, `RAIN_WATER × moisture`); danach zurück. Biome werden nicht neu eingestuft |
-| 6 | Rich Vein | Rare | 1 Hexfeld | legt ein Sondervorkommen (Metall oder Mineral) auf das Hexfeld; Art zufällig unter Copper, Tin, Iron, Gold, Salt, Flint, Marble, Gems, gewichtet nach `deposits.ts`, nur eine zum Biom passende; Zielprüfer: Landhexfeld ohne Sondervorkommen. Förderung, Handel und Kriegsgüter laufen über die bestehenden Systeme |
+| 6 | Rich Vein | Rare | 1 Hexfeld | legt ein Sondervorkommen (Metall oder Mineral) auf das Hexfeld; Art zufällig unter Copper, Tin, Iron, Gold, Salt, Flint, Marble, Gems, gewichtet nach `deposits.ts`, nur eine zum Biom passende; Zielprüfer: Landhexfeld ohne Sondervorkommen, **kein Wald** (Forest ist kein zulässiges Ziel). Förderung, Handel und Kriegsgüter laufen über die bestehenden Systeme |
 | 7 | Great River | Legendary | Pfad bis 12 Hexfelder | bildet oder verlängert einen Fluss (Abschnitt 7.2) |
 | 8 | Wild Fire | Epic | Start 1 Hexfeld, breitet sich aus | Wald brennt, Holz weg, Gebäude werden Ruinen, später Ebene (Abschnitt 7.3) |
 | 9 | Biome Shift | Legendary | Radius 1 | wechselt das Biom der Hexfelder zu einem verwandten (Abschnitt 7.4) |
@@ -87,7 +87,7 @@ Ziel ist ein Volk (auch das eigene). Die Wirkung gilt für alle Bezirke und Sied
 | 14 | Wanderlust | Common | Überlast-Faktor des Siedelns −0,05 und Wegkosten des Siedelns ×0,8 für 15 Jahre (Hebel `L.settleOver`, `L.travel`) |
 | 15 | Prophet's Light | Rare | Glaube aller Einwohner einmalig +0,15 und Andacht +0,03 je Jahr für 10 Jahre (Abschnitt 7.7) |
 | 16 | Doubt | Rare | Glaube aller Einwohner an **alle Götter** einmalig −0,15 und Andacht −0,03 je Jahr für 10 Jahre (Abschnitt 7.7) |
-| 17 | Golden Harvest | Epic | Ernte und Handelswert +15 % für 20 Jahre (Hebel `L.harvest`, `L.load`) |
+| 17 | Golden Harvest | Epic | Ernte und Handelswert +15 % für 20 Jahre: **Nahrungsernte** ebenso wie Förderung aus Minen und Sondervorkommen +15 % (Hebel `L.harvest` wirkt auf beides), Händlerlast ×1,15 (`L.load`) |
 
 ### 6.3 Anführer (8)
 
@@ -100,9 +100,9 @@ Ziel ist der Anführer eines Volks (`Requirement Anführer.md`). Der Gott ist di
 | 20 | Long Life | Rare | niedrigere Sterberate: Todesalter −10 Jahre (er würfelt den Tod mit „Alter − 10“), nur für diesen Anführer (Abschnitt 7.8) |
 | 21 | Brittle Crown | Rare | höhere Sterberate: Todesalter +10 Jahre („Alter + 10“), nur für diesen Anführer |
 | 22 | Reroll Destiny | Rare | würfelt das **Ziel** neu (Gewichte wie `Requirement Anführer.md` §6, ohne das heutige Ziel); Fortschritt beginnt neu; nur bei noch aktivem Ziel |
-| 23 | Young Heir | Rare | der **nächste Nachfolger** tritt mit Alter 20 an (statt 20 bis 40): längste Amtszeit; gilt für einen Nachfolger, dann verbraucht (Abschnitt 7.8) |
+| 23 | Young Heir | Rare | der **nächste Nachfolger** tritt mit Alter 20 an (statt 20 bis 40): längste Amtszeit; gilt für einen Nachfolger, dann verbraucht; **unzulässiges Ziel**, solange das Flag bei diesem Volk schon gesetzt ist (Abschnitt 7.8) |
 | 24 | Honed Mind | Epic | ein **zufälliges** vorhandenes Attribut des Anführers wird verstärkt: die Abweichung seiner Wirkungen vom Grundwert ×1,5 (Zufriedenheit weiter im ±8-Deckel); nur für diesen Anführer (Abschnitt 7.8) |
-| 25 | Dynasty's Heir | Epic | der **nächste Nachfolger** erbt sicher ein Attribut des Vorgängers (statt 50 %; Zufall unter dessen Attributen); gilt für einen Nachfolger, dann verbraucht (Abschnitt 7.8) |
+| 25 | Dynasty's Heir | Epic | der **nächste Nachfolger** erbt sicher ein Attribut des Vorgängers (statt 50 %; Zufall unter dessen Attributen); gilt für einen Nachfolger, dann verbraucht; **unzulässiges Ziel**, solange das Flag bei diesem Volk schon gesetzt ist (Abschnitt 7.8) |
 
 ### 6.4 Stufenzuordnung (vorläufig)
 
@@ -135,22 +135,23 @@ Nr. 14 und Nr. 23 ersetzen „Seafarers' Whisper“ (Kulturwerte wirken noch nir
 Alle Dauer-Effekte (Fertile Blessing, Drought, Völker-Fähigkeiten) laufen über **eine** gemeinsame Liste, nicht über eigene Schleifen je Fähigkeit.
 
 - **Liste aktiver Effekte** (flache Typed Arrays, höchstens 256 Einträge; ein neuer Eintrag derselben Art und desselben Ziels ersetzt den alten): Art, Ziel (Hexfeld-Mitte oder Volk), Radius, Wert, Ende (Tick). Gespeichert mit dem Spielstand.
-- **Volks-Effekte** schreiben in einen **Hebelsatz „Gott“** (`godLev`, Volk × Hebel, neutral 0 bzw. 1 wie `LEVERS`), der mit dem Hebelsatz des Anführers kombiniert wird (additiv addiert, multiplikativ multipliziert, `Requirement Anführer.md` §3) und nur bei Beginn und Ende eines Effekts neu berechnet wird. Die Deckel aus Anführer §3 gelten für die Anführer-Schicht; die Gott-Schicht hat eigene Obergrenzen je Hebel (vorläufig).
+- **Volks-Effekte** schreiben in einen **Hebelsatz „Gott“** (`godLev`, Volk × Hebel, neutral 0 bzw. 1 wie `LEVERS`), der mit dem Hebelsatz des Anführers kombiniert wird (additiv addiert, multiplikativ multipliziert, `Requirement Anführer.md` §3) und nur bei Beginn und Ende eines Effekts neu berechnet wird. Die Deckel aus Anführer §3 gelten für die Anführer-Schicht; die Gott-Schicht hat **keine Obergrenzen je Hebel** (entschieden); nur der Teilwert „Divine“ der Zufriedenheit behält seine Grenze von ±15 (7.6).
 - **Land-Effekte** (Kapazität, Feuchtigkeit, Gefahr) ändern die Kartenfelder um einen Betrag/Faktor und ziehen ihn am Ende **exakt wieder ab** (gemerkt je Eintrag); überlappende Effekte addieren sich richtig; angewandt bei Beginn und Ende, nicht jeden Tick.
 - **Ablauf:** je Tick eine Prüfung, ob der früheste Eintrag endet.
 
 ### 7.2 Great River
 
 - Ziel: ein Landhexfeld. Ab dort wird **bergab** gesucht: jeweils der Nachbar mit der niedrigsten Höhe (`elevation`), der tiefer liegt (Gleichstand: mehr Feuchtigkeit). Der Weg endet an Meer, See oder einem bestehenden Fluss (`riverFlow > 0`), dann fließt der neue Fluss hinein; liegt das Ziel schon an einem Fluss, wird dieser **verlängert** (die Suche beginnt an seinem Ende).
-- **Senke (entschieden):** Hat der Weg keinen Auslauf (Hexfeld ohne tieferen Nachbarn, oder 12 Hexfelder ohne Meer/See/Fluss), wird sein **letzter Hexfeld zu einem See** (`Biome.Lake`; Kapazität, `danger`, `moveCost` neu aus der Biomtabelle wie bei Biome Shift, 7.4). Das Ziel ist also immer zulässig, wenn das Zielhexfeld Land ist; liegt auf dem See-Hexfeld eine Siedlung, wird sie **überflutet**: ihre Gebäude werden zu Ruinen (bestehendes Ruinensystem), die Einwohner wandern über die bestehenden Regeln ab (entschieden).
-- Wirkung: je Hexfeld des Pfads `riverDir` auf das nächste und `riverFlow` auf einen kleinen Bachwert (Startwert Offen, Eichung so, dass `supply.ts` das Hexfeld als Flusshexfeld wertet; ein bestehender Fluss am Auslauf behält seinen Wert).
+- **Senke (entschieden):** Hat der Weg keinen Auslauf (Hexfeld ohne tieferen Nachbarn, oder 12 Hexfelder ohne Meer/See/Fluss), wird sein **letzter Hexfeld zu einem See** (`Biome.Lake`; Kapazität, `danger`, `moveCost` neu aus der Biomtabelle wie bei Biome Shift, 7.4). Das Ziel ist also immer zulässig, wenn das Zielhexfeld Land ist; liegt auf dem See-Hexfeld eine Siedlung, wird sie **überflutet**: ihre Gebäude werden zu Ruinen (bestehendes Ruinensystem), **alle Einwohner sterben** (entschieden).
+- **Fluss am Zielhexfeld (entschieden):** Liegt das Ziel auf einem Hexfeld, das schon einen Fluss hat, wird dieser **verstärkt**: `riverFlow` +1 (Einheit der Karte) vom Zielhexfeld flussabwärts bis zur Mündung; es entsteht kein neuer Pfad und kein See.
+- Wirkung (neuer Pfad): je Hexfeld des Pfads `riverDir` auf das nächste und `riverFlow` auf einen kleinen Bachwert (Startwert Offen, Eichung so, dass `supply.ts` das Hexfeld als Flusshexfeld wertet; ein bestehender Fluss am Auslauf behält seinen Wert).
 - Folgen über bestehende Systeme: Wasser (`FRESH_WATER` in `supply.ts` liest `riverFlow` im Hexfeld und an Nachbarn) und Fruchtbarkeit am Pfad; die Kacheln werden neu gezeichnet. `riverFlow`/`riverDir` sind veränderlich und werden mit dem Spielstand gespeichert.
 
 ### 7.3 Wild Fire
 
 - Zündung: Hexfeld der Biome Forest, Jungle, Savanna (brennbar); Zielprüfer: Zielhexfeld brennbar.
 - Ablauf in Wochen-Ticks: ein brennendes Hexfeld brennt **6 Wochen**; jede Woche entzündet es jeden brennbaren Nachbarn mit **15 %**; ein Hexfeld brennt nur einmal; höchstens **40 Hexfelder** je Brand.
-- Während es brennt: Gefahr +0,3 (Gott-Schicht, exakter Rückbau), Einwohner −3 % je Woche. Ausgebrannt: **Holz 0**, Wild ×0,3, und das Biom wird **Plains** (Kapazität, `danger`, `moveCost` neu aus der Biomtabelle wie bei Biome Shift, 7.4); die Ressourcen wachsen normal nach. Straßen und Besitzer bleiben; **stehende Gebäude auf ausgebrannten Hexfeldern werden zu Ruinen** (bestehendes Ruinensystem `ruins`).
+- Während es brennt: Gefahr +0,3 (Gott-Schicht, exakter Rückbau), Einwohner −3 % je Woche. Ausgebrannt: **Holz 0**, Wild ×0,3, und das Biom wird **Plains** (Kapazität, `danger`, `moveCost` neu aus der Biomtabelle wie bei Biome Shift, 7.4); die Ressourcen sind **dauerhaft** verloren (kein Nachwachsen, 7.9). Straßen und Besitzer bleiben; **stehende Gebäude auf ausgebrannten Hexfeldern werden zu Ruinen** (bestehendes Ruinensystem `ruins`).
 - Liste der brennenden Hexfelder (≤ 64 Einträge: Hexfeld, Restwochen); pro Tick nur diese Liste; eigenes Kartensymbol.
 
 ### 7.4 Biome Shift
@@ -158,10 +159,10 @@ Alle Dauer-Effekte (Fertile Blessing, Drought, Völker-Fähigkeiten) laufen übe
 - Ziel: Hexfeld-Mitte, Wirkung auf die 7 Hexfelder (Land). Meer, See, Eis und Hexfelder mit mystischem Sondervorkommen (`HolySpring`, `SacredGrove`, `Meteorite`, `AncientRuins`) bleiben; Zielprüfer: mindestens ein Hexfeld wechselt.
 - **Wechselregel** (jedes Landhexfeld ein Schritt in der Kette, Richtung „wetter“ oder „trockener“ vom Spieler gewählt):
 
-  `Desert ↔ Savanna ↔ Plains ↔ Forest ↔ Jungle ↔ Swamp`, `Tundra ↔ Plains`, `Hills ↔ Mountains`, `Hills ↔ Plains`.
+  `Desert ↔ Savanna ↔ Plains ↔ Forest ↔ Jungle ↔ Swamp`, `Tundra ↔ Plains`, `Hills ↔ Plains` und `Mountains ↔ Hills` (entschieden: Tundra und Hills werden in beide Richtungen zu Plains, Mountains in beide Richtungen zu Hills).
 
   Wetter = in Richtung Swamp, trockener = in Richtung Desert; am Kettenende bleibt das Hexfeld.
-- Danach neu aus der Biomtabelle: `resourceCapacity` (× `terrainVariation`), `danger`, `moveCost`; aktuelle Ressourcen wachsen über das normale Nachwachsen. `moisture`/`temperature`, Straßen, Gebäude, Besitzer und Bewohner bleiben; wer im neuen Biom nicht leben kann, wandert über die bestehenden Regeln ab. Kacheln neu gezeichnet.
+- Danach neu aus der Biomtabelle: `resourceCapacity` (× `terrainVariation`), `danger`, `moveCost`; ein Verlust an aktuellen Ressourcen ist dauerhaft (kein Nachwachsen, 7.9). `moisture`/`temperature`, Straßen, Gebäude, Besitzer und Bewohner bleiben; wer im neuen Biom nicht leben kann, wandert über die bestehenden Regeln ab. Kacheln neu gezeichnet.
 
 ### 7.5 Bauplatz-Modifikator (Wide Foundations, Cramped Ground)
 
@@ -192,12 +193,16 @@ Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.m
 - **Ziel:** Reroll Destiny ruft die Zielwahl (§6) neu auf; Ausgangswert und Fortschritt zurück. Das ist die **einzige** Ausnahme von „kein Zielwechsel“.
 - Chronik: ein vom Gott gesetzter Wechsel bekommt einen stillen Eintrag mit „by the god“. Das Panel „Leader ›“ zeigt das Ergebnis ohne Änderung; das **Todesalter wird nicht angezeigt** (entschieden).
 
+### 7.9 Kein Nachwachsen (entschieden)
+
+Ressourcenverluste durch Exhausted Soil, Wild Fire und Biome Shift sind **dauerhaft**: Die Fähigkeiten setzen die Werte, die Kapazität bleibt wie gesetzt, und es gibt kein Nachwachsen der Ressourcen im Kern. Ein Nachwachsen kann später als eigenes Feature kommen (Abschnitt 13). Alle Stellen dieses Dokuments, die „wächst nach“ sagten, gelten damit nicht mehr.
+
 ## 8. Anzeige
 
 - **Faith-Anzeige:** oben auf dem Bildschirm eine kleine Anzeige „Faith 17,3 / 20“ (Stand / Preis der nächsten Ziehung) und ein Knopf „Gacha“, grün hervorgehoben, wenn eine Ziehung leistbar ist.
 - **Gacha-Bildschirm:** Preis, Knopf „Pull (3)“, Aufdecken der 3 Ergebnisse nacheinander mit Seltenheitsfarbe (Common grau, Rare blau, Epic violett, Legendary gold). Nach der Ziehung bleiben die Ergebnisse sichtbar, bis der Spieler sie schließt.
 - **Inventar:** Liste der Fähigkeiten mit Zahl der Ladungen, nach Kategorie (Land, Völker, Anführer) und Seltenheit; Antippen zeigt die Beschreibung mit Zahlen und den Knopf „Use“.
-- **Zielwahl:** Land: Antippen eines Hexfelds mit Vorschau der betroffenen Fläche (Great River zeigt den Pfad, Biome Shift den Wahlknopf „wetter/trockener“), Bestätigen/Abbrechen. Volk/Anführer: Liste oder Antippen.
+- **Zielwahl:** Land: Antippen eines Hexfelds mit Vorschau der betroffenen Fläche (Biome Shift den Wahlknopf „wetter/trockener“; **keine Pfadvorschau** für Great River, entschieden), Bestätigen/Abbrechen. Volk/Anführer: Liste oder Antippen.
 - **Karte:** brennende Hexfelder (Wild Fire) und Ruinen sichtbar, neue Flüsse und geänderte Biome erscheinen nach dem Einsatz in den Kacheln.
 - Alle Texte Englisch.
 
@@ -211,7 +216,7 @@ Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.m
 ## 10. Performance, Benchmark, Simulation
 
 - Laufender Aufwand: Faith je Tick eine Multiplikation; Effektliste und Feuerliste klein (≤ 256 bzw. ≤ 64), ein Vergleich je Tick. Einmalige Eingriffe (Biome Shift, Great River, Fertile Blessing) berühren ≤ 37 Hexfelder bzw. ≤ 12 Pfadfelder.
-- **Benchmark (Pflicht, `AGENTS.md`):** neues Szenario `gacha` (aged, mit Ladungen aller 25 Fähigkeiten, die der Setup auf verteilten Zielen einsetzt: Wild Fire in Wäldern, Great River, Biome Shift, Wide Foundations/Cramped Ground, Effekte aller Völker, brennende Hexfelder, neue Flüsse, viele Kacheln auf Neuzeichnen) und alle Szenarien bleiben grün. Die Karten-Kacheln werden bei Biom-, Fluss-, Ruinen- und Brandänderung neu gezeichnet; das darf auch während der Wischer keine Frames über 25 ms kosten (Neuzeichnen nur, wenn die Karte ruht, wie heute).
+- **Benchmark (Pflicht, `AGENTS.md`):** neues Szenario `gacha` (aged, mit Ladungen aller 25 Fähigkeiten, die der Setup auf verteilten Zielen einsetzt: Wild Fire in Wäldern, Great River, Biome Shift, Wide Foundations/Cramped Ground, Effekte aller Völker, brennende Hexfelder, neue Flüsse, viele Kacheln auf Neuzeichnen) und alle Szenarien bleiben grün. Die Karten-Kacheln werden bei Biom-, Fluss-, Ruinen- und Brandänderung neu gezeichnet; das darf auch während der Wischer keine Frames über 25 ms kosten (Neuzeichnen nur, wenn die Karte ruht, wie heute; die Neuzeichnung der Übersicht bleibt bei **1 s Ruhe**, entschieden).
 - **Simulation (`sim-analyst`, 12 Welten, 300 Jahre):**
   1. Eichung des Faith-Faktors und der Preiskurve (erledigt, Abschnitte 2 und 3): Ziehungen je Echtminute bei Geschwindigkeit 1 (Eichziel 5 min je Ziehung) und bei den höheren Stufen; Gläubigenzahl über die Zeit.
   2. Stufengewichte und Stufenzuordnung: Verteilung der Ziehungen, Wirkungsstärke je Fähigkeit (z. B. Wirkung auf Siedlungen, Kriege, Rebellionen, Handel bei Einsatz auf ein typisches Ziel), ob Common wirklich nützlich ist.
@@ -230,17 +235,18 @@ Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.m
 
 ## 12. Offene Punkte
 
-Entschieden (Nutzer): Startvorrat 0; Wanderlust und Young Heir; keine Grenze für Bauplätze und Attribute; zufällige Attribute; Wild Fire macht Ruinen; Great River in einer Senke macht einen See; Todesalter nicht angezeigt; Doubt senkt den Glauben an alle Götter; Anbetung ab 55 % Gläubigen, Ende unter 45 % (7.7); überflutete Siedlung bei See (7.2). Noch offen:
+Entschieden (Nutzer): kein Nachwachsen der Ressourcen (7.9); Great River auf einem Fluss verstärkt ihn (+1 bis zur Mündung); eine überflutete Siedlung verliert alle Einwohner; Golden Harvest auch auf die Nahrungsernte; Rich Vein nicht auf Wald; Biome Shift Tundra/Hills → Plains, Mountains → Hills; keine Gott-Obergrenzen je Hebel (nur „Divine“ ±15); Young Heir und Dynasty's Heir unzulässig bei schon gesetztem Flag; keine Pfadvorschau für Great River; Übersichts-Neuzeichnung bleibt bei 1 s Ruhe; Startvorrat 0; Wanderlust und Young Heir; keine Grenze für Bauplätze und Attribute; zufällige Attribute; Wild Fire macht Ruinen; Great River in einer Senke macht einen See; Todesalter nicht angezeigt; Doubt senkt den Glauben an alle Götter; Anbetung ab 55 % Gläubigen, Ende unter 45 % (7.7); überflutete Siedlung bei See (7.2). Noch offen:
 
 - **Folgeaufgabe Bauplatz-Arrays** (7.5).
 - **Honed Mind:** ×1,5 auf additive Abweichungen, Faktor^1,5 auf multiplikative.
-- **Dauern** (10/15 Jahre) und **Flächen** (Radius 1–3) aller Fähigkeiten, die Stärken (±0,15 Glaube, ±3 Zufriedenheit, ±10 % Geburten, +15 % Ernte, ×1,25 Fruchtbarkeit, ×1,5 Honed Mind, ±1 Bauplatz, −0,25 Feuchtigkeit) und die Gott-Obergrenzen je Hebel (Abschnitt 7.1): alles vorläufig.
+- **Dauern** (10/15 Jahre) und **Flächen** (Radius 1–3) aller Fähigkeiten, die Stärken (±0,15 Glaube, ±3 Zufriedenheit, ±10 % Geburten, +15 % Ernte, ×1,25 Fruchtbarkeit, ×1,5 Honed Mind, ±1 Bauplatz, −0,25 Feuchtigkeit): alles vorläufig.
 - **Stapelregel** (Abschnitt 5: Dauer-Effekt ersetzt den laufenden) und **Todesalter**-Stapelung (Empfehlung: ersetzen, nicht addieren).
 - **Zeitraffer:** Faith läuft nach Spielzeit, bei 26/104 Ticks je Sekunde also 4-/17-mal schneller; Wirkung auf das Tempo der Partie und eine mögliche Sperre der Ziehung bei Pause prüfen.
 - **Rivalen-Götter** (Game Design 8) später: dann auch Fähigkeiten auf fremde Götter.
 
 ## 13. Später (nicht in Version 1)
 
+- Nachwachsen der Ressourcen (heute dauerhafte Verluste, 7.9).
 - Rivalen-Götter mit eigenem Faith und eigenen Ladungen.
 - Handel mit Ladungen, Verschmelzen, Pity-System (bewusst ausgeschlossen).
 - Weitere Fähigkeiten nach Kultureffekten (Seafarers' Whisper, sobald Kultur im Spiel etwas bewirkt) und Fähigkeiten auf Kriege und Verträge.
