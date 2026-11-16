@@ -688,6 +688,12 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
 
   // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
   const overview = useRef<{ version: number; mode: number; image: SkImage } | null>(null);
+  /** Frees the territory overview once it can no longer be on screen (a full-map image, rebuilt per snapshot or map mode). */
+  const dropOverview = () => {
+    const old = overview.current?.image;
+    overview.current = null;
+    if (old) setTimeout(() => old.dispose(), OVERVIEW_KEEP_MS);
+  };
   const overviewFor = (version: number): SkImage => {
     const mode = territory.mode.getVersion();
     if (overview.current?.version !== version || overview.current.mode !== mode) {
@@ -695,6 +701,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
       const built = buildTerritoryOverview(world, territory.civColor, layers, territory.war, territory.mode.data);
       recordMapBuild(performance.now() - t0);
       countEvent('territoryOverviews');
+      dropOverview();
       overview.current = { version, mode, image: built.overview };
     }
     return overview.current.image;
@@ -815,11 +822,13 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
     publish.current();
   };
 
-  // A new world or tile cache: start over from the current view.
+  // A new world or tile cache: start over from the current view. The old caches' images are freed (dispose above), so the GPU notes start over too.
   useEffect(() => {
-    overview.current = null;
+    dropOverview();
+    uploaded.current = new WeakSet<SkImage>();
     listener.current(current.current);
   }, [terrainTiles, territoryTiles, listener]);
+  useEffect(() => () => dropOverview(), []);
 
   // New society snapshots: redo the territory tiles that look different, and the terrain tiles if the map mode's values changed.
   useEffect(() => {

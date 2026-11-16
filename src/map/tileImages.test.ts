@@ -92,3 +92,42 @@ test('two layers never hand over new tiles in the same frame, and take turns', a
     assert.ok(slices[i].at - slices[i - 1].at >= 15, `slices ${i - 1} and ${i} too close`);
   }
 });
+
+test('many map mode switches and moves keep the cache bounded and free every dropped image once', async () => {
+  // Images of 10x10 px (400 bytes): a budget of 8 tiles.
+  let live = 0;
+  let doubleFree = 0;
+  const counted = (): SkImage => {
+    live++;
+    let freed = false;
+    return {
+      width: () => 10,
+      height: () => 10,
+      dispose: () => {
+        if (freed) doubleFree++;
+        freed = true;
+        live--;
+      },
+    } as unknown as SkImage;
+  };
+  let mode = 0;
+  const tiles = new TileImages(counted, (chunk) => chunk * 31 + mode, [1, 2], () => {}, 8 * 400);
+  for (let step = 0; step < 40; step++) {
+    // A view of 4 tiles moving across 200 chunks, at alternating tiers; every 5th step a mode switch changes every tile.
+    const first = (step * 5) % 200;
+    tiles.want([0, 1, 2, 3].map((i) => ({ chunk: first + i, tier: step % 2, distance: i }) as TileRequest));
+    if (step % 5 === 4) {
+      mode++;
+      tiles.invalidate();
+    }
+    await wait(80);
+  }
+  // Tiles drawn within the last second are evicted once that second is over, then freed a second later.
+  await wait(2500);
+  // Beyond the budget only tiles of the view and those drawn within the last second may stay.
+  assert.ok(live <= 8 + 8, `live images bounded: ${live}`);
+  tiles.dispose();
+  await wait(1100);
+  assert.equal(live, 0, 'all images freed after dispose');
+  assert.equal(doubleFree, 0, 'no image freed twice');
+});

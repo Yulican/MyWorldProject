@@ -251,8 +251,15 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          # The scenario list comes from the benchmark job's matrix in this
+          # file, so a new scenario can't be left out of the release notes.
+          SCENARIOS=$(grep -m1 -oP '^\s+scenario: \[\K[^\]]+' .github/workflows/android-build.yml | tr -d ' ' | tr ',' ' ')
+          if [ -z "$SCENARIOS" ]; then
+            echo "::error::Benchmark scenario matrix not found in android-build.yml"
+            exit 1
+          fi
           NOTES=""
-          for scenario in young aged cities unrest trade diplomacy government war gacha save; do
+          for scenario in $SCENARIOS; do
             f="results/benchmark-results-$scenario/summary.json"
             if [ -f "$f" ]; then
               RESULT=$(node -p "const s=require('./$f'); (s.pass ? 'PASSED' : 'FAILED') + ' (failed swipes: ' + s.failed + '/' + s.swipes + ')'")

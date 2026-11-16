@@ -115,9 +115,21 @@ export function buildTerrainOverview(
     drawFeatures(canvas, world, all);
   }, size);
   const image = drawAsImageFromPicture(overviewPicture, size);
+  overviewPicture.dispose();
   if (!image) throw new Error('Could not render the map overview.');
-  // A plain (non-GPU) copy can be drawn by any Skia canvas.
-  return image.makeNonTextureImage() ?? image;
+  return plainCopy(image);
+}
+
+/**
+ * A plain (non-GPU) copy of an image, which any Skia canvas can draw; the
+ * original is freed at once instead of whenever the garbage collector gets
+ * to it (overviews are full-map images, rebuilt per snapshot or map mode).
+ */
+export function plainCopy(image: SkImage): SkImage {
+  const copy = image.makeNonTextureImage();
+  if (!copy || copy === image) return image;
+  image.dispose();
+  return copy;
 }
 
 /**

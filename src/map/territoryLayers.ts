@@ -11,7 +11,7 @@ import { HEX_PX } from './mapGeometry';
 import { MODES, MapModeId, type MapModeData } from './mapModes';
 import { BuilderSet, keptBuilder, sharedFillPaint, sharedStrokePaint } from './paints';
 import { MODE_ICON_ALPHA, withAlpha } from './palette';
-import { cellsInRange, drawModeOverview, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
+import { cellsInRange, drawModeOverview, plainCopy, renderTileWith, tileCells, type WorldLayers } from './worldPicture';
 
 /**
  * Territory overview resolution in pixels per hex size. Lower than the
@@ -107,8 +107,9 @@ export function buildTerritoryOverview(
     drawTerritory(canvas, world, all, colorOf, war, modeDims(mode));
   }, size);
   const image = drawAsImageFromPicture(picture, size);
+  picture.dispose();
   if (!image) throw new Error('Could not render the territory overview.');
-  return { overview: image.makeNonTextureImage() ?? image, overviewRect: rect };
+  return { overview: plainCopy(image), overviewRect: rect };
 }
 
 /**
