@@ -208,6 +208,7 @@ vorerst immer auf; später entscheidet die Außenpolitik.
   gehört aber nicht zu diesem Feature.
 
 ## 7. Performance und Benchmark
+- **Kartenmodus (`Requirement Kartenmodi.md`):** Der Modus „Satisfaction“ färbt bewohnte Hexe nach dem Wert (−100…+100) mit Zahl und rotem „May rebel“-Rand bei Wert < 0.
 
 - Rechnung vierteljährlich pro Hex, in flachen Arrays. Die Straßensuche für
   die Anbindung läuft einmal pro Quartal und Volk, von allen Regierungssitzen

@@ -57,6 +57,8 @@ export class TileImages {
    */
   private resting = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** A later eviction, for tiles over budget that were drawn too recently to free yet (see evict). */
+  private evictTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   /** Longest recent tile render in ms (decays), to stop a slice before it overruns SLICE_MS. */
   private tileMs = 0;
@@ -201,13 +203,27 @@ export class TileImages {
   private evict() {
     if (this.bytes <= this.budgetBytes) return;
     const now = Date.now();
+    let recent = false;
     const old = [...this.entries]
-      .filter(([k, e]) => !this.wanted.has(chunkOf(k)) && now - e.usedAt > KEEP_MS)
+      .filter(([k, e]) => {
+        if (this.wanted.has(chunkOf(k))) return false;
+        if (now - e.usedAt > KEEP_MS) return true;
+        recent = true;
+        return false;
+      })
       .sort((a, b) => a[1].usedAt - b[1].usedAt);
     for (const [k, e] of old) {
       if (this.bytes <= this.budgetBytes) break;
       this.entries.delete(k);
       this.free(e);
+    }
+    // Still over budget with tiles drawn too recently: try again once they may go, even if no further tile is rendered
+    // (otherwise the overshoot stays until the next render).
+    if (this.bytes > this.budgetBytes && recent && this.evictTimer === null && !this.disposed) {
+      this.evictTimer = setTimeout(() => {
+        this.evictTimer = null;
+        if (!this.disposed) this.evict();
+      }, KEEP_MS + 50);
     }
   }
 
@@ -223,6 +239,7 @@ export class TileImages {
     this.disposed = true;
     if (gate.waiting === this) gate.waiting = null;
     if (this.timer !== null) clearTimeout(this.timer);
+    if (this.evictTimer !== null) clearTimeout(this.evictTimer);
     for (const e of this.entries.values()) this.free(e);
     this.entries.clear();
   }

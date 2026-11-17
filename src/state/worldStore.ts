@@ -23,6 +23,7 @@ import {
   type World,
 } from '../sim';
 import type { ExtraArmies } from '../bench/armyDecoys';
+import { MapModeId, POLITICAL, createModeData, fillModeData, modeKey, parseModeKey, type MapMode } from '../map/mapModes';
 import { countEvent, logWork, recordSimWork, workLogging } from './perfStats';
 
 // Holds the current world and its simulation outside React (see design doc:
@@ -180,13 +181,57 @@ function syncArmies(sim: Simulation) {
   armyListeners.forEach((l) => l());
 }
 
-/** A new map snapshot is shown: the war data, armies and land changes come along. */
+/** A new map snapshot is shown: the war data, armies, land changes and the map mode's values come along. */
 function syncSnapshot(sim: Simulation) {
   notifiedSnapshot = sim.snapshotVersion;
   syncMapWar(sim);
   syncArmies(sim);
   syncLand(sim);
+  // Only outside Political (Requirement Kartenmodi 9); the map sees the new version with the snapshot.
+  if (mapMode.id !== MapModeId.Political && fillModeData(sim, mapMode)) mapMode.version++;
 }
+
+/**
+ * The active map mode (Requirement Kartenmodi) and its per-hex buffer
+ * (bucket, number, marks), filled with every snapshot while a mode other
+ * than Political is active. UI state, kept here beside the snapshot it is
+ * made from; saved in the app trailer.
+ */
+export const mapMode = createModeData();
+const modeListeners = new Set<() => void>();
+
+/** Switches the map mode: the buffer is filled at once, the map redraws its tiles once it rests. */
+export function setMapMode(mode: MapMode) {
+  if (mode.id === mapMode.id && mode.sub === mapMode.sub) return;
+  mapMode.id = mode.id;
+  mapMode.sub = mode.sub;
+  if (state.sim) fillModeData(state.sim, mapMode);
+  mapMode.version++;
+  modeListeners.forEach((l) => l());
+}
+
+export function getMapMode(): MapMode {
+  return { id: mapMode.id, sub: mapMode.sub };
+}
+
+/** The map mode as an external store: notifies on a switch (snapshots change `version` silently, see syncSnapshot). */
+export const modeStore = {
+  subscribe: (listener: () => void): (() => void) => {
+    modeListeners.add(listener);
+    return () => modeListeners.delete(listener);
+  },
+  getVersion: (): number => mapMode.version,
+  data: mapMode,
+};
+
+/** The active mode for React (a new object only on a switch). */
+export function useMapMode(): MapMode {
+  return useSyncExternalStore(modeStore.subscribe, () => modeSnapshot);
+}
+let modeSnapshot: MapMode = POLITICAL;
+modeListeners.add(() => {
+  if (modeSnapshot.id !== mapMode.id || modeSnapshot.sub !== mapMode.sub) modeSnapshot = getMapMode();
+});
 
 /**
  * Changes of the land the terrain layer draws (the god's abilities: biome,
@@ -229,6 +274,8 @@ function publish(changes: Partial<GameState>) {
 export function createNewWorld(seed: number = randomSeed()): World {
   cancelSave();
   const sim = createSimulation(generateWorld({ seed }));
+  // A new world starts in the standard map (Requirement Kartenmodi 7).
+  setMapMode(POLITICAL);
   syncSnapshot(sim);
   pendingTicks = 0;
   const seen = state.chronicleDialogs ? nextShown(sim, 0) : sim.chronicle.length;
@@ -739,11 +786,22 @@ export function runningMs(): number {
 }
 
 /** What the app stores alongside the simulation in a save (GameState). */
-export type SavedAppState = { speed: number; resumeSpeed: number; chronicleSeen: number };
+export type SavedAppState = {
+  speed: number;
+  resumeSpeed: number;
+  chronicleSeen: number;
+  /** The map mode (mapModes.modeKey, e.g. "supply.water"); missing in older saves: Political. */
+  mapMode?: string;
+};
 
 /** The app part of the current game state, for a save. */
 export function appState(): SavedAppState {
-  return { speed: state.speed, resumeSpeed: state.resumeSpeed, chronicleSeen: state.chronicleSeen };
+  return {
+    speed: state.speed,
+    resumeSpeed: state.resumeSpeed,
+    chronicleSeen: state.chronicleSeen,
+    mapMode: modeKey(mapMode),
+  };
 }
 
 /**
@@ -765,6 +823,11 @@ export function loadSimulation(sim: Simulation, app: SavedAppState) {
   heldSince = 0;
   lastNotify = 0;
   lastArmyNotify = 0;
+  // The mode saved with the world (Political when missing or unknown); filled from the loaded world by the snapshot.
+  const mode = parseModeKey(app.mapMode);
+  mapMode.id = mode.id;
+  mapMode.sub = mode.sub;
+  mapMode.version++;
   syncSnapshot(sim);
   const speed = clampSpeed(app.speed);
   const resumeSpeed = clampSpeed(app.resumeSpeed);
@@ -772,6 +835,7 @@ export function loadSimulation(sim: Simulation, app: SavedAppState) {
   const seen = state.chronicleDialogs ? nextShown(sim, from) : sim.chronicle.length;
   const waiting = seen < sim.chronicle.length;
   publish({ sim, speed: waiting ? 0 : speed, resumeSpeed: waiting && speed > 0 ? speed : resumeSpeed, chronicleSeen: seen });
+  modeListeners.forEach((l) => l());
   startClock();
   collectOldWorld();
 }

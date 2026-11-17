@@ -18,11 +18,14 @@
  * dashed war borders; declareWars.ts), and where the god cast charges of
  * all 25 abilities and keeps fires burning, biomes shifting and rivers
  * springing during the swipes (terrain tiles redrawn, fires; castGacha.ts),
- * and where the autosave runs over and over during the swipes, and the
- * save is loaded back once per world while the map rests (benchSaves.ts).
+ * where the autosave runs over and over during the swipes, and the
+ * save is loaded back once per world while the map rests (benchSaves.ts),
+ * and where the map mode goes through all modes and sub-modes during the
+ * swipes (colors and numbers in the tiles; modeCycle.ts). All other
+ * scenarios run in the Political mode.
  */
 export const SCENARIOS: Record<
-  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war' | 'gacha' | 'save',
+  'young' | 'aged' | 'cities' | 'unrest' | 'trade' | 'diplomacy' | 'government' | 'war' | 'gacha' | 'save' | 'modes',
   {
     years: number;
     buildings?: boolean;
@@ -33,6 +36,7 @@ export const SCENARIOS: Record<
     war?: boolean;
     gacha?: boolean;
     save?: boolean;
+    modes?: boolean;
   }
 > = {
   young: { years: 0 },
@@ -45,6 +49,7 @@ export const SCENARIOS: Record<
   war: { years: 300, war: true },
   gacha: { years: 300, gacha: true },
   save: { years: 300, save: true },
+  modes: { years: 300, modes: true },
 };
 
 /** The save scenario loads its last save back after this many swipes of each world (while the map rests). */

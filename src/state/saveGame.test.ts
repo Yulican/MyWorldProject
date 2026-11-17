@@ -20,7 +20,20 @@ import {
   saveFromMenu,
   startSaveGame,
 } from './saveGame';
-import { advanceSlicedSave, advanceYears, castCharge, closeAllChronicle, finishSlicedSaveNow, getGameState, requestSlicedSave, setSpeed } from './worldStore';
+import { MapModeId, POLITICAL } from '../map/mapModes';
+import {
+  advanceSlicedSave,
+  advanceYears,
+  castCharge,
+  closeAllChronicle,
+  finishSlicedSaveNow,
+  getGameState,
+  getMapMode,
+  mapMode,
+  requestSlicedSave,
+  setMapMode,
+  setSpeed,
+} from './worldStore';
 
 // The store's clock runs on requestAnimationFrame, which Node lacks: no frames here.
 (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame = () => 0;
@@ -254,3 +267,38 @@ function deserialize(bytes: Uint8Array) {
   assert.ok(opened.ok);
   return opened.sim;
 }
+
+test('the map mode is saved in the app trailer and restored on load; an old save or New World gives Political', async () => {
+  resetSaveGame();
+  const slot = memorySlot();
+  startSaveGame(slot, { timerless: true });
+  closeAllChronicle();
+  setMapMode({ id: MapModeId.Supply, sub: 1 });
+  await autosaveNow();
+  const read = readSaveFile(slot.bytes!);
+  assert.ok(read.ok);
+  assert.equal(read.meta.mapMode, 'supply.water');
+
+  setMapMode(POLITICAL);
+  openMenu();
+  assert.ok(await loadFromMenu());
+  assert.deepEqual(getMapMode(), { id: MapModeId.Supply, sub: 1 }, 'restored with the world');
+  assert.equal(mapMode.bucket.length, getGameState().sim!.world.cellCount, 'buffer filled from the loaded world');
+
+  // A save without the field (older version) or with an unknown mode loads in Political.
+  for (const mode of [undefined, 'weather.rain']) {
+    const tail = asciiBytes(saveTrailer({ ...read.meta, mapMode: mode }));
+    const file = new Uint8Array(read.world.length + tail.length);
+    file.set(read.world);
+    file.set(tail, read.world.length);
+    slot.bytes = file;
+    setMapMode({ id: MapModeId.Population, sub: 0 });
+    openMenu();
+    assert.ok(await loadFromMenu());
+    assert.deepEqual(getMapMode(), POLITICAL, String(mode));
+  }
+
+  setMapMode({ id: MapModeId.Satisfaction, sub: 0 });
+  assert.ok(await newWorldFromMenu(false));
+  assert.deepEqual(getMapMode(), POLITICAL, 'New World starts in Political');
+});

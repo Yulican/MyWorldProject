@@ -43,8 +43,10 @@ import { MapPerfMeter } from './MapPerfMeter';
 import { fillPaint, strokePaint } from './paints';
 import { uiArmySwaps, uiTileDraws } from './uiCounters';
 import { SELECTION_COLOR } from './palette';
+import type { MapModeData } from './mapModes';
 import {
   buildTerritoryOverview,
+  modeDims,
   renderTerritoryTile,
   TERRITORY_TILE_RESOLUTION,
   territoryTileSignature,
@@ -131,6 +133,15 @@ export type TerritorySource = {
   land: {
     subscribe: (listener: () => void) => () => void;
     getVersion: () => number;
+  };
+  /**
+   * The map mode and its per-hex buffer (worldStore.modeStore): notifies on a
+   * switch; with a snapshot `getVersion` changes when the mode's values did.
+   */
+  mode: {
+    subscribe: (listener: () => void) => () => void;
+    getVersion: () => number;
+    data: MapModeData;
   };
   /** Army markers: their own store, as armies move weekly, between snapshots. */
   armies: {
@@ -624,25 +635,42 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
       new TileImages(
         (chunk, px) => {
           countEvent('terrainTiles');
-          return renderTile(world, chunk, layers.chunkCols, px);
+          // The map mode's numbers only from tier 1 (zoom >= 1.15, Requirement Kartenmodi 9).
+          return renderTile(world, chunk, layers.chunkCols, px, territory.mode.data, scales.indexOf(px) >= 1);
         },
-        // Only tiles whose land the god changed are rendered again (see the land subscription below).
-        (chunk) => terrainTileSignature(world, chunk, layers.chunkCols),
+        // Only tiles whose land (or map mode values) changed are rendered again (see the subscriptions below).
+        (chunk) => terrainTileSignature(world, chunk, layers.chunkCols, territory.mode.data),
         scales,
         onReady,
         undefined,
         'terrain',
       ),
-    [world, layers, scales, onReady],
+    [world, layers, scales, onReady, territory],
   );
   const territoryTiles = useMemo(
     () =>
       new TileImages(
         (chunk, px) => {
           countEvent('territoryTiles');
-          return renderTerritoryTile(world, chunk, layers.chunkCols, px, territory.civColor, territory.war);
+          return renderTerritoryTile(
+            world,
+            chunk,
+            layers.chunkCols,
+            px,
+            territory.civColor,
+            territory.war,
+            modeDims(territory.mode.data),
+          );
         },
-        (chunk) => territoryTileSignature(world, chunk, layers.chunkCols, territory.civColor, territory.war),
+        (chunk) =>
+          territoryTileSignature(
+            world,
+            chunk,
+            layers.chunkCols,
+            territory.civColor,
+            territory.war,
+            modeDims(territory.mode.data),
+          ),
         scales.map((s) => s * TERRITORY_TILE_RESOLUTION),
         onReady,
         // Out-of-view tiles are kept through snapshots (see TileImages.invalidate): a smaller budget than the terrain's.
@@ -659,14 +687,22 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
   };
 
   // Zoomed out, territories are one image, rebuilt per snapshot only while shown.
-  const overview = useRef<{ version: number; image: SkImage } | null>(null);
+  const overview = useRef<{ version: number; mode: number; image: SkImage } | null>(null);
+  /** Frees the territory overview once it can no longer be on screen (a full-map image, rebuilt per snapshot or map mode). */
+  const dropOverview = () => {
+    const old = overview.current?.image;
+    overview.current = null;
+    if (old) setTimeout(() => old.dispose(), OVERVIEW_KEEP_MS);
+  };
   const overviewFor = (version: number): SkImage => {
-    if (overview.current?.version !== version) {
+    const mode = territory.mode.getVersion();
+    if (overview.current?.version !== version || overview.current.mode !== mode) {
       const t0 = performance.now();
-      const built = buildTerritoryOverview(world, territory.civColor, layers, territory.war);
+      const built = buildTerritoryOverview(world, territory.civColor, layers, territory.war, territory.mode.data);
       recordMapBuild(performance.now() - t0);
       countEvent('territoryOverviews');
-      overview.current = { version, image: built.overview };
+      dropOverview();
+      overview.current = { version, mode, image: built.overview };
     }
     return overview.current.image;
   };
@@ -786,25 +822,48 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
     publish.current();
   };
 
-  // A new world or tile cache: start over from the current view.
+  // A new world or tile cache: start over from the current view. The old caches' images are freed (dispose above), so the GPU notes start over too.
   useEffect(() => {
-    overview.current = null;
+    dropOverview();
+    uploaded.current = new WeakSet<SkImage>();
     listener.current(current.current);
   }, [terrainTiles, territoryTiles, listener]);
+  useEffect(() => () => dropOverview(), []);
 
-  // New society snapshots: redo the territory tiles that look different.
+  // New society snapshots: redo the territory tiles that look different, and the terrain tiles if the map mode's values changed.
   useEffect(() => {
     let seen = territory.getVersion();
-    return territory.subscribe(() => {
+    let seenMode = territory.mode.getVersion();
+    const unsubscribe = territory.subscribe(() => {
       const version = territory.getVersion();
       if (version === seen) return;
       seen = version;
       const t0 = performance.now();
       territoryTiles.invalidate();
+      const mode = territory.mode.getVersion();
+      if (mode !== seenMode) {
+        seenMode = mode;
+        terrainTiles.invalidate();
+      }
       listener.current(current.current);
       logWork('tile check (snapshot)', t0, performance.now() - t0);
     });
-  }, [territory, territoryTiles, listener]);
+    // A switch of the map mode: both layers redo what looks different, once the map rests (Requirement Kartenmodi 8).
+    const unsubscribeMode = territory.mode.subscribe(() => {
+      const mode = territory.mode.getVersion();
+      if (mode === seenMode) return;
+      seenMode = mode;
+      const t0 = performance.now();
+      terrainTiles.invalidate();
+      territoryTiles.invalidate();
+      listener.current(current.current);
+      logWork('tile check (map mode)', t0, performance.now() - t0);
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeMode();
+    };
+  }, [territory, terrainTiles, territoryTiles, listener]);
 
   // Changes of the land (the god's abilities): redo the terrain tiles that look different, while the map rests.
   useEffect(() => {

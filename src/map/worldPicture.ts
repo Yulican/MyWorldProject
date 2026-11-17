@@ -6,6 +6,7 @@ import {
   type SkCanvas,
   type SkImage,
   type SkPathBuilder,
+  type SkRect,
   type SkSurface,
 } from '@shopify/react-native-skia';
 import {
@@ -22,7 +23,31 @@ import {
 import { createIconLayers, drawBiomeIcon } from './hexIcons';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { BuilderSet, keptBuilder, sharedFillPaint, sharedStrokePaint } from './paints';
-import { BIOME_COLORS, DEPOSIT_COLORS, RIVER_COLOR, START_COLOR } from './palette';
+import {
+  GLYPH_ADVANCE,
+  GLYPHS,
+  MARK_LABEL,
+  MARK_REBEL,
+  MODES,
+  MapModeId,
+  labelText,
+  modeColors,
+  modeSignature,
+  type MapModeData,
+} from './mapModes';
+import {
+  BIOME_COLORS,
+  DEPOSIT_COLORS,
+  MODE_DIM,
+  MODE_DIM_LIGHT,
+  MODE_FILL_ALPHA,
+  MODE_LABEL_COLOR,
+  MODE_LABEL_OUTLINE,
+  MODE_REBEL_COLOR,
+  RIVER_COLOR,
+  START_COLOR,
+  withAlpha,
+} from './palette';
 
 /** Largest overview image side; stays within the texture limit of every phone. */
 const MAX_OVERVIEW_PX = 4096;
@@ -90,9 +115,21 @@ export function buildTerrainOverview(
     drawFeatures(canvas, world, all);
   }, size);
   const image = drawAsImageFromPicture(overviewPicture, size);
+  overviewPicture.dispose();
   if (!image) throw new Error('Could not render the map overview.');
-  // A plain (non-GPU) copy can be drawn by any Skia canvas.
-  return image.makeNonTextureImage() ?? image;
+  return plainCopy(image);
+}
+
+/**
+ * A plain (non-GPU) copy of an image, which any Skia canvas can draw; the
+ * original is freed at once instead of whenever the garbage collector gets
+ * to it (overviews are full-map images, rebuilt per snapshot or map mode).
+ */
+export function plainCopy(image: SkImage): SkImage {
+  const copy = image.makeNonTextureImage();
+  if (!copy || copy === image) return image;
+  image.dispose();
+  return copy;
 }
 
 /**
@@ -101,7 +138,7 @@ export function buildTerrainOverview(
  * image, so after a change of the land only the tiles that look different
  * are rendered again (Requirement Gacha 8).
  */
-export function terrainTileSignature(world: World, chunk: number, chunkCols: number): number {
+export function terrainTileSignature(world: World, chunk: number, chunkCols: number, mode?: MapModeData): number {
   let h = 0x811c9dc5;
   const mix = (v: number) => {
     h = Math.imul(h ^ v, 0x01000193);
@@ -117,6 +154,8 @@ export function terrainTileSignature(world: World, chunk: number, chunkCols: num
       mix(flow <= 0 ? 0 : flow < 2 ? 1 : flow < 5 ? 2 : 3);
       mix(world.deposit[c]);
     }
+    // The map mode's colors and numbers are part of the terrain tile (Requirement Kartenmodi 8).
+    if (mode) h = modeSignature(h, mode, cells);
   }
   return h >>> 0;
 }
@@ -128,14 +167,36 @@ export function terrainTileSignature(world: World, chunk: number, chunkCols: num
  * Hexes of neighboring tiles and map copies are drawn too and clipped; the
  * image covers the tile plus TILE_BLEED on each side.
  */
-export function renderTile(world: World, chunk: number, chunkCols: number, pxPerUnit: number): SkImage | null {
-  return renderTileWith(world, chunk, chunkCols, pxPerUnit, [
+export function renderTile(
+  world: World,
+  chunk: number,
+  chunkCols: number,
+  pxPerUnit: number,
+  mode?: MapModeData,
+  labels = false,
+): SkImage | null {
+  const passes: TilePass[] = [
     (canvas, cells) => drawFills(canvas, world, cells),
     (canvas, cells) => drawFeatures(canvas, world, cells),
     // Icons after all fills, so no hex covers the icons of its neighbor.
     (canvas, cells) => drawIcons(canvas, world, cells),
-  ]);
+  ];
+  if (mode && mode.id !== MapModeId.Political && mode.bucket.length === world.cellCount) {
+    const info = MODES[mode.id];
+    // The whole tile dimmed once (hex by hex would darken the seams), then the mode on top.
+    const dim = info.fill ? MODE_DIM : MODE_DIM_LIGHT;
+    passes.push({
+      whole: (canvas, rect) => canvas.drawRect(rect, sharedFillPaint(dim)),
+    });
+    if (info.fill) passes.push((canvas, cells) => drawModeFills(canvas, world, cells, mode));
+    else passes.push((canvas, cells) => drawModeDots(canvas, world, cells, mode));
+    if (info.labels && labels) passes.push((canvas, cells) => drawModeLabels(canvas, world, cells, mode));
+  }
+  return renderTileWith(world, chunk, chunkCols, pxPerUnit, passes);
 }
+
+/** A pass over a tile's hexes (per map copy), or one drawing over the whole tile rect once. */
+export type TilePass = ((canvas: SkCanvas, cells: Int32Array) => void) | { whole: (canvas: SkCanvas, rect: SkRect) => void };
 
 /**
  * Hexes a tile has to draw, by map copy: those reaching into the tile plus
@@ -173,7 +234,7 @@ export function renderTileWith(
   chunk: number,
   chunkCols: number,
   pxPerUnit: number,
-  passes: ((canvas: SkCanvas, cells: Int32Array) => void)[],
+  passes: TilePass[],
 ): SkImage | null {
   const col = chunk % chunkCols;
   const row = (chunk - col) / chunkCols;
@@ -190,9 +251,14 @@ export function renderTileWith(
   canvas.clear(TRANSPARENT());
   canvas.scale(w / tileW, h / tileH);
   canvas.translate(-x, -y);
-  canvas.clipRect(Skia.XYWHRect(x, y, tileW, tileH), ClipOp.Intersect, true);
+  const rect = Skia.XYWHRect(x, y, tileW, tileH);
+  canvas.clipRect(rect, ClipOp.Intersect, true);
   const segments = tileCells(world, chunk, chunkCols);
   for (const pass of passes) {
+    if (typeof pass !== 'function') {
+      pass.whole(canvas, rect);
+      continue;
+    }
     for (const seg of segments) {
       canvas.save();
       canvas.translate(seg.offsetX, 0);
@@ -374,4 +440,95 @@ function drawIcons(canvas: SkCanvas, world: World, cells: Int32Array) {
   });
   canvas.drawPath(outlines.detach(), sharedStrokePaint('rgba(0,0,0,0.12)', 1));
   for (const layer of layers.values()) canvas.drawPath(layer.path.detach(), layer.paint);
+}
+
+// ---------------------------------------------------------------------------
+// Map modes (Requirement Kartenmodi 3, 9): one path per color bucket, numbers from vector glyphs.
+
+const modePaths = new BuilderSet<number>();
+/** One fill per mode bucket over the dimmed terrain. */
+function drawModeFills(canvas: SkCanvas, world: World, cells: Int32Array, mode: MapModeData) {
+  forEachCenter(world, cells, (c, x, y) => {
+    const b = mode.bucket[c];
+    if (b > 0) addHex(modePaths.get(b), x, y, HEX_PX + 0.5);
+  });
+  const colors = modeColors(mode);
+  modePaths.drawAll((b, path) =>
+    canvas.drawPath(path.detach(), sharedFillPaint(withAlpha(colors[b - 1] ?? '#ffffff', MODE_FILL_ALPHA))),
+  );
+}
+
+const modeRimPath = keptBuilder();
+/** Deposits: a large dot in the category's color where the small one is, over lightly dimmed terrain. */
+function drawModeDots(canvas: SkCanvas, world: World, cells: Int32Array, mode: MapModeData) {
+  const rim = modeRimPath();
+  let any = false;
+  forEachCenter(world, cells, (c, x, y) => {
+    const b = mode.bucket[c];
+    if (b === 0) return;
+    const dx = x + HEX_PX * 0.4;
+    const dy = y + HEX_PX * 0.4;
+    rim.addCircle(dx, dy, HEX_PX * 0.34);
+    modePaths.get(b).addCircle(dx, dy, HEX_PX * 0.27);
+    any = true;
+  });
+  if (any) canvas.drawPath(rim.detach(), sharedFillPaint('#1b1b1b'));
+  else rim.detach();
+  const colors = modeColors(mode);
+  modePaths.drawAll((b, path) => canvas.drawPath(path.detach(), sharedFillPaint(colors[b - 1] ?? '#ffffff')));
+}
+
+/** Glyph box height in picture pixels (readable at zoom 2), width, and where the number sits below the hex center. */
+const GLYPH_H = HEX_PX * 0.36;
+const GLYPH_W = GLYPH_H * 0.6;
+const LABEL_Y = HEX_PX * 0.5;
+const labelPath = keptBuilder();
+const rebelPath = keptBuilder();
+/** The numbers on settlement hexes: one path for all glyphs (a dark outline under a white stroke), red frames for "may rebel". */
+function drawModeLabels(canvas: SkCanvas, world: World, cells: Int32Array, mode: MapModeData) {
+  const glyphs = labelPath();
+  const frames = rebelPath();
+  let count = 0;
+  let rebels = 0;
+  forEachCenter(world, cells, (c, x, y) => {
+    const m = mode.mark[c];
+    if (!(m & MARK_LABEL)) return;
+    const text = labelText(mode.label[c]);
+    const width = GLYPH_W * (text.length * GLYPH_ADVANCE - (GLYPH_ADVANCE - 1));
+    const x0 = x - width / 2;
+    const y0 = y + LABEL_Y - GLYPH_H / 2;
+    for (let i = 0; i < text.length; i++) {
+      const strokes = GLYPHS[text[i]];
+      if (!strokes) continue;
+      const gx = x0 + i * GLYPH_W * GLYPH_ADVANCE;
+      for (const line of strokes) {
+        glyphs.moveTo(gx + line[0] * GLYPH_W, y0 + line[1] * GLYPH_H);
+        for (let k = 2; k < line.length; k += 2) glyphs.lineTo(gx + line[k] * GLYPH_W, y0 + line[k + 1] * GLYPH_H);
+      }
+    }
+    count++;
+    if (m & MARK_REBEL) {
+      const pad = GLYPH_H * 0.35;
+      frames.addRect(Skia.XYWHRect(x0 - pad, y0 - pad, width + 2 * pad, GLYPH_H + 2 * pad));
+      rebels++;
+    }
+  });
+  if (count === 0) {
+    glyphs.detach();
+    frames.detach();
+    return;
+  }
+  if (rebels > 0) canvas.drawPath(frames.detach(), sharedStrokePaint(MODE_REBEL_COLOR, GLYPH_H * 0.2));
+  else frames.detach();
+  const path = glyphs.detach();
+  canvas.drawPath(path, sharedStrokePaint(MODE_LABEL_OUTLINE, GLYPH_H * 0.36));
+  canvas.drawPath(path, sharedStrokePaint(MODE_LABEL_COLOR, GLYPH_H * 0.17));
+}
+
+/** The mode's dimming and colors over the whole map (the zoomed-out territory overview; no numbers). */
+export function drawModeOverview(canvas: SkCanvas, world: World, all: Int32Array, mode: MapModeData, rect: SkRect) {
+  const info = MODES[mode.id];
+  canvas.drawRect(rect, sharedFillPaint(info.fill ? MODE_DIM : MODE_DIM_LIGHT));
+  if (info.fill) drawModeFills(canvas, world, all, mode);
+  else drawModeDots(canvas, world, all, mode);
 }

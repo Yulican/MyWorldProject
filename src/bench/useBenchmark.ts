@@ -4,11 +4,13 @@ import { randomSeed } from '../sim';
 import { gcTotals, logWork, perfEvents, setWorkLogging, workBetween } from '../state/perfStats';
 import { setSaveBenchmark } from '../state/saveGame';
 import { benchSlot } from '../state/saveSlot';
-import { advanceYears, createNewWorld, setBenchTick, setChronicleDialogs, setExtraArmies } from '../state/worldStore';
+import { POLITICAL } from '../map/mapModes';
+import { advanceYears, createNewWorld, setBenchTick, setChronicleDialogs, setExtraArmies, setMapMode } from '../state/worldStore';
 import { armyDecoys } from './armyDecoys';
 import { startBenchSaves, type BenchSaves } from './benchSaves';
 import { castGacha, gachaDuringSwipes } from './castGacha';
 import { fillWithBuildings } from './fillBuildings';
+import { MODE_SWITCH_EVERY, modeForSwipe } from './modeCycle';
 import { openTrade } from './openTrade';
 import { declareWarsEverywhere } from './declareWars';
 import { empowerGovernment } from './empowerGovernment';
@@ -89,6 +91,8 @@ export function useBenchmark(controller: { current: MapController | null }) {
       await delay(WORLD_SETTLE_MS);
       let map = controller.current;
       if (!map) throw new Error('Benchmark: the map is not ready.');
+      // The modes scenario starts in its first mode (a new world is in Political), before zooming in.
+      if (setup.modes) setMapMode(modeForSwipe(0));
       map.zoomToCenter(BENCHMARK.zoom);
       await delay(ZOOM_SETTLE_MS);
       await map.swipe(plan[0]);
@@ -109,6 +113,8 @@ export function useBenchmark(controller: { current: MapController | null }) {
           await delay(ZOOM_SETTLE_MS);
           await map.swipe(plan[0]);
         }
+        // The modes scenario: the next mode between two swipes; its tiles are redrawn while the map rests.
+        if (setup.modes && i > 0 && i % MODE_SWITCH_EVERY === 0) setMapMode(modeForSwipe(i));
         await delay(PAUSE_MS);
         const before = { ...perfEvents, ...gcStats() };
         const swipeStart = performance.now();
@@ -144,6 +150,7 @@ export function useBenchmark(controller: { current: MapController | null }) {
     setStatus({ running: false, summary });
     setExtraArmies(null);
     setBenchTick(null);
+    setMapMode(POLITICAL);
     setChronicleDialogs(true);
     setSaveBenchmark(false);
     running.current = false;
