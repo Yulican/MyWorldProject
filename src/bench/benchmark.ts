@@ -146,7 +146,7 @@ export type SwipeResult = {
 
 export function evaluateSwipe(stats: SwipeStats): { fps: number; worstMs: number; pass: boolean } {
   const fps = stats.timeMs > 0 ? (stats.frames * 1000) / stats.timeMs : 0;
-  // Rounded like the on-screen meter: a 60 Hz display reports 59.9 fps for a perfect swipe.
+  // Rounded to whole fps: a 60 Hz display reports 59.9 fps for a perfect swipe.
   const pass = Math.round(fps) >= BENCHMARK.minFps && stats.worstMs <= BENCHMARK.maxWorstMs;
   return { fps, worstMs: stats.worstMs, pass };
 }

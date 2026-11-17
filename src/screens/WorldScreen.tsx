@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { scenarioFromUrl } from '../bench/benchmark';
-import { useBenchmark, type BenchmarkStatus } from '../bench/useBenchmark';
+import { useBenchmark } from '../bench/useBenchmark';
 import { CastBar, invalidText, targetName, type CastState } from '../components/CastBar';
 import { ChronicleDialog } from '../components/ChronicleDialog';
 import { GachaPanel, formatFaith } from '../components/GachaPanel';
@@ -68,8 +68,6 @@ import {
 import { fileSlot } from '../state/saveSlot';
 import { colors, spacing } from '../theme';
 
-// Set by the CI build (branch · commit) so testers can see which build is installed.
-const buildLabel = process.env.EXPO_PUBLIC_BUILD_LABEL ?? 'local dev build';
 // CI opens the app with this link to start the benchmark (scripts/run-benchmark.sh).
 const BENCHMARK_URL = 'myworld://benchmark';
 
@@ -204,6 +202,9 @@ export function WorldScreen() {
     [sim],
   );
 
+  /** The people living in a hex, for the hex panel's last trade partner. */
+  const civNameAt = useCallback((cell: number) => (sim ? (sim.civs[sim.world.owner[cell]]?.name ?? null) : null), [sim]);
+
   const selectedCell = panel.kind === 'hex' ? panel.cell : -1;
   // Tapping the selected hex again (or off the map) closes the info bar; while casting, a tap chooses the target.
   const casting = cast !== null;
@@ -275,21 +276,6 @@ export function WorldScreen() {
           </Text>
         </Pressable>
         <Pressable
-          style={({ pressed }) => [styles.button, styles.benchButton, pressed && styles.buttonPressed]}
-          disabled={benchmarkRunning || modal}
-          onPress={() => {
-            setPanel({ kind: 'none' });
-            runBenchmark('young');
-          }}
-          // A long press runs the aged-worlds scenario (300 simulated years first).
-          onLongPress={() => {
-            setPanel({ kind: 'none' });
-            runBenchmark('aged');
-          }}
-        >
-          <Text style={styles.buttonText}>Bench</Text>
-        </Pressable>
-        <Pressable
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
           disabled={benchmarkRunning || !sim || modal}
           onPress={showMenu}
@@ -311,12 +297,12 @@ export function WorldScreen() {
         )}
         {/* The active map mode's name and legend, with a quick way back to Political (Requirement Kartenmodi 2). */}
         {sim && <MapModeBar mode={mapMode} onMode={setMapMode} />}
-        {benchmark.status && <BenchmarkBanner status={benchmark.status} />}
         {sim && panel.kind === 'hex' && (
           <HexInfoPanel
             world={sim.world}
             cell={panel.cell}
             civName={sim.civs[sim.world.owner[panel.cell]]?.name ?? null}
+            civNameAt={civNameAt}
             supply={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexSupplyTerms(sim, panel.cell)}
             economy={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexEconomy(sim, panel.cell)}
             satisfaction={hexSatisfaction(sim, panel.cell)}
@@ -433,35 +419,7 @@ export function WorldScreen() {
           </Pressable>
         </View>
       </View>
-
-      <Text style={styles.build}>
-        {world ? `Seed ${world.seed} · ${world.shape} · ` : ''}
-        {buildLabel}
-      </Text>
     </SafeAreaView>
-  );
-}
-
-function BenchmarkBanner({ status }: { status: BenchmarkStatus }) {
-  if (status.running) {
-    return (
-      <View style={styles.bench} pointerEvents="none">
-        <Text style={styles.benchText}>
-          Benchmark ({status.scenario}) · world {status.world + 1}/5 · swipe {status.swipe}/80 · failed {status.failed}
-        </Text>
-      </View>
-    );
-  }
-  const s = status.summary;
-  return (
-    <View style={[styles.bench, s.pass ? styles.benchPass : styles.benchFail]} pointerEvents="none">
-      <Text style={styles.benchText}>
-        Benchmark{s.scenario ? ` (${s.scenario})` : ''} {s.pass ? 'PASSED' : 'FAILED'} · {s.failed}/{s.swipes} swipes failed
-      </Text>
-      <Text style={styles.benchText}>
-        fps min {s.minFps.toFixed(0)} · median {s.medianFps.toFixed(0)} · worst frame {s.worstMs.toFixed(0)} ms
-      </Text>
-    </View>
   );
 }
 
@@ -482,7 +440,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
-  benchButton: { marginRight: spacing.sm, backgroundColor: colors.panelMuted },
   gacha: {
     marginRight: spacing.sm,
     borderRadius: 10,
@@ -508,19 +465,6 @@ const styles = StyleSheet.create({
   },
   noticeText: { color: colors.panelText, fontSize: 13, textAlign: 'center' },
   buttonPressed: { opacity: 0.7 },
-  bench: {
-    position: 'absolute',
-    left: 4,
-    right: 4,
-    bottom: 4,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  benchPass: { backgroundColor: 'rgba(30,110,50,0.9)' },
-  benchFail: { backgroundColor: 'rgba(140,30,30,0.9)' },
-  benchText: { color: '#ffffff', fontSize: 12, fontVariant: ['tabular-nums'] },
   buttonText: { color: colors.panel, fontWeight: '700', fontSize: 14 },
   mapArea: { flex: 1 },
   bottomBar: {
@@ -553,7 +497,6 @@ const styles = StyleSheet.create({
   },
   gameOverTitle: { color: colors.panelText, fontSize: 20, fontWeight: '700', textAlign: 'center' },
   gameOverText: { color: colors.panelMuted, fontSize: 14, textAlign: 'center', marginBottom: spacing.sm },
-  build: { color: colors.panelMuted, fontSize: 10, textAlign: 'center', paddingVertical: 2 },
   tapToContinue: {
     position: 'absolute',
     top: 0,

@@ -30,16 +30,14 @@ import {
   useSharedValue,
   withDecay,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 import type { Swipe, SwipeStats } from '../bench/benchmark';
 import { cellAtPoint, hexCenterX, hexCenterY, type World } from '../sim';
-import { countEvent, logWork, recordMapBuild } from '../state/perfStats';
+import { countEvent, logWork } from '../state/perfStats';
 import { setMapMoving } from '../state/worldStore';
 import { CHUNK_H, CHUNK_W, HEX_PX } from './mapGeometry';
 import { ArmySprites, buildArmyPicture, type ArmyMarkers } from './armyLayer';
-import { MapPerfMeter } from './MapPerfMeter';
 import { fillPaint, strokePaint } from './paints';
 import { uiArmySwaps, uiTileDraws } from './uiCounters';
 import { SELECTION_COLOR } from './palette';
@@ -580,7 +578,6 @@ export const WorldMap = memo(function WorldMap({ world, selectedCell, highlight,
           </Group>
         </Canvas>
       </GestureDetector>
-      <MapPerfMeter tx={tx} ty={ty} scale={scale} mapWidth={mapWidth} />
     </View>
   );
 });
@@ -697,9 +694,7 @@ const TileLayer = memo(function TileLayer({ world, layers, listener, restListene
   const overviewFor = (version: number): SkImage => {
     const mode = territory.mode.getVersion();
     if (overview.current?.version !== version || overview.current.mode !== mode) {
-      const t0 = performance.now();
       const built = buildTerritoryOverview(world, territory.civColor, layers, territory.war, territory.mode.data);
-      recordMapBuild(performance.now() - t0);
       countEvent('territoryOverviews');
       dropOverview();
       overview.current = { version, mode, image: built.overview };

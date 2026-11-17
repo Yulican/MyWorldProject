@@ -581,7 +581,6 @@ function runFrame(now: number) {
   pendingTicks += ticksPerSecond * seconds;
   const start = performance.now();
   const budget = Math.max(FRAME_BUDGET_MS[speed], FRAME_BUDGET_MS[1]);
-  let ticks = 0;
   let parts = 0;
   const entries = sim.chronicle.length;
   for (;;) {
@@ -607,7 +606,6 @@ function runFrame(now: number) {
     partTypeMs[part] = Math.max(ms, partTypeMs[part] * 0.99);
     parts++;
     if (done) {
-      ticks++;
       if (benchTick) {
         const h0 = performance.now();
         benchTick(sim);
@@ -615,7 +613,7 @@ function runFrame(now: number) {
       }
     }
   }
-  recordSimWork(performance.now() - start, ticks);
+  recordSimWork(performance.now() - start);
   // Drop what didn't fit instead of piling up a backlog (but keep what waited for the map to rest).
   pendingTicks = Math.min(pendingTicks, heldSince > 0 ? 2 + (ticksPerSecond * HOLD_MS) / 1000 : 2);
 
