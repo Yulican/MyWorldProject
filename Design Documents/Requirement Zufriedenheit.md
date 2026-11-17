@@ -17,8 +17,7 @@ Gebäude-Feature umgesetzt.
 
 - Pro bewohntem Hex gibt es einen Wert von −100 bis +100.
 - Der **Zielwert** ist die Summe benannter Teilwerte (Begriffssystem, wie bei
-  Nahrung, Wasser und Platz). Die Hexfeld-Info zeigt nur das Ergebnis
-  (Zufriedenheit und Zielwert), keine Teilwerte (UI-Aufräumen, entschieden).
+  Nahrung, Wasser und Platz). Die Hexfeld-Info zeigt jeden Teilwert einzeln.
 - Der **tatsächliche Wert** folgt dem Zielwert träge: um 25 % des Abstands
   pro Jahr. Er wird vierteljährlich berechnet, also um etwa 6,9 % pro
   Quartal.
@@ -202,9 +201,8 @@ vorerst immer auf; später entscheidet die Außenpolitik.
 
 ## 6. Anzeige
 
-- Hexfeld-Info: die Zufriedenheit und ihr Zielwert (ohne Aufschlüsselung in
-  Teilwerte), die Jahre im Minus, die Luxusgüter im Vorrat und die
-  Komfortgebäude.
+- Hexfeld-Info: die Zufriedenheit mit allen Teilwerten, die Jahre im Minus,
+  die Luxusgüter im Vorrat und die Komfortgebäude.
 - Völker-Panel: die durchschnittliche Zufriedenheit pro Volk.
 - Keine Anzeige auf der Karte. Ein eigener Kartenmodus ist später denkbar,
   gehört aber nicht zu diesem Feature.

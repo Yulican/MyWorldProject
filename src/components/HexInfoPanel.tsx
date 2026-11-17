@@ -16,6 +16,7 @@ import {
   armySoldiers,
   elevationMeters,
   hasFreshWater,
+  resourceCapacityTerms,
   sumTerms,
   type GodEffect,
   type HexEconomy,
@@ -139,12 +140,14 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
 
           <Text style={styles.section}>Resources</Text>
           {RESOURCE_NAMES.map((name, r) => (
-            <Bar
-              key={name}
-              label={name}
-              value={world.resources[cell * RESOURCE_COUNT + r]}
-              capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
-            />
+            <View key={name}>
+              <Bar
+                label={name}
+                value={world.resources[cell * RESOURCE_COUNT + r]}
+                capacity={world.resourceCapacity[cell * RESOURCE_COUNT + r]}
+              />
+              <Text style={styles.terms}>{formatTerms(resourceCapacityTerms(world, cell, r))}</Text>
+            </View>
           ))}
 
           {supply && totals && (
@@ -153,10 +156,16 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
                 Supports {supports} people · scarcest: {scarcest}
               </Text>
               {SUPPLY_NAMES.map((name, k) => (
-                <Row key={name} label={name} value={`${Math.floor(totals[k])} people`} />
+                <View key={name}>
+                  <Row label={name} value={`${Math.floor(totals[k])} people`} />
+                  {supply[k].map((t, i) => (
+                    <TermRow key={i} term={t} digits={0} />
+                  ))}
+                </View>
               ))}
               <Text style={styles.note}>
-                Each person needs one unit of food, water and space.
+                Each person needs one unit of food, water and space. Buildings and other modifiers appear as extra
+                lines; percentages apply after the rest and multiply.
               </Text>
             </>
           )}
@@ -166,6 +175,9 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
               <Text style={styles.section}>
                 Satisfaction {signed(satisfaction.value, 0)} · heading for {signed(satisfaction.target, 0)}
               </Text>
+              {satisfaction.terms.map((t, i) => (
+                <TermRow key={i} term={t} digits={1} />
+              ))}
               {(satisfaction.unhappyYears > 0 || satisfaction.restless) && (
                 <Row
                   label="Unhappy"
@@ -181,8 +193,8 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
                 <Row key={g.name} label={g.name} value={`${Math.floor(g.stock)} in stock${g.covered ? ' · enough for everyone' : ''}`} />
               ))}
               <Text style={styles.note}>
-                Satisfaction moves a quarter of the way to its target each year. Your Grateful Hearts and Restless
-                Spirits on the people move it by at most ±15. Satisfied settlements have more
+                Satisfaction moves a quarter of the way to its target each year. “Divine” is your doing: Grateful
+                Hearts and Restless Spirits on the people (at most ±15). Satisfied settlements have more
                 children and harvest more; unhappy ones send people away. A realm’s settlements below zero (not
                 the capital) rise together once their soldiers and militia outweigh the realm, and fight a war for
                 their independence.
@@ -199,7 +211,7 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
               {economy.buildings.map((b, i) => (
                 <View key={i}>
                   <Row label={b.name} value={`${buildingState(b.state, b.workLeft)} · ${b.effect}`} />
-                  <Text style={styles.subLine}>
+                  <Text style={styles.terms}>
                     Upkeep {b.upkeep} a year
                     {b.unpaidYears > 0 ? ` · unpaid for ${b.unpaidYears} year${b.unpaidYears > 1 ? 's' : ''}` : ''}
                   </Text>
@@ -223,7 +235,7 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
                   {economy.government.buildings.map((b, i) => (
                     <View key={i}>
                       <Row label={b.name} value={`${buildingState(b.state, b.workLeft)} · ${b.effect}`} />
-                      <Text style={styles.subLine}>
+                      <Text style={styles.terms}>
                         Upkeep {b.upkeep} a year
                         {b.unpaidYears > 0 ? ` · unpaid for ${b.unpaidYears} year${b.unpaidYears > 1 ? 's' : ''}` : ''}
                       </Text>
@@ -237,7 +249,13 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
 
               <Text style={styles.section}>Stock</Text>
               <Row label="Wood" value={`${Math.floor(economy.wood)} · ${yearly(sumTerms(economy.harvest.wood), economy.upkeepWood)}`} />
+              {economy.harvest.wood.map((t, i) => (
+                <TermRow key={i} term={t} digits={1} />
+              ))}
               <Row label="Stone" value={`${Math.floor(economy.stone)} · ${yearly(sumTerms(economy.harvest.stone), economy.upkeepStone)}`} />
+              {economy.harvest.stone.map((t, i) => (
+                <TermRow key={i} term={t} digits={1} />
+              ))}
               <Row label="Money" value={`${Math.floor(economy.trade.money)} · +${economy.trade.income.toFixed(1)} a year`} />
               {strategic?.map((g) => (
                 <Row key={g.name} label={g.name} value={`${Math.floor(g.stock)} · for soldiers`} />
@@ -319,6 +337,22 @@ function Row({ label, value }: { label: string; value: string }) {
       <Text style={styles.value}>{value}</Text>
     </View>
   );
+}
+
+/** One line of a calculation: what it is and how much it adds. */
+function TermRow({ term, digits }: { term: Term; digits: number }) {
+  return (
+    <View style={styles.termRow}>
+      <Text style={styles.termLabel}>{term.label}</Text>
+      <Text style={styles.termValue}>{signed(term.value, digits)}</Text>
+    </View>
+  );
+}
+
+/** A resource's calculation on one line, e.g. "Plains 0.80 · Terrain ×1.05 +0.04 · River +0.17 = 1.01". */
+function formatTerms(terms: readonly Term[]): string {
+  const parts = terms.map((t, i) => (i === 0 ? `${t.label} ${t.value.toFixed(2)}` : `${t.label} ${signed(t.value, 2)}`));
+  return `${parts.join(' · ')} = ${sumTerms(terms).toFixed(2)}`;
 }
 
 const signed = (v: number, digits: number) => {
@@ -420,7 +454,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
   label: { color: colors.panelMuted, fontSize: 14, width: 110 },
   value: { color: colors.panelText, fontSize: 14, flex: 1 },
-  subLine: { color: colors.panelMuted, fontSize: 11, paddingLeft: 110, marginTop: -1, marginBottom: 3 },
+  termRow: { flexDirection: 'row', paddingLeft: spacing.md, paddingVertical: 1 },
+  termLabel: { color: colors.panelMuted, fontSize: 12, flex: 1 },
+  termValue: { color: colors.panelMuted, fontSize: 12, fontVariant: ['tabular-nums'] },
+  terms: { color: colors.panelMuted, fontSize: 11, paddingLeft: 110, marginTop: -1, marginBottom: 3 },
   note: { color: colors.panelMuted, fontSize: 11, marginTop: spacing.xs, fontStyle: 'italic' },
   barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.barTrack, overflow: 'hidden' },
   barCapacity: { position: 'absolute', top: 0, bottom: 0, left: 0, backgroundColor: colors.barCapacity },

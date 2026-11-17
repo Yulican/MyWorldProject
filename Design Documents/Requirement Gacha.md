@@ -171,7 +171,7 @@ Alle Dauer-Effekte (Fertile Blessing, Drought, Völker-Fähigkeiten) laufen übe
 
 ### 7.6 Teilwert „Divine“ der Zufriedenheit
 
-Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.md`, neben „Leader“; die Hexfeld-Info zeigt nur die Summe): Summe der laufenden Gott-Wirkungen (Grateful Hearts +3, Restless Spirits −3) des Volks, eigene Grenze ±15 (vorläufig), unabhängig vom ±8-Deckel des Anführers. Wirkt auf den Zielwert; der Istwert folgt träge (25 % des Abstands je Jahr). Restless Spirits lange auf einem Volk kann Aufstände auslösen (bestehende Regeln).
+Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.md`, neben „Leader“ in der Hexfeld-Info): Summe der laufenden Gott-Wirkungen (Grateful Hearts +3, Restless Spirits −3) des Volks, eigene Grenze ±15 (vorläufig), unabhängig vom ±8-Deckel des Anführers. Wirkt auf den Zielwert; der Istwert folgt träge (25 % des Abstands je Jahr). Restless Spirits lange auf einem Volk kann Aufstände auslösen (bestehende Regeln).
 
 ### 7.7 Andacht und Prophet's Light/Doubt
 
