@@ -1,6 +1,6 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
-Stand: Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
+Stand: Abschnitt 12 (dynamische Biome, Ressourcen wachsen nach: Entwurf, alle Regeln entschieden, Zahlen Startwerte) neu, Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
 (Ablauf: Design → Simulation → Umsetzung), Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
@@ -344,3 +344,11 @@ Regel (1–2 Gebäude = kleine, ab 3 = große Stadt), die auf 4 Plätze ausgeleg
   mit).
 
 Stand der Zahlen: Startwerte (50 % und 80 %), vom Nutzer gewählt.
+
+## 12. Dynamische Biome und nachwachsende Ressourcen
+
+Neu, Details in `Requirement Dynamische Biome.md` (Zahlen Startwerte bis zur Simulation):
+
+- **Biome sind veränderlich** (Rückkehr zum Klimax, Nachbardruck, Einflüsse der Völker). Wechselt das Biom eines Hexfelds, folgt die **Kapazität** (`resourceCapacity`) dem neuen Biom (Tabelle in Abschnitt 3, × `terrainVariation`); `danger` und `moveCost` ebenfalls. Das gilt auch für Siedlungs-Hexfelder (halbe Wechselchance, Abwanderung über die bestehenden Regeln der Versorgung).
+- **Ressourcen wachsen nach** (Startwert 2 % der Lücke zur Kapazität je Jahr): ersetzt die Aussage, Ressourcenverluste (Exhausted Soil, Wild Fire, Biome Shift) seien dauerhaft. Entschieden: Fruchtbarkeit, Wild, Fisch, Holz wachsen nach, Stein und Erz nicht; einheitliche Rate; keine Sperre bei Ernte (die Ernte verbraucht den Bestand heute nicht).
+- **Bauplätze** (Abschnitt 6, 11): Die nutzbaren Plätze hängen vom Biom ab (6 auf der Ebene, 4 sonst); ein Wechsel von oder zu Plains ändert sie. Sie liegen wie bisher **nie unter den belegten** Plätzen (`Requirement Gacha.md` §7.5); die Stadtstufe folgt dem Anteil. Biomgebundene Gebäude (Holzfällerlager, Sägewerk, Steinbruch, Steinmetz; Abschnitt 3) auf einem Hexfeld, das nicht mehr passt, werden Ruinen (entschieden, `Requirement Dynamische Biome.md` §7).
