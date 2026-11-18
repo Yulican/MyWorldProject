@@ -1,9 +1,5 @@
-// Performance counters for the on-screen FPS meter. Plain mutable numbers,
-// written from hot paths without triggering React; the meter polls them.
-
-let simMs = 0;
-let ticks = 0;
-let lastMapBuildMs = 0;
+// Performance counters for the benchmark. Plain mutable numbers, written
+// from hot paths without triggering React.
 
 /**
  * Running totals of work that might cost frames, for the benchmark to report
@@ -23,8 +19,6 @@ export const perfEvents = {
   terrainOverviews: 0,
   /** Army marker pictures recorded (an army moved, appeared or is gone). */
   armyPictures: 0,
-  /** Text updates of the on-screen performance meter. */
-  meterUpdates: 0,
   /** Frames that did a slice of a sliced save (autosave; the game clock stands still in them), and saves finished. */
   saveSlices: 0,
   saves: 0,
@@ -36,23 +30,8 @@ export function countEvent(event: Exclude<keyof PerfEvents, 'simMs'>) {
 }
 
 /** Called by the game clock after each frame's simulation work. */
-export function recordSimWork(ms: number, tickCount: number) {
-  simMs += ms;
-  ticks += tickCount;
+export function recordSimWork(ms: number) {
   perfEvents.simMs += ms;
-}
-
-/** Called after the territory map layers were rebuilt. */
-export function recordMapBuild(ms: number) {
-  lastMapBuildMs = ms;
-}
-
-/** Simulation time and ticks since the last call, plus the latest map rebuild time. */
-export function takePerfSample(): { simMs: number; ticks: number; mapBuildMs: number } {
-  const sample = { simMs, ticks, mapBuildMs: lastMapBuildMs };
-  simMs = 0;
-  ticks = 0;
-  return sample;
 }
 
 // ---------------------------------------------------------------------------

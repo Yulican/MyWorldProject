@@ -140,7 +140,7 @@ export function WarPanel({ sim, onClose }: Props) {
           sends {Math.round(WAR.sendShare * 100)} % of its soldiers in up to {WAR.maxArmies} armies; they march to the
           goal seat and fight whoever they meet. A seat besieged for {WAR.occupyWeeks / TICKS_PER_YEAR} years whose
           settlement is unhappy is occupied. Only then may the defender give up, when it has less than{' '}
-          {Math.round(BATTLE.giveUp * 100)} % of the attacker's strength; the goal's district changes hands. After {WAR.exhaustYears} years without success the war ends, followed by a truce of {WAR.truceYears} years. Allies join a war only when it starts, each with one army. Tap
+          {Math.round(BATTLE.giveUp * 100)} % of the attacker’s strength; the goal’s district changes hands. After {WAR.exhaustYears} years without success the war ends, followed by a truce of {WAR.truceYears} years. Allies join a war only when it starts, each with one army. Tap
           a people for the parts of its danger.
         </Text>
       </ScrollView>

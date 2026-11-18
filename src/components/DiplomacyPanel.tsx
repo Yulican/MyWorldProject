@@ -53,7 +53,7 @@ export function DiplomacyPanel({ sim, onClose }: Props) {
           <RelationRow key={r.other} sim={sim} relation={r} expanded={open === r.other} onPress={() => setOpen(open === r.other ? -1 : r.other)} />
         ))}
         <Text style={styles.note}>
-          Trust grows between peaceful neighbors; danger comes from the other's military strength against ours
+          Trust grows between peaceful neighbors; danger comes from the other’s military strength against ours
           and how near they are. Borders open at trust 50 and danger up to 40; open borders let
           settlers and merchants pass for a toll. Peoples that trust each other {ALLY.pactTrust} and both fear the same
           third people sign a defense pact; at trust {ALLY.allianceTrust} they form an alliance. Allies may join a

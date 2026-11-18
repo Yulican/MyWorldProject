@@ -35,6 +35,8 @@ type Props = {
   cell: number;
   /** Name of the civilization living in the hex, if any. */
   civName?: string | null;
+  /** Name of the civilization living in another hex (the last trade partner), if any. */
+  civNameAt?: (cell: number) => string | null;
   /**
    * How the hex's food, water and space (in people, see SUPPLY_NAMES) are
    * calculated; null for water.
@@ -59,7 +61,7 @@ type Props = {
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, supply, economy, satisfaction, military, strategic, war, god, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy, satisfaction, military, strategic, war, god, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -79,6 +81,9 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
   const scarcest = totals ? SUPPLY_NAMES[totals.indexOf(Math.min(...totals))] : null;
   let roads = 0;
   for (let d = 0; d < 6; d++) if (world.roads[cell] & (1 << d)) roads++;
+  const partner = economy ? economy.trade.partner : -1;
+  const partnerPeople = partner >= 0 && civNameAt ? civNameAt(partner) : null;
+  const partnerName = partnerPeople ? `${partnerPeople} ${settlementName(world.cityTier[partner]).toLowerCase()}` : null;
   const ruins = economy ? economy.buildings.filter((b) => b.state === 'ruin' || b.state === 'repair').length : 0;
   const highlights = [
     civName ? `${civName} · ${people}/${supports} people · ${percent(world.faith[cell])} faith` : null,
@@ -126,7 +131,7 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
           {deposit && <Row label="Deposit" value={`${deposit.name} (${deposit.category})`} />}
           {god && god.length > 0 && (
             <>
-              <Text style={styles.section}>The god's effects</Text>
+              <Text style={styles.section}>The god’s effects</Text>
               {god.map((e, i) => (
                 <Row key={i} label={e.name} value={e.yearsLeft > 0 ? `${e.yearsLeft} year${e.yearsLeft > 1 ? 's' : ''} left` : 'burning now'} />
               ))}
@@ -190,7 +195,7 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
               <Text style={styles.note}>
                 Satisfaction moves a quarter of the way to its target each year. “Divine” is your doing: Grateful
                 Hearts and Restless Spirits on the people (at most ±15). Satisfied settlements have more
-                children and harvest more; unhappy ones send people away. A realm's settlements below zero (not
+                children and harvest more; unhappy ones send people away. A realm’s settlements below zero (not
                 the capital) rise together once their soldiers and militia outweigh the realm, and fight a war for
                 their independence.
               </Text>
@@ -274,9 +279,7 @@ export function HexInfoPanel({ world, cell, civName, supply, economy, satisfacti
                         : 'None (needs a trade center or harbor)'
                     }
                   />
-                  {economy.trade.partner >= 0 && (
-                    <Row label="Last partner" value={`Hex ${economy.trade.partner % world.width}, ${Math.floor(economy.trade.partner / world.width)}`} />
-                  )}
+                  {partnerName && <Row label="Last partner" value={partnerName} />}
                   <Row label="Asks for" value={goodsList(economy.trade.asks)} />
                   <Row label="Can spare" value={goodsList(economy.trade.spares)} />
                   <Text style={styles.note}>
