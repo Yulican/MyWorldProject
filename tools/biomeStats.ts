@@ -5,6 +5,7 @@
 //   biomes=0|1   natural/civilization biome transitions (default 1)
 //   regrow=0|1   resources regrow to capacity (default 1); biomes=0 regrow=0 is the current state (baseline)
 //   any PARAMS name, e.g. pReturn=0.04 pNeighbor=0.01 wetFactor=2 pDefor=0.03 ruinFactor=3 settleFactor=0.5
+//   hold=10 (years without return/neighbor change after a change) desertOwn=1 (Desert next to water allowed where generated)
 //   regrowRate=0.02 checkEvery=10 (rotation: 1/checkEvery of the land hexes per year)
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type Simulation } from '../src/sim';
 import { Biome, BIOMES, BIOME_COUNT, Resource, RESOURCE_COUNT } from '../src/sim/world/biomes';
@@ -39,6 +40,10 @@ export const PARAMS = {
   settleFactor: 0.5,
   /** Per year: share of the gap to the capacity (Fertility, Game, Fish, Wood). */
   regrowRate: 0.02,
+  /** Years after a change without return/neighbor change at that hex (0 = off). */
+  hold: 0,
+  /** 0: no Desert next to sea/lake anywhere; 1: only for hexes that were not Desert at generation. */
+  desertOwn: 0,
 };
 for (const [k, v] of Object.entries(options)) if (k in PARAMS) (PARAMS as Record<string, number>)[k] = Number(v);
 
@@ -84,6 +89,7 @@ type Hook = {
   initial: Uint8Array;
   prev: Int16Array;
   prevAt: Int32Array;
+  lastAt: Int32Array;
   moves: Uint16Array;
   count: Counters;
 };
@@ -135,7 +141,8 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
   let n = 0;
   const add = (to: number, p: number, kind: number) => {
     if (to < 0 || p <= 0) return;
-    if (to === Biome.Desert && nearStillWater(sim, c)) return;
+    if (to === Biome.Desert && nearStillWater(sim, c) && !(P.desertOwn && h.initial[c] === Biome.Desert)) return;
+    if (kind !== 2 && P.hold > 0 && sim.tick - h.lastAt[c] < P.hold * TICKS_PER_YEAR) return;
     const wetter = CHAIN_RANK[cur] >= 0 && CHAIN_RANK[to] > CHAIN_RANK[cur];
     if (wetter && (water || (irrigated && (cur === Biome.Desert || cur === Biome.Savanna) && CHAIN_RANK[to] <= CHAIN_RANK[Biome.Plains]))) p *= P.wetFactor;
     cand[n] = p * factor;
@@ -184,6 +191,7 @@ function change(sim: Simulation, h: Hook, c: number, to: number, kind: number, s
   if (h.prev[c] === to && sim.tick - h.prevAt[c] < 50 * TICKS_PER_YEAR) k.reversals++;
   h.prev[c] = from;
   h.prevAt[c] = sim.tick;
+  h.lastAt[c] = sim.tick;
   h.moves[c]++;
   // Biome-bound buildings fall to ruins.
   let any = false;
@@ -247,6 +255,7 @@ for (let seed = 1; seed <= worlds; seed++) {
     initial: Uint8Array.from(w.biome),
     prev: new Int16Array(w.cellCount).fill(-1),
     prevAt: new Int32Array(w.cellCount),
+    lastAt: new Int32Array(w.cellCount).fill(-1e9),
     moves: new Uint16Array(w.cellCount),
     count: { changes: 0, ret: 0, press: 0, defor: 0, settled: 0, reversals: 0, ruined: 0 },
   };
