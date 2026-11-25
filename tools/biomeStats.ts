@@ -44,6 +44,14 @@ export const PARAMS = {
   hold: 0,
   /** 0: no Desert next to sea/lake anywhere; 1: only for hexes that were not Desert at generation. */
   desertOwn: 0,
+  /** Established biome: every land neighbor of the same biome multiplies the change chance by (1 - established); 0 = off. */
+  established: 0,
+  /** Neighbor pressure only when at least this many neighbors have the target biome (0/1 = off). */
+  majority: 0,
+  /** Ecotone margin: a hex is off-climax only if its moisture is beyond the biome boundary by more than this (0 = off). */
+  margin: 0,
+  /** Pressure band: neighbor pressure only towards a biome that is the climax for moisture within +-band of the hex's (0 = off). */
+  band: 0,
 };
 for (const [k, v] of Object.entries(options)) if (k in PARAMS) (PARAMS as Record<string, number>)[k] = Number(v);
 
@@ -112,6 +120,7 @@ function nearStillWater(sim: Simulation, c: number): boolean {
   return false;
 }
 
+const nbBuf = new Int8Array(BIOME_COUNT);
 const cand = new Float64Array(16);
 const candTo = new Int8Array(16);
 const candKind = new Int8Array(16);
@@ -137,7 +146,16 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
       else if (name === 'Lumber camp' || name === 'Sawmill') logging = true;
     }
   }
-  const factor = settled ? P.settleFactor : 1;
+  let same = 0;
+  const nbCount = nbBuf;
+  nbCount.fill(0);
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = w.neighbors[c * DIRECTION_COUNT + d];
+    if (nb < 0) continue;
+    if (w.biome[nb] === cur) same++;
+    else nbCount[w.biome[nb]]++;
+  }
+  const factor = (settled ? P.settleFactor : 1) * (P.established > 0 ? Math.pow(1 - P.established, same) : 1);
   let n = 0;
   const add = (to: number, p: number, kind: number) => {
     if (to < 0 || p <= 0) return;
@@ -151,7 +169,12 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
     n++;
   };
   // 1. return to the climax (never into a wood while a lumber camp stands)
-  if (isMovable(clim) && cur !== clim) {
+  let fine = false;
+  if (P.margin > 0) {
+    const m = w.moisture[c];
+    fine = cur === landBiome(w.elevation[c], w.temperature[c], m - P.margin) || cur === landBiome(w.elevation[c], w.temperature[c], m + P.margin);
+  }
+  if (isMovable(clim) && cur !== clim && !fine) {
     const to = STEP[cur * BIOME_COUNT + clim];
     if (!(logging && (to === Biome.Forest || to === Biome.Jungle))) add(to, P.pReturn * (ruins ? P.ruinFactor : 1), 0);
   }
@@ -162,8 +185,10 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
       if (nb < 0) continue;
       const nbb = w.biome[nb];
       if (nbb === cur || !isMovable(nbb)) continue;
+      if (P.majority > 1 && nbCount[nbb] < P.majority) continue;
       const to = STEP[cur * BIOME_COUNT + nbb];
       if (to < 0 || DIST[to * BIOME_COUNT + clim] > 1) continue;
+      if (P.band > 0 && to !== clim && to !== landBiome(w.elevation[c], w.temperature[c], w.moisture[c] - P.band) && to !== landBiome(w.elevation[c], w.temperature[c], w.moisture[c] + P.band)) continue;
       add(to, P.pNeighbor, 1);
     }
   }
