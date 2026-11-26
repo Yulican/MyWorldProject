@@ -1,6 +1,6 @@
 # Requirement: Religion
 
-Stand: **Entwurf, Grundregeln vom Nutzer entschieden (Religion als eigenes Objekt, höchstens 16, eine Religion je Einwohner; Eigenschaften-Pool nach dem Muster der Anführer-Attribute; Ausbreitung, Spaltung und Verschmelzung auch für die Religion des Spielers; Tod; Rivalen-Götter als Schritt 2). Der Eigenschaften-Pool (Abschnitt 4), die neuen Fähigkeiten (Abschnitt 8) und alle Zahlen sind Startwerte, „vorläufig, wird simuliert“; die mit „Offen:“ markierten Punkte sind noch nicht entschieden.** Ablauf: Design → Simulation (`sim-analyst`) → Umsetzung. Schritt 1 (Abschnitte 2–11): Religionen mit Eigenschaften. Schritt 2 (Abschnitt 12): Rivalen-Götter. Spieltexte sind Englisch („Faith“, „Faiths“, „Religion“, Namen der Eigenschaften).
+Stand: **Entwurf, Grundregeln vom Nutzer entschieden (Religion als eigenes Objekt, höchstens 16, eine Religion je Einwohner; Eigenschaften-Pool nach dem Muster der Anführer-Attribute; Ausbreitung, Spaltung und Verschmelzung auch für die Religion des Spielers; Tod; Rivalen-Götter als Schritt 2). Der Eigenschaften-Pool (Abschnitt 4), die neuen Fähigkeiten (Abschnitt 8) und alle Zahlen sind Startwerte, „vorläufig, wird simuliert“; die mit „Offen:“ markierten Punkte sind noch nicht entschieden. Neu: Heresy (6.4, vom Nutzer entschieden) und Glaube in der Diplomatie (6a, im Grundsatz entschieden, Einzelheiten Entwurf).** Ablauf: Design → Simulation (`sim-analyst`) → Umsetzung. Schritt 1 (Abschnitte 2–11): Religionen mit Eigenschaften. Schritt 2 (Abschnitt 12): Rivalen-Götter. Spieltexte sind Englisch („Faith“, „Faiths“, „Religion“, Namen der Eigenschaften).
 
 Baut auf `Game Design Gott einer Zivilisation` (Abschnitte 5, 7, 8 und 9: Glaube, Gott, Rivalen, Spielende), `Requirement Anführer.md` (Hebelsatz, Attribute als Vorbild), `Requirement Gacha.md` (Faith, Pool, Gott-Schicht, Andacht §7.7), `Requirement Zufriedenheit.md`, `Requirement Diplomatie.md`, `Requirement Krieg.md`, `Requirement Kartenmodi.md` und `Requirement Speichern und Laden.md` auf.
 
@@ -29,7 +29,7 @@ Eine Religion entsteht auf vier Wegen (Plätze vorausgesetzt, sonst entsteht nic
 3. **Spaltung** einer bestehenden Religion (Abschnitt 6.1).
 4. **Fähigkeit** „Spark of a New Faith“ (Abschnitt 8).
 
-**Entschieden (Nutzer):** Rebellenvölker gründen **keine** eigene Religion; der Glaube bleibt beim Aufstand unverändert (`Requirement Zufriedenheit.md`). Eine **Spaltung des Glaubens kann aber zu einer Rebellion führen** (Regel in Klärung, nicht hier eingetragen).
+**Entschieden (Nutzer):** Rebellenvölker gründen **keine** eigene Religion; der Glaube bleibt beim Aufstand unverändert (`Requirement Zufriedenheit.md`). Eine **Spaltung des Glaubens kann aber zu einer Rebellion führen** (Abschnitt 6.4, Heresy); die Rebellen behalten ihre Religion.
 
 **Mindestgläubige bei Gründung (entschieden): 20**, für jeden Gründungsweg (sonst würde die Religion nach der Schonfrist sofort sterben, Abschnitt 7).
 
@@ -151,6 +151,41 @@ Gilt für **alle** Religionen, auch für die des Spielers.
 - **Verschmelzung der Religion 0:** Verschmilzt sie mit einer anderen, **bleibt Religion 0 immer bestehen** (auch wenn die andere größer ist): deren Gläubige werden Gläubige des Spielers, und deren Eigenschaft kommt dazu (6.2). Der Spieler gewinnt damit Faith.
 - **Entschieden (Nutzer):** Der Spieler kann eine Spaltung seiner Religion **nur über Fähigkeiten** verhindern oder zurücknehmen (Covenant of One auf die abgespaltene Religion, Prophet's Light, Eigenschafts-Eingriffe); keine eigene Spielregel.
 
+### 6.4 Ketzerei und Rebellion über den Glauben (Heresy)
+
+Entschieden (Nutzer): eine Spaltung kann zu einer Rebellion führen, **ohne neuen Rebellionsmechanismus**: sie wirkt über einen Zufriedenheits-Teilwert und die bestehende Rebellionsprüfung (`Requirement Krieg.md` §8). Gilt auch für die Spaltung der Religion des Spielers und für Spaltungen durch „Sunder the Faith“.
+
+- **Teilwert „Heresy“** (`Requirement Zufriedenheit.md`, Nachtrag Religion): In **jeder Siedlung des Gründervolks** der Tochterreligion (das Volk, das sich trennt, 6.1) **−6** ab dem Spaltungsjahr, **linear abklingend über 30 Jahre**. Eigene **Grenze −10** (unabhängig von „Creed“ ±8, „Leader“ ±8 und „Divine“ ±15). Eine weitere Spaltung im selben Volk erneuert den Wert, statt ihn zu stapeln.
+- **Rebellion:** Die **bestehende Stärkeprüfung** (Krieg §8: Stärke aller Siedlungen mit Zufriedenheit < 0 > Stärke des Mutterlands) entscheidet; es gibt keinen Zufallswurf und keine zweite Regel. Die Hauptstadt wird nie unzufrieden im Sinn der Rebellion. **Die Rebellen behalten ihre Religion** (Tochterreligion, 3), es ist ein normaler Rebellenkrieg (Krieg §8). Chronik: wichtiger Eintrag **„Rebellion over faith“** (statt „Rebellion“), wenn „Heresy“ bei der Erklärung der größte negative Teilwert der Rebellensiedlungen ist.
+- **Skalierung durch Eigenschaften** (Faktoren auf −6, nach Anhängeranteil im Volk gemischt, 4.4; Deckel bleiben): **Inquisition ×0,5 und `suppress`** (die Unterdrückung 5 bekehrt Abweichler, bevor es zur Rebellion kommt: der Eingriff verhindert sie also durch Bekehrung); **Open Gates ×0,5**; **Syncretic Spirit ×0,5**; **Holy War ×1,3**; **Steadfast Flock ×1,2**; **Divine Mandate wie heute** (Rebellionsschwelle ×1,4 aus Tabelle 4.2, kein eigener Faktor).
+- **Einmal je Tochterreligion** und Volk (die Wirkung folgt der Gründung), **endet bei Verschmelzung** der Tochter- mit der Mutterreligion (Teilwert fällt sofort auf 0). Schwellen für Völker, die die Religion später übernehmen: keine Heresy.
+- **Simulationsziel:** 10–30 % der Spaltungen führen zu einer Rebellion (11, Punkt 4); Zahlen (−6 / 30 Jahre / −10 / Faktoren) vorläufig.
+
+## 6a. Glaube in der Diplomatie
+
+Entschieden (Nutzer, im Grundsatz): Glaubensunterschiede ändern das **Vertrauen** (`Requirement Diplomatie.md` §1), und Eigenschaften heben oder senken die Meinung über andere Religionen. **Die Einzelheiten dieses Abschnitts sind Entwurf und noch nicht vom Nutzer bestätigt.** Alle Zahlen vorläufig, wird simuliert.
+
+- **Neuer Vertrauens-Teilwert „Faith“** (gerichtet: A über B, jährlich nach der Gläubigenzählung, nicht abklingend, sondern dauerhaft nach dem Stand). Er kommt in die Tabelle der Teilwerte neben „Abkommen“ und „Ereignisse“ und wird im Diplomatie-Panel einzeln gezeigt.
+- **Basiswert je Religionspaar** *(r von A, s von B)*: **gleiche Religion +8**, **verwandte Religionen** (Mutter und Tochter, Schwestern aus derselben Mutter; dazu hält jede Religion die Mutter `parent`) **+2**, **fremde Religion −8**. Einwohner ohne Religion zählen 0.
+- **Anteile:** `Faith(A→B) = Σ_r Σ_s share(A,r) · share(B,s) · w(r,s)`; `share` wie 4.4 (Gläubige durch Bevölkerung). Zwei Völker mit je 100 % derselben Religion: +8; 60 % gleich, 40 % anders: ca. +2 bis +3.
+- **Eigenschaften (Volk A, Hebel des Glaubens, nach Anteil gemischt, 4.4):** drei neue multiplikative Hebel (neutral 1): `bond` (auf den positiven Teil, gleiche Religion), `kin` (auf den Teil der Verwandten), `xeno` (auf den negativen Teil, Fremde). Pro Eigenschaft (Stufe 2):
+
+| Eigenschaft | `bond` | `kin` | `xeno` |
+|---|---|---|---|
+| Open Gates | 1 | 1 | ×0,5 (Fremde −8 → −4) |
+| Syncretic Spirit | 1 | ×2 (+2 → +4) | ×0,5 |
+| Peacemakers | 1 | 1 | ×0,7 |
+| Pilgrim Roads | 1 | 1 | ×0,8 (Kontakt auf der Handelsstraße) |
+| Inquisition | 1 | 1 | ×1,5 (−8 → −12) |
+| Holy War | ×1,2 | 1 | ×1,5 |
+| Steadfast Flock | ×1,3 | 1 | ×1,3 |
+| Missionary Zeal, übrige | 1 | 1 | 1 |
+
+  Stufen skalieren die Abweichung wie 4.1; Missionary Zeal ändert hier bewusst nichts (er wirkt über `pull`, 5). **Keine neue Eigenschaft** im Pool (24 in 8 Themen zu je 3 bleiben, die Ausschlusspaare 4.3 reichen: Open Gates/Syncretic Spirit gegen Inquisition/Steadfast Flock; Holy War und Peacemakers schließen sich schon aus).
+- **Deckel:** Teilwert „Faith“ **−12 bis +12** nach den Faktoren. Bündnisse (Vertrauen ≥ 80) und Pakte (≥ 40) werden damit unter gleichem Glauben leichter, unter fremdem Glauben schwerer; die Schwellen der Diplomatie ändern sich nicht (Kalibrierung, 11).
+- **Eigenschaften mit eigener Wirkung bleiben:** Vertrauen +6 (Open Gates), +5 (Peacemakers), +3 (Syncretic Spirit) in Tabelle 4.2 gelten weiter für alle Völker; „Faith“ kommt dazu. Die Simulation prüft, ob das doppelt zählt (Doppelung ggf. abschwächen).
+- **Nicht in dieser Regel:** Gefahr (bleibt Stärke), Zoll und Handelsmengen (nur über 4.2), Krieg (heiliger Krieg: siehe Entwurf, noch nicht eingetragen).
+
 ## 7. Tod der Religion
 
 - Eine Religion **stirbt**, wenn **weniger als 1 % aller Einwohner der Welt** oder **weniger als 20 Gläubige** ihr anhängen, und das **2 Jahre in Folge** (jährlich geprüft). Neu gegründete Religionen haben eine **Schonfrist von 5 Jahren** (in dieser Zeit wird nicht auf Tod geprüft) und brauchen **mindestens 20 Gläubige bei Gründung** (Abschnitt 3). Entschieden (Nutzer).
@@ -197,7 +232,7 @@ Neue Kategorie **Faiths** (Ziel: eine Religion; Wahl in der Liste „Faiths“ o
   1. **Zahl der Religionen** über die Zeit, Gründungswege (Volksglaube, Spaltung, Fähigkeit), Tod, Lebensdauer (Ziel: 3–8 lebende Religionen, keine dauerhafte 16/16, Religion 0 überlebt in ≥ 90 % der Welten bis Jahr 300).
   2. **Eigenschaftsverteilung**: wie viele je Religion, Stufen, Verteilung der 24 (keine fehlende, keine dominante), Abschluss der Ereigniswege.
   3. **Wirkung auf Völker**: Kriege, Bündnisse, Handel, Siedlungswachstum, Rebellionen gegen den Stand ohne Eigenschaften (Warmonger-/Pacifist-artige Völker sichtbar verschieden; Deckel wirken); Zufriedenheit „Creed“ (Spanne ±8 erreicht?).
-  4. **Spaltung und Verschmelzung**: Häufigkeit, Anteil der Religion 0 (Spaltung der Spielerreligion in ≤ 30 % der Welten bis Jahr 300 und Spielende-Risiko; Anspannung als Warnung brauchbar).
+  4. **Spaltung und Verschmelzung**: Häufigkeit, Anteil der Religion 0 (Spaltung der Spielerreligion in ≤ 30 % der Welten bis Jahr 300 und Spielende-Risiko; Anspannung als Warnung brauchbar); **Heresy:** 10–30 % der Spaltungen enden in einer Rebellion (6.4); **Faith-Vertrauen (6a):** Verteilung des Teilwerts, Bündnisse und Pakte nach gleichem/fremdem Glauben, Doppelung mit den Vertrauens-Eigenschaften.
   5. **Parameter** (Startwerte siehe Abschnitte 3–7): Volksglaube-Schwellen (30 % / 5 Jahre / 5 %), Fortschrittspunkte (+10/−2/−8), Plätze (2 + Alter/20), Spaltungschance, Verschmelzungschance, Todesschwelle (1 % / 20 Gläubige / 2 Jahre / Schonfrist 5), Druck und Bekehrung (0,1 / 0,2), `suppress` 0,03, Stufenfaktoren (0,5/1/1,5), Faith-Verlust bei Spaltung der Religion 0.
   6. Gacha: Verteilung der Ziehungen mit 30 Fähigkeiten, Wirkung der 5 neuen (Eingriffe auf Eigenschaften, Spaltung, Verschmelzung).
 
@@ -242,7 +277,7 @@ Mehrere Eigenschaften mischen die Gewichte. Die genaue Tabelle (je Eigenschaft �
 ## 13. Zukunft (nicht in Schritt 1 und 2)
 
 - **Vergessene Götter:** Ein toter Gott soll später nicht endgültig verschwinden: Spuren (Ruinen, heilige Stätten wie `HolySpring`, `SacredGrove`, `AncientRuins`) könnten eine Religion wieder erwecken; eigene Regeln folgen später.
-- **Einfluss von Religion auf Diplomatie:** Glaubensunterschiede ändern das Vertrauen (steht in `Requirement Diplomatie.md` „Für Stufe 2 notiert“); heilige Kriege als Kriegsgrund.
+- **Einfluss von Religion auf Diplomatie:** Vertrauen jetzt in Abschnitt 6a (Entwurf); **heilige Kriege** als Kriegsgrund bleiben Zukunft (Vorschlag liegt dem Hauptprozess vor, nicht eingetragen).
 - **Tempel und heilige Stätten** als Gebäude, Pilger als Händlerart.
 - Duelle der Götter, Bündnisse zwischen Göttern, Eigenschaften mit mehr als 3 Stufen, Religionsnamen aus einer Liste.
 
@@ -250,8 +285,9 @@ Mehrere Eigenschaften mischen die Gewichte. Die genaue Tabelle (je Eigenschaft �
 
 - `Requirement Gacha.md`: §6 (30 statt 25 Fähigkeiten), §7.7 (Anbetung, Light/Doubt je Religion), §13 (Rivalen-Götter jetzt hier); Hebelsatz „Gott“ und Glaube (3 Schichten).
 - `Requirement Anführer.md`: Hebelsatz `L`, Attribute als Vorbild und Gründer-Eigenschaften (4.2), Erbe 50 → 80 % (Ancestor Veneration), Hebel `devotion`.
-- `Requirement Zufriedenheit.md`: Teilwert „Creed“, Chronik, Völker ohne eigene Religion.
-- `Requirement Diplomatie.md`: Hebel Vertrauen/Grenzen/Zoll, Glaube der Abwanderer, spätere Glaubensunterschiede.
+- `Requirement Zufriedenheit.md`: Teilwerte „Creed“ und „Heresy“, Chronik, Völker ohne eigene Religion.
+- `Requirement Krieg.md` §8: Rebellion über den Glauben (6.4) nutzt die bestehende Stärkeprüfung.
+- `Requirement Diplomatie.md`: Hebel Vertrauen/Grenzen/Zoll, Glaube der Abwanderer, Teilwert „Faith“ im Vertrauen (6a).
 - `Requirement Krieg.md`: Hebel Kriegswurf, Aufgabe, Verluste, Erschöpfung, Verteidigung; Ereignisse (Krieg gewonnen/verloren).
 - `Requirement Handel.md`, `Requirement Zentralregierung.md`: Hebel Händlerlast, Fahrtweite, Unterhalt, Einkommensprüfung.
 - `Requirement Kartenmodi.md`: neuer Modus „Faith“ (Runde 2).
@@ -264,5 +300,9 @@ Entschieden (Nutzer): Religion als eigenes Objekt, höchstens 16, eine je Einwoh
 
 Ebenfalls entschieden (Nutzer, später): Schonfrist neuer Religionen 5 Jahre und mindestens 20 Gläubige bei Gründung (3, 7); Rebellenvölker gründen keine eigene Religion (3); Spaltung der Spielerreligion nur über Fähigkeiten verhinderbar/rücknehmbar (6.3); Creed-Deckel ±8, linear mit dem Anteil, Simulation prüft (4.4); Rivalen-Anzeige nur „Rival god“ (12.4); Namen „Faith of the <Volk>“ (2).
 
+Ebenfalls entschieden (Nutzer): Spaltung kann zu einer Rebellion führen, über den Teilwert „Heresy“ und die bestehende Stärkeprüfung; −6 über 30 Jahre; Inquisition kann sie durch Bekehrung verhindern (6.4). Glaubensunterschiede ändern das Vertrauen, Eigenschaften heben oder senken die Meinung über andere Religionen (6a, im Grundsatz).
+
 Offen:
-1. **Spaltung kann zu einer Rebellion führen** (Nutzer: ja, Regel noch zu entwerfen; Entwurf liegt dem Hauptprozess vor, noch nicht eingetragen).
+1. **Einzelheiten von 6a** (Entwurf, vom Nutzer zu bestätigen): Basiswerte +8 / +2 / −8, Deckel ±12, Faktoren der Eigenschaften (Tabelle), „verwandt“ als positiver Wert (Alternative: Tochter-/Mutterreligion feindlicher als Fremde), keine neue Eigenschaft im Pool.
+2. **Heresy: Reichweite** (nur das Gründervolk der Tochterreligion bekommt den Teilwert; Entwurf).
+3. **Heiliger Krieg** (Entwurf liegt dem Hauptprozess vor, nicht eingetragen).
