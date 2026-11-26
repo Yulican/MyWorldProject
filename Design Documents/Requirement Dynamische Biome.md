@@ -39,9 +39,9 @@ Fest heißt: das Hexfeld wechselt nicht, zählt aber als Nachbar für den Druck 
 
 ## 5. Ressourcen wachsen nach (entschieden)
 
-- **Entschieden:** Ressourcen wachsen im selben Update **nach**: **2 % der Lücke zur Kapazität je Jahr** (Startwert). Das heilt auch Wild-Fire-Holzverlust und Exhausted Soil. (Entschieden, auch Rate **2 %/Jahr** für Fruchtbarkeit, Wild, Fisch, Holz.) Die **Kapazität folgt dem neuen Biom** (Abschnitt 3): bei einem Biomwechsel gilt sofort die neue Kapazität; der Bestand wächst oder sinkt mit derselben Rate dorthin (**kein Sprung**, ein Bestand über der neuen Kapazität sinkt mit 2 % der Lücke je Jahr), damit ein Biomwechsel die Versorgung nicht von einem Jahr aufs andere bricht.
+- **Entschieden:** Ressourcen wachsen im selben Update **nach**: **2 % der Lücke zur Kapazität je Jahr**. Das heilt auch Wild-Fire-Holzverlust und Exhausted Soil. (Entschieden, auch Rate **2 %/Jahr** für Fruchtbarkeit, Wild, Fisch, Holz.) Die **Kapazität folgt dem neuen Biom** (Abschnitt 3): bei einem Biomwechsel gilt sofort die neue Kapazität; der Bestand wächst oder sinkt mit derselben Rate dorthin (**kein Sprung**, ein Bestand über der neuen Kapazität sinkt mit 2 % der Lücke je Jahr), damit ein Biomwechsel die Versorgung nicht von einem Jahr aufs andere bricht.
 - **Entschieden: Welche Ressourcen wachsen nach?** **Fruchtbarkeit, Wild, Fisch, Holz** (erneuerbar). **Stein und Erz nicht** (nicht erneuerbar; eine Exhausted-Soil-Wirkung auf Stein/Erz bleibt dauerhaft). **Sondervorkommen** (`deposit`, auch mystische) sind keine Ressourcen und bleiben unverändert.
-- **Entschieden: Rate.** Einheitlich 2 % der Lücke je Jahr für alle nachwachsenden Ressourcen (Lücke halbiert sich in ~35 Jahren); Startwert, die Simulation kann je Ressource trennen.
+- **Entschieden: Rate.** Einheitlich 2 % der Lücke je Jahr für alle nachwachsenden Ressourcen (Lücke halbiert sich in ~35 Jahren).
 - **Entschieden: keine Sperre bei Ernte.** Die Ernte verbraucht den Bestand heute nicht (Abschnitt 2); das Nachwachsen läuft immer.
 
 - Technik: das Nachwachsen läuft in derselben rotierenden Prüfung wie die Biome (Abschnitt 3), mit dem Wert für 5 Jahre in einem Schritt (Lücke × (1 − 0,98^5) ≈ 9,6 %), damit es keinen eigenen Durchlauf über alle Hexfelder je Tick gibt.
