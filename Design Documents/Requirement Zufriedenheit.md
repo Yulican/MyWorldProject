@@ -292,3 +292,7 @@ Die Regeln für Regierungssitze, den Ausbreitungsstopp bei Anbindung unter
 Abschnitt 12, beschrieben; sie ersetzen hier die alte Sitzplanung (drei
 schlechtest angebundene Siedlungen, Bezahlung nur aus dem eigenen Vorrat,
 Unterhalt nur aus der eigenen Ernte).
+
+## Nachtrag: Religion (Entwurf)
+
+Neuer Teilwert **„Creed“** (Wirkungen der Religionen im Volk, Grenze ±8, vorläufig) neben „Leader“ und „Divine“; Chronik-Einträge zu Religionen (Gründung, Spaltung, Verschmelzung, Tod wichtig; Eigenschaften still), siehe `Requirement Religion.md` §4.4, §9. Der Glaube bleibt bei neuen Völkern unverändert; ob Rebellenvölker eine eigene Religion gründen, ist dort offen (§3).

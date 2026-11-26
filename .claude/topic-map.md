@@ -55,6 +55,7 @@ Where each topic of MyWorldProject lives, so agents can open the right files wit
 | `Requirement Zentralregierung.md` | seats of government, goods tax, government buildings and traders |
 | `Requirement Anführer.md` | leaders: attributes, goals, succession, panel "Leader ›" (implemented; numbers measured in round 3, fine tuning left to implementation) |
 | `Requirement Gacha.md` | gacha: Faith, price, pull, inventory, rarities, 25 abilities, new subsystems, god interventions on leaders (draft, numbers preliminary) |
+| `Requirement Religion.md` | religion: religions as objects (≤ 16, one per inhabitant), pool of 24 traits in 8 themes (levels 1–3, events, exclusions, third lever layer "Glaube" scaled by believer share), spread, schism and syncretism (also the player's faith), death, 5 new gacha abilities (Faiths, Ids 26–30), Faiths panel/map mode; step 2 rival gods (draft, numbers to simulate; not implemented) |
 | `Requirement Krieg.md` | war: soldiers, strategic goods, battles, sieges, alliances, rebel wars (draft, 5 phases) |
 | `Requirement Kartenmodi.md` | map modes: UI, mode list with data and scales, legend, numbers, save, benchmark `modes` (round 1 implemented with measured bucket edges, round 2 open) |
 | `Requirement Dynamische Biome.md` | dynamic biomes (climate drift, climax return, civilization influences, pinning by Biome Shift) and regrowing resources (draft, all rules and numbers decided after simulation) |

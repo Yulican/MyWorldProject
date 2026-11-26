@@ -261,3 +261,7 @@ Entschieden (Nutzer); Zahlen in Runde 3 gemessen.
 ## 13. Abhängigkeiten
 
 Ändern sich mit diesem Requirement: `Requirement Krieg.md` (§6 Kriegswurf und 2×-Schwelle, Aufgabe, Erschöpfung; §7 Pakt-/Bündnisschwellen, Beitritt; §8 Rebellionsschwelle), `Requirement Diplomatie.md` (Schwellen für Grenzen, Pakte, Abkommen, Zoll), `Requirement Zentralregierung.md` (Sicherheitsabstand, Einkommensprüfung, Bauliste), `Requirement Zufriedenheit.md` (neuer Teilwert „Leader“, Chronik), `Requirement Handel.md` (Handelsabkommen, Handelswert), Game-Design-Dokument (Völker, Gott-Eingriff später).
+
+## Nachtrag: Religion (Entwurf)
+
+Das Attribut-System ist das Vorbild der Religions-Eigenschaften (`Requirement Religion.md` §4: Pool von 24, Ausschlusspaare, Erlebtes, Stufen). Das Attribut des Anführers des Gründervolks bestimmt die erste Eigenschaft einer neuen Religion (Religion §4.2/§4.5); Ancestor Veneration hebt das Erbe eines Attributs von 50 auf 80 %. Hebelsatz `L`: dritte Schicht „Glaube“ kommt zu Anführer und Gott hinzu; der Hebel `devotion` und Devout gelten jetzt für jede Religion, der das Volk folgt (Religion §4.4).

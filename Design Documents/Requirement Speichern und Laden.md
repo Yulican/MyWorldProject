@@ -126,3 +126,7 @@ Die Welt läuft nach dem Laden so weiter, wie sie ohne Unterbrechung weitergelau
 ## 9. Offene Punkte
 
 Keine. Alle Entscheidungen sind in den Abschnitten 2-6 eingearbeitet.
+
+## Nachtrag: Religion (Entwurf)
+
+Neuer Zustand (Religion je Einwohner, Religionen mit Eigenschaften/Ereigniszählern/Anspannung, Gläubige je Religion und Volk, Hebelsatz „Glaube“, Zufallsgenerator „faith“, später Götter) ist Teil des Spielstands; `SAVE_VERSION` wird erhöht. Siehe `Requirement Religion.md` §10.

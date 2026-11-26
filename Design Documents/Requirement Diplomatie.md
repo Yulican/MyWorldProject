@@ -318,3 +318,7 @@ Geprüft und verworfen (der Nutzer bleibt nach dem Test bei 10): Mit 20 statt
 
 Die Rechenzeit liegt dann aber bei 4,7 ms, das 1,39-Fache und damit über
 dem Ziel von 1,3.
+
+## Nachtrag: Religion (Entwurf)
+
+Religions-Eigenschaften verschieben Vertrauen, Grenzschwellen, Zoll und Handelsmengen über die Hebel `L` (Open Gates, Peacemakers, Pilgrim Roads, Inquisition …), siehe `Requirement Religion.md` §4.2. Der Glaube der Abwanderer bleibt unverändert; Siedler, Händler und Soldaten tragen ihn weiter (`carry`, Religion §5). „Glaubensunterschiede ändern das Vertrauen“ (oben, Stufe 2 notiert) bleibt **Zukunft** (Religion §13).

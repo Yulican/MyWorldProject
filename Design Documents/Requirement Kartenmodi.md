@@ -111,3 +111,7 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 - **Offen: Volkswahl per Karte.** Empfehlung wie Abschnitt 5 (Antippen setzt Auswahl und öffnet das Hex-Panel). Alternative: erst Antippen = Auswahl, zweites Antippen desselben Hex = Panel.
 - **Offen: Political-Eintrag.** Eigener Eintrag als erster in der Liste (Entscheidung des Nutzers); ob zusätzlich ein Kurzknopf auf der Karte nötig ist, nach dem ersten Test auf dem Handy.
 - **Entschieden: „Fertility“-Untermodi.** Food und Water als endgültiger Ertrag in Personen je Hex mit Gebäuden und Modifikatoren (`cellSupply`), Wood und Stone als Rohstoffwert in Prozent (Abschnitt 4).
+
+## Nachtrag: Religion (Entwurf, Runde 2)
+
+Neuer Modus **„Faith“** mit Untermodi „Religions“ (Farbe je Religion, Schattierung nach Anteil) und „Your faith“ (Anteil der Religion 0), liest nur vorhandene Werte; Benchmark `modes` bekommt die Untermodi. Siehe `Requirement Religion.md` §9, §11.

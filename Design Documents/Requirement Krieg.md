@@ -351,3 +351,7 @@ Gewählt 2,5 % (heute in Klammern):
 - Rechenzeit unverändert
 
 Produktionsstand (24 Welten, Jahr 500, Miliz 2,5 %): Rebellionen 1,83, niedergeschlagen 0,79 plus Aufgabe der Rebellen 0,13, Erschöpfung 0,83, Dauer 6,0 Jahre, Kriege 5,6, Völker 10,2, langfristig unzufriedene Siedlungen 0,71, Rechenzeit ca. 11,4 ms pro Jahr.
+
+## Nachtrag: Religion (Entwurf)
+
+Religions-Eigenschaften (Holy War, Peacemakers, Martyrs' Creed, Stoic Endurance, Spirit Guardians, Inquisition) ändern Kriegswurf, Aufgabe, Verluste, Erschöpfung, Verteidigung und Rebellionsschwelle über den Hebelsatz „Glaube“ (dritte Schicht, mit denselben Deckeln); Kriege und Belagerungen sind Ereignisse, aus denen Religionen Eigenschaften gewinnen. Völker im Krieg erhöhen die Anspannung (Spaltung). Siehe `Requirement Religion.md` §4, §6.

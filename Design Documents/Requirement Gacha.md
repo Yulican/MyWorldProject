@@ -59,6 +59,8 @@ Vier Stufen: **Common, Rare, Epic, Legendary**. Je mehr eine Fähigkeit das Spie
 
 ## 6. Fähigkeiten (25)
 
+> **Nachtrag Religion (Entwurf):** `Requirement Religion.md` §8 hängt **5 Fähigkeiten der neuen Kategorie „Faiths“** (Ids 26–30: Blessed Doctrine, Lost Doctrine, Sunder the Faith, Spark of a New Faith, Covenant of One) an den Pool an (dann 30; Common 7, Rare 11, Epic 9, Legendary 3). Prophet's Light/Doubt wirken dann je Religion (§7.7 → Religion §2, §8). Die Tabellen unten bleiben unverändert.
+
 Alle 25 gehören zu Version 1 (vom Nutzer gesehen und bestätigt, bis auf die zwei Ersatz-Fähigkeiten Nr. 14 und Nr. 23, Abschnitt 6.5). Dauern, Stärken und Flächen sind Startwerte („vorläufig, wird kalibriert“); Faith-Faktor, Preis und Stufengewichte stehen in den Abschnitten 2 bis 4. „Jahre“ sind Spieljahre (52 Ticks). Die Hebel sind die bestehenden Hebel des Kerns (`LEVERS`, `Requirement Anführer.md` §9); die Einsätze legen eine **Gott-Schicht** darüber (Abschnitt 7.1).
 
 ### 6.1 Land (9)
@@ -251,6 +253,6 @@ Entschieden (Nutzer): ~~kein Nachwachsen der Ressourcen~~ (ersetzt: Ressourcen w
 ## 13. Später (nicht in Version 1)
 
 - ~~Nachwachsen der Ressourcen~~ (jetzt Teil von 1.0, `Requirement Dynamische Biome.md`).
-- Rivalen-Götter mit eigenem Faith und eigenen Ladungen.
+- Rivalen-Götter mit eigenem Faith und eigenen Ladungen: jetzt entworfen in `Requirement Religion.md` §12 (Schritt 2: gleicher Preis, gleicher Pool inkl. der 5 Religions-Fähigkeiten, Verhalten aus den Eigenschaften der Religion).
 - Handel mit Ladungen, Verschmelzen, Pity-System (bewusst ausgeschlossen).
 - Weitere Fähigkeiten nach Kultureffekten (Seafarers' Whisper, sobald Kultur im Spiel etwas bewirkt) und Fähigkeiten auf Kriege und Verträge.
