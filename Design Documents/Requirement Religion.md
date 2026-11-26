@@ -1,6 +1,6 @@
 # Requirement: Religion
 
-Stand: **Entwurf, Grundregeln vom Nutzer entschieden (Religion als eigenes Objekt, höchstens 16, eine Religion je Einwohner; Eigenschaften-Pool nach dem Muster der Anführer-Attribute; Ausbreitung, Spaltung und Verschmelzung auch für die Religion des Spielers; Tod; Rivalen-Götter als Schritt 2). Der Eigenschaften-Pool (Abschnitt 4), die neuen Fähigkeiten (Abschnitt 8) und alle Zahlen sind Startwerte, „vorläufig, wird simuliert“; die mit „Offen:“ markierten Punkte sind noch nicht entschieden. Neu: Heresy (6.4, vom Nutzer entschieden) und Glaube in der Diplomatie (6a, im Grundsatz entschieden, Einzelheiten Entwurf).** Ablauf: Design → Simulation (`sim-analyst`) → Umsetzung. Schritt 1 (Abschnitte 2–11): Religionen mit Eigenschaften. Schritt 2 (Abschnitt 12): Rivalen-Götter. Spieltexte sind Englisch („Faith“, „Faiths“, „Religion“, Namen der Eigenschaften).
+Stand: **Entwurf, Grundregeln vom Nutzer entschieden (Religion als eigenes Objekt, höchstens 16, eine Religion je Einwohner; Eigenschaften-Pool nach dem Muster der Anführer-Attribute; Ausbreitung, Spaltung und Verschmelzung auch für die Religion des Spielers; Tod; Rivalen-Götter als Schritt 2). Der Eigenschaften-Pool (Abschnitt 4), die neuen Fähigkeiten (Abschnitt 8) und alle Zahlen sind Startwerte, „vorläufig, wird simuliert“; die mit „Offen:“ markierten Punkte sind noch nicht entschieden. Neu: Heresy (6.4, vom Nutzer entschieden, Beitritt anderer Völker 6.4a), Glaube in der Diplomatie (6a, Verwandte je nach Eigenschaften freundlich oder feindlich, vom Nutzer entschieden) und Heiliger Krieg (6b, vom Nutzer angenommen). Bereit für die Simulation (`sim-analyst`); alle Zahlen dieser Abschnitte sind vorläufige Startwerte.** Ablauf: Design → Simulation (`sim-analyst`) → Umsetzung. Schritt 1 (Abschnitte 2–11): Religionen mit Eigenschaften. Schritt 2 (Abschnitt 12): Rivalen-Götter. Spieltexte sind Englisch („Faith“, „Faiths“, „Religion“, Namen der Eigenschaften).
 
 Baut auf `Game Design Gott einer Zivilisation` (Abschnitte 5, 7, 8 und 9: Glaube, Gott, Rivalen, Spielende), `Requirement Anführer.md` (Hebelsatz, Attribute als Vorbild), `Requirement Gacha.md` (Faith, Pool, Gott-Schicht, Andacht §7.7), `Requirement Zufriedenheit.md`, `Requirement Diplomatie.md`, `Requirement Krieg.md`, `Requirement Kartenmodi.md` und `Requirement Speichern und Laden.md` auf.
 
@@ -161,30 +161,53 @@ Entschieden (Nutzer): eine Spaltung kann zu einer Rebellion führen, **ohne neue
 - **Einmal je Tochterreligion** und Volk (die Wirkung folgt der Gründung), **endet bei Verschmelzung** der Tochter- mit der Mutterreligion (Teilwert fällt sofort auf 0). Schwellen für Völker, die die Religion später übernehmen: keine Heresy.
 - **Simulationsziel:** 10–30 % der Spaltungen führen zu einer Rebellion (11, Punkt 4); Zahlen (−6 / 30 Jahre / −10 / Faktoren) vorläufig.
 
+### 6.4a Andere Völker treten der Glaubensrebellion bei
+
+Entschieden (Nutzer): zusätzlich zum Gründervolk können **andere Völker der Glaubensrebellion beitreten**. Umsetzung (Auslegung, Startwerte) mit den **bestehenden Beitrittsregeln** (`Requirement Krieg.md` §7, Kriegsbeitritt 4b), nur bei Kriegsbeginn einer „Rebellion over faith“ (6.4):
+
+- **Auf der Seite der Rebellen:** ein Volk, das nicht im Krieg ist und dessen **Mehrheit (> 50 % der Bevölkerung) die Tochterreligion** der Rebellen hält, tritt bei, wenn sein **Vertrauen zum Rebellenvolk ≥ 40** ist und die **Angreifer-Seite-Stärkeregel** (Krieg §7: gemeinsame Stärke der Seite größer als die der Gegenseite) erfüllt ist.
+- **Auf der Seite des Mutterlands:** ein Volk, dessen **Mehrheit die Mutterreligion** hält und dessen **Vertrauen zum Mutterland ≥ 40** ist, tritt bei (wie die Verteidiger-Seite, ohne Stärkeregel). Pakt- und Bündnispartner treten wie bisher bei (Krieg §7); ein Volk mit Bindung zu beiden Seiten tritt keiner Seite bei.
+- Armee, Obergrenzen (4 je Volk, 32 auf der Karte), keine Beute, +10 Vertrauen beim Partner, Friede der Hauptparteien beendet den Krieg für alle: wie Krieg §7. Kein neuer Rebellionsmechanismus, nur eine zusätzliche Beitrittsbedingung (Glaube statt Bündnis).
+- Chronik: stiller Eintrag „<Volk> joins the faith rebellion“. Gilt auch für die Religion des Spielers.
+
 ## 6a. Glaube in der Diplomatie
 
 Entschieden (Nutzer, im Grundsatz): Glaubensunterschiede ändern das **Vertrauen** (`Requirement Diplomatie.md` §1), und Eigenschaften heben oder senken die Meinung über andere Religionen. **Die Einzelheiten dieses Abschnitts sind Entwurf und noch nicht vom Nutzer bestätigt.** Alle Zahlen vorläufig, wird simuliert.
 
 - **Neuer Vertrauens-Teilwert „Faith“** (gerichtet: A über B, jährlich nach der Gläubigenzählung, nicht abklingend, sondern dauerhaft nach dem Stand). Er kommt in die Tabelle der Teilwerte neben „Abkommen“ und „Ereignisse“ und wird im Diplomatie-Panel einzeln gezeigt.
-- **Basiswert je Religionspaar** *(r von A, s von B)*: **gleiche Religion +8**, **verwandte Religionen** (Mutter und Tochter, Schwestern aus derselben Mutter; dazu hält jede Religion die Mutter `parent`) **+2**, **fremde Religion −8**. Einwohner ohne Religion zählen 0.
-- **Anteile:** `Faith(A→B) = Σ_r Σ_s share(A,r) · share(B,s) · w(r,s)`; `share` wie 4.4 (Gläubige durch Bevölkerung). Zwei Völker mit je 100 % derselben Religion: +8; 60 % gleich, 40 % anders: ca. +2 bis +3.
-- **Eigenschaften (Volk A, Hebel des Glaubens, nach Anteil gemischt, 4.4):** drei neue multiplikative Hebel (neutral 1): `bond` (auf den positiven Teil, gleiche Religion), `kin` (auf den Teil der Verwandten), `xeno` (auf den negativen Teil, Fremde). Pro Eigenschaft (Stufe 2):
+- **Basiswert je Religionspaar** *(r von A, s von B)*: **gleiche Religion +8**, **verwandte Religionen** (Mutter und Tochter, Schwestern aus derselben Mutter; dazu hält jede Religion die Mutter `parent`) **0 als Basis, durch Eigenschaften verschoben** (siehe `kin`: kann positiv oder negativ werden), **fremde Religion −8**. Einwohner ohne Religion zählen 0.
+- **Anteile:** `Faith(A→B) = Σ_r Σ_s share(A,r) · share(B,s) · w(r,s)`; `share` wie 4.4 (Gläubige durch Bevölkerung). Zwei Völker mit je 100 % derselben Religion: +8; 60 % gleich, 40 % anders: ca. +2 bis +3. Das Gewicht `w(r,s)` für Verwandte ist `kin(A)` (nächster Punkt), nicht mehr fest.
+- **Eigenschaften (Volk A, Hebel des Glaubens, nach Anteil gemischt, 4.4):** zwei multiplikative Hebel (neutral 1) und ein **additiver** Hebel: `bond` (×, auf den positiven Teil, gleiche Religion), `xeno` (×, auf den negativen Teil, Fremde) und **`kin`** (**additiv**, neutral 0, Gewicht für Verwandte; **Entschieden (Nutzer):** verwandte Religionen sind je nach Eigenschaften freundlich **oder** feindlich, als „Ketzer“ sogar feindlicher als Fremde). `kin(A) = Σ Anteil · Verschiebung der Eigenschaft`, Stufen skalieren wie 4.1, Grenze für `kin` **−16 bis +8**. Pro Eigenschaft (Stufe 2, Startwerte):
 
-| Eigenschaft | `bond` | `kin` | `xeno` |
+| Eigenschaft | `bond` | `kin` (additiv) | `xeno` |
 |---|---|---|---|
-| Open Gates | 1 | 1 | ×0,5 (Fremde −8 → −4) |
-| Syncretic Spirit | 1 | ×2 (+2 → +4) | ×0,5 |
-| Peacemakers | 1 | 1 | ×0,7 |
-| Pilgrim Roads | 1 | 1 | ×0,8 (Kontakt auf der Handelsstraße) |
-| Inquisition | 1 | 1 | ×1,5 (−8 → −12) |
-| Holy War | ×1,2 | 1 | ×1,5 |
-| Steadfast Flock | ×1,3 | 1 | ×1,3 |
-| Missionary Zeal, übrige | 1 | 1 | 1 |
+| Open Gates | 1 | +3 | ×0,5 (Fremde −8 → −4) |
+| Syncretic Spirit | 1 | +6 | ×0,5 |
+| Peacemakers | 1 | +3 | ×0,7 |
+| Pilgrim Roads | 1 | +1 | ×0,8 (Kontakt auf der Handelsstraße) |
+| Inquisition | 1 | −14 (Ketzer, feindlicher als Fremde −12) | ×1,5 (−8 → −12) |
+| Holy War | ×1,2 | −10 | ×1,5 |
+| Steadfast Flock | ×1,3 | −6 | ×1,3 |
+| Missionary Zeal, übrige | 1 | 0 | 1 |
 
-  Stufen skalieren die Abweichung wie 4.1; Missionary Zeal ändert hier bewusst nichts (er wirkt über `pull`, 5). **Keine neue Eigenschaft** im Pool (24 in 8 Themen zu je 3 bleiben, die Ausschlusspaare 4.3 reichen: Open Gates/Syncretic Spirit gegen Inquisition/Steadfast Flock; Holy War und Peacemakers schließen sich schon aus).
-- **Deckel:** Teilwert „Faith“ **−12 bis +12** nach den Faktoren. Bündnisse (Vertrauen ≥ 80) und Pakte (≥ 40) werden damit unter gleichem Glauben leichter, unter fremdem Glauben schwerer; die Schwellen der Diplomatie ändern sich nicht (Kalibrierung, 11).
+  Gemischte Völker (tolerante und orthodoxe Eigenschaften zugleich) mitteln sich nach Anteil; Ausschlusspaare 4.3 verhindern die schlimmsten Widersprüche. Stufen skalieren die Abweichung wie 4.1; Missionary Zeal ändert hier bewusst nichts (er wirkt über `pull`, 5). **Keine neue Eigenschaft** im Pool (24 in 8 Themen zu je 3 bleiben, die Ausschlusspaare 4.3 reichen: Open Gates/Syncretic Spirit gegen Inquisition/Steadfast Flock; Holy War und Peacemakers schließen sich schon aus).
+- **Deckel:** Teilwert „Faith“ **−16 bis +12** nach den Faktoren (unten −16, damit „Ketzer“ unter Inquisition feindlicher als Fremde bleiben können; vorläufig). Bündnisse (Vertrauen ≥ 80) und Pakte (≥ 40) werden damit unter gleichem Glauben leichter, unter fremdem Glauben schwerer; die Schwellen der Diplomatie ändern sich nicht (Kalibrierung, 11).
 - **Eigenschaften mit eigener Wirkung bleiben:** Vertrauen +6 (Open Gates), +5 (Peacemakers), +3 (Syncretic Spirit) in Tabelle 4.2 gelten weiter für alle Völker; „Faith“ kommt dazu. Die Simulation prüft, ob das doppelt zählt (Doppelung ggf. abschwächen).
-- **Nicht in dieser Regel:** Gefahr (bleibt Stärke), Zoll und Handelsmengen (nur über 4.2), Krieg (heiliger Krieg: siehe Entwurf, noch nicht eingetragen).
+- **Nicht in dieser Regel:** Gefahr (bleibt Stärke), Zoll und Handelsmengen (nur über 4.2), Krieg (heiliger Krieg: siehe 6b, Beitritt zur Rebellion über den Glauben: 6.4a).
+
+## 6b. Heiliger Krieg
+
+Entschieden (Nutzer): angenommen. Alle Zahlen vorläufig, wird simuliert. Ergänzung in `Requirement Krieg.md` §6 (Kriegsziel „Holy war“).
+
+- **Voraussetzung:** Die **Mehrheitsreligion des Angreifers** hat die Eigenschaft **Holy War oder Inquisition** (Stufe ≥ 1, nach Anhängeranteil gemischt, 4.4; zählt, wenn der Anteil der Anhänger mit der Eigenschaft ≥ 50 % ist). Entschieden (Nutzer).
+- **Erklärung:** Neues Kriegsziel „Holy war“ in Krieg §6: über die normale jährliche Erklärung (10 %-Wurf, nur gegen Nachbarn, Waffenstillstand und „schon im Krieg“ gelten), aber die **Stärkeprüfung ist 1,5× statt 2×**, und nur gegen einen Nachbarn mit **fremder Mehrheitsreligion** (nicht gleicher Glaube). Zielsitz und Nutzen wie Krieg §6. **Abklingzeit 30 Jahre je Angreifer-Religion.**
+- **Eroberung:** Die Eroberung gilt wie Krieg §6 (Bezirk wechselt den Besitzer, „erobert“ −15), dazu **Bekehrung mild**: Gläubige fremden Glaubens im Bezirk **−0,3 Glaube** (Glaubensverlust, 5), und der Besatzer bekommt **10 Jahre lang +0,15 Ausbreitungsdruck** (`pull`, 5) im Bezirk. Entschieden (Nutzer): mild, keine Zwangsbekehrung.
+- **Beitritt:** Völker mit der **Mehrheitsreligion des Angreifers** und **Vertrauen ≥ 40** zum Angreifer dürfen dem Angreifer beitreten (**mit 50 % der Armee**, wie Krieg §7); Armee, Obergrenzen und Chronik wie dort. Sonst gelten die Beitrittsregeln von Krieg §7 unverändert.
+- **Aufgabe:** Der Angreifer gibt erst auf, wenn er **unter 30 % statt 40 %** der Stärke des Gegners hat (er kämpft hartnäckiger); der Verteidiger wie Krieg §6.
+- **Rückkopplung auf Eigenschaften:** jeder heilige Krieg des Angreifers gibt der Religion **Holy War +10** (Ereignis, wie 4.5; Gewinn und Obergrenze wie dort); ein **verlorener heiliger Krieg** gibt **Steadfast Flock oder Martyrs' Creed** (je +10, Wahl nach Zufall unter den nicht ausgeschlossenen, 4.3).
+- **Religion des Spielers:** gleiche Regeln. Ein Volk des Spielers erklärt heilige Kriege nur, wenn die Mehrheitsreligion Holy War oder Inquisition hat (kein Sonderfall, wie jeder Krieg: der Spieler erklärt nicht selbst).
+- **Zukunft (nicht in dieser Regel):** Kriegsziel „Befreiung von Glaubensgenossen“ (Kriegserklärung gegen ein Volk, das Gläubige der eigenen Religion unterdrückt).
+- **Simulationsziele:** heilige Kriege sind selten und beeinflussen die Karte (z. B. höchstens 15–25 % aller Kriege); keine Dauerkriege einer Religion (Abklingzeit); Anspannung der Religion (Spaltung, 6.1) nicht außer Kontrolle.
 
 ## 7. Tod der Religion
 
@@ -286,7 +309,7 @@ Mehrere Eigenschaften mischen die Gewichte. Die genaue Tabelle (je Eigenschaft �
 - `Requirement Gacha.md`: §6 (30 statt 25 Fähigkeiten), §7.7 (Anbetung, Light/Doubt je Religion), §13 (Rivalen-Götter jetzt hier); Hebelsatz „Gott“ und Glaube (3 Schichten).
 - `Requirement Anführer.md`: Hebelsatz `L`, Attribute als Vorbild und Gründer-Eigenschaften (4.2), Erbe 50 → 80 % (Ancestor Veneration), Hebel `devotion`.
 - `Requirement Zufriedenheit.md`: Teilwerte „Creed“ und „Heresy“, Chronik, Völker ohne eigene Religion.
-- `Requirement Krieg.md` §8: Rebellion über den Glauben (6.4) nutzt die bestehende Stärkeprüfung.
+- `Requirement Krieg.md` §8: Rebellion über den Glauben (6.4) nutzt die bestehende Stärkeprüfung; §7: Beitritt anderer Völker über den Glauben (6.4a); §6: Kriegsziel „Holy war“ (6b).
 - `Requirement Diplomatie.md`: Hebel Vertrauen/Grenzen/Zoll, Glaube der Abwanderer, Teilwert „Faith“ im Vertrauen (6a).
 - `Requirement Krieg.md`: Hebel Kriegswurf, Aufgabe, Verluste, Erschöpfung, Verteidigung; Ereignisse (Krieg gewonnen/verloren).
 - `Requirement Handel.md`, `Requirement Zentralregierung.md`: Hebel Händlerlast, Fahrtweite, Unterhalt, Einkommensprüfung.
@@ -302,7 +325,9 @@ Ebenfalls entschieden (Nutzer, später): Schonfrist neuer Religionen 5 Jahre und
 
 Ebenfalls entschieden (Nutzer): Spaltung kann zu einer Rebellion führen, über den Teilwert „Heresy“ und die bestehende Stärkeprüfung; −6 über 30 Jahre; Inquisition kann sie durch Bekehrung verhindern (6.4). Glaubensunterschiede ändern das Vertrauen, Eigenschaften heben oder senken die Meinung über andere Religionen (6a, im Grundsatz).
 
-Offen:
-1. **Einzelheiten von 6a** (Entwurf, vom Nutzer zu bestätigen): Basiswerte +8 / +2 / −8, Deckel ±12, Faktoren der Eigenschaften (Tabelle), „verwandt“ als positiver Wert (Alternative: Tochter-/Mutterreligion feindlicher als Fremde), keine neue Eigenschaft im Pool.
-2. **Heresy: Reichweite** (nur das Gründervolk der Tochterreligion bekommt den Teilwert; Entwurf).
-3. **Heiliger Krieg** (Entwurf liegt dem Hauptprozess vor, nicht eingetragen).
+Ebenfalls entschieden (Nutzer, jüngste Runde): Verwandte Religionen sind je nach Eigenschaften freundlich oder feindlich (additiver Hebel `kin`, auch negativ, 6a); bei Heresy treten zusätzlich andere Völker der Rebellion bei (6.4a); Heiliger Krieg mit allen Punkten von 6b, nur mit Holy War oder Inquisition, Bekehrung bei Eroberung mild.
+
+Offen (vor oder in der Simulation, alle mit Empfehlung):
+1. **Einzelne Zahlen von 6a** (Basiswerte +8 / −8, Deckel −16/+12, `kin`-Verschiebungen der Tabelle) und die Doppelung mit den Vertrauens-Boni aus 4.2: die Simulation entscheidet.
+2. **Heresy: Reichweite** (nur das Gründervolk bekommt den Teilwert; Empfehlung: so lassen) und die Beitrittsschwellen in 6.4a (Mehrheit > 50 %, Vertrauen ≥ 40; Empfehlung: Startwerte).
+3. **Heiliger Krieg:** alle Zahlen von 6b (1,5×, 30 %, −0,3 / +0,15 über 10 Jahre, Abklingzeit 30 Jahre, +10) sind Startwerte; „Befreiung von Glaubensgenossen“ ist Zukunft.
