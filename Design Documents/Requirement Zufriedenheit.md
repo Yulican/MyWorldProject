@@ -295,4 +295,4 @@ Unterhalt nur aus der eigenen Ernte).
 
 ## Nachtrag: Religion (Entwurf)
 
-Neuer Teilwert **„Creed“** (Wirkungen der Religionen im Volk, Grenze ±8, vorläufig) neben „Leader“ und „Divine“; Chronik-Einträge zu Religionen (Gründung, Spaltung, Verschmelzung, Tod wichtig; Eigenschaften still), siehe `Requirement Religion.md` §4.4, §9. Der Glaube bleibt bei neuen Völkern unverändert; ob Rebellenvölker eine eigene Religion gründen, ist dort offen (§3).
+Neuer Teilwert **„Creed“** (Wirkungen der Religionen im Volk, Grenze ±8, vorläufig) neben „Leader“ und „Divine“; Chronik-Einträge zu Religionen (Gründung, Spaltung, Verschmelzung, Tod wichtig; Eigenschaften still), siehe `Requirement Religion.md` §4.4, §9. Der Glaube bleibt bei neuen Völkern unverändert; Rebellenvölker gründen keine eigene Religion (entschieden, dort §3); dass eine Glaubensspaltung zu einer Rebellion führen kann, ist dort in Klärung.

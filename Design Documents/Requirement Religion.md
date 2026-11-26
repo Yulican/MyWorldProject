@@ -16,7 +16,7 @@ Der Einfluss soll **spürbar** sein: zwei Völker mit gleicher Lage und verschie
 - **Eine Religion je Einwohner** (`religion`, `Uint8`, 255 = keine) plus der bestehende Glaubenswert `faith` (0..1) **an diese Religion**; Gläubiger = `faith ≥ 0,5`. Einwohner mit Glaube < 0,5 „schwanken“ (zählen nicht als Gläubige, behalten aber die Religion), unter 0,2 verlieren sie die Religion (255).
 - **Religion 0 ist die Religion des Spielers** (sein Gott, Schritt 1 und 2). Sie ist keine Ausnahme der Regeln: sie kann Eigenschaften gewinnen und verlieren, sich spalten, verschmelzen (6) und hat Tod und Spielende wie bisher (Game Design Abschnitt 9: keine Gläubigen des Spieler-Gottes → Spielende; Tod der Religion: Abschnitt 7).
 - Eine Religion hat: Name, Gründungsjahr, Gründervolk, Eigenschaften (4.1), Zähler der Gläubigen je Volk, Anspannung (6.1), Zustand (lebt/tot), Gott (Spieler, keiner, später Rivale).
-- **Name (Offen):** „Faith of the <Gründervolk>“ (bei Wiederholung römischer Zähler: „… II“). Empfehlung: so lassen, bis es eine Namensliste für Religionen gibt.
+- **Name (entschieden):** „Faith of the <Gründervolk>“ (bei Wiederholung römischer Zähler: „… II“), bis es eine Namensliste für Religionen gibt.
 - **Gläubigenzählung:** je Religion und Volk (16 × 9 Zahlen), jährlich neu aus den Bewohnern (so oft wie `sim.believers` heute); der Faith-Zufluss des Spielers rechnet mit den Gläubigen von **Religion 0** (`Requirement Gacha.md` §2: 0,001 je Gläubigem und Tick).
 - **Anbetung:** Ein Volk **folgt einer Religion** (`majorReligion`), sobald mindestens 55 % seiner Bevölkerung Gläubige dieser Religion sind, und verliert sie unter 45 % (Hysterese wie `Requirement Gacha.md` §7.7, jetzt für alle Religionen). Das ersetzt `worships(civ, god)`: Folgen, die an der Anbetung des Spielers hingen (Andacht des Anführers, Hebel `devotion`), hängen an „Volk folgt Religion 0“.
 
@@ -29,7 +29,9 @@ Eine Religion entsteht auf vier Wegen (Plätze vorausgesetzt, sonst entsteht nic
 3. **Spaltung** einer bestehenden Religion (Abschnitt 6.1).
 4. **Fähigkeit** „Spark of a New Faith“ (Abschnitt 8).
 
-**Offen:** Entsteht beim Aufstand eines Rebellenvolks mit einer festen Chance (Empfehlung 40 %) eine eigene Religion? Heute gilt „der Glaube bleibt unverändert“ (`Requirement Zufriedenheit.md`, Abschnitt zu neuen Völkern). Empfehlung: nein in Schritt 1, die Spaltung (6.1) deckt abgespaltene Völker bereits ab.
+**Entschieden (Nutzer):** Rebellenvölker gründen **keine** eigene Religion; der Glaube bleibt beim Aufstand unverändert (`Requirement Zufriedenheit.md`). Eine **Spaltung des Glaubens kann aber zu einer Rebellion führen** (Regel in Klärung, nicht hier eingetragen).
+
+**Mindestgläubige bei Gründung (entschieden): 20**, für jeden Gründungsweg (sonst würde die Religion nach der Schonfrist sofort sterben, Abschnitt 7).
 
 ## 4. Eigenschaften (Traits)
 
@@ -87,7 +89,7 @@ Anmerkung: Die Wirkungen sind absichtlich **groß genug, um im Panel und im Verh
 
 - **Anhängeranteil:** Für Volk *c* und Religion *r* ist `share(c, r)` = Gläubige von *r* in *c* geteilt durch die Bevölkerung von *c* (0..1). Eine Eigenschaft wirkt im Volk **mit diesem Anteil**: additive Hebel: Σ über Religionen `share × Abweichung`; multiplikative Hebel: Π `Faktor^share`. Ein Volk mit 30 % Holy War und 60 % Peacemakers bekommt also eine Mischung (und wird innerlich uneins: Zufriedenheit, 5).
 - **Hebelsatz „Glaube“** (`faithLev`, Volk × Hebel, neutral 0 bzw. 1 wie `LEVERS`): eine **dritte Schicht** neben Anführer und Gott; `combineLevers` (`leaders.ts`) kombiniert sie (additiv addiert, multiplikativ multipliziert). Neu berechnet **jährlich** (nach der Gläubigenzählung) und bei jeder Änderung einer Eigenschaft, nie in der Entscheidung selbst.
-- **Deckel:** Die harten Deckel aus `Requirement Anführer.md` §3 gelten auf dem **kombinierten** Satz (Kriegswurf höchstens 40 %, 2×-Schwelle nie unter 1,2×, „erklärt nie selbst Krieg“ schlägt jede Erhöhung). Die Zufriedenheitswirkung aller Religionen eines Volks bildet einen **eigenen Teilwert „Creed“** (`Requirement Zufriedenheit.md`, neben „Leader“ und „Divine“) mit **Grenze ±8** (vorläufig), unabhängig von den ±8 des Anführers und den ±15 von „Divine“.
+- **Deckel:** Die harten Deckel aus `Requirement Anführer.md` §3 gelten auf dem **kombinierten** Satz (Kriegswurf höchstens 40 %, 2×-Schwelle nie unter 1,2×, „erklärt nie selbst Krieg“ schlägt jede Erhöhung). Die Zufriedenheitswirkung aller Religionen eines Volks bildet einen **eigenen Teilwert „Creed“** (`Requirement Zufriedenheit.md`, neben „Leader“ und „Divine“) mit **Grenze ±8** (entschieden; Wirkung **linear mit dem Anhängeranteil**, Simulation prüft), unabhängig von den ±8 des Anführers und den ±15 von „Divine“.
 - **R-Hebel** wirken nicht auf Völker, sondern auf die Religion selbst (Ausbreitung, Spaltung): Grundwert 1 (`pull`, `carry`, `hold`, `merge`, `schism`) bzw. 0 (`devotion`, `suppress`); je Religion aus Stufen berechnet.
 - **Andacht:** Der bisherige Andacht-Summand (0,02 × Kultur „Devout“ plus Hebel `devotion` des Anführers, nur für Anhänger des Spieler-Gottes) gilt jetzt für **die Anhänger jeder Religion in einem Volk, das ihr folgt**, plus `devotion` der Religion; Vergessen −0,005 gilt für Einwohner einer Religion, der das Volk nicht folgt (`Requirement Gacha.md` §7.7).
 
@@ -147,11 +149,11 @@ Gilt für **alle** Religionen, auch für die des Spielers.
 - **Spaltung der Religion 0:** Die **neue Religion hat den Spieler nicht als Gott**: Sie ist eine Religion ohne Gott (Schritt 1) bzw. mit der Chance auf einen Rivalen-Gott (Schritt 2, Abschnitt 12). Der Spieler **verliert diese Gläubigen** für Faith und für die Siegbedingung (Game Design Abschnitt 9: der Spieler-Gott stirbt nur, wenn Religion 0 keine Gläubigen mehr hat; ein Rest bleibt, sonst Spielende). Sein Faith-Zufluss sinkt entsprechend.
 - Die Spaltung wird **angekündigt**: Anspannung „Tense“ (ab 70) erscheint im Faiths-Panel in der Religion 0 und als stiller Chronik-Eintrag („Unrest in your faith“), so dass der Spieler gegensteuern kann (Frieden zwischen den Völkern, Fähigkeiten wie Prophet's Light, Covenant of One, ein Eigenschafts-Eingriff). Die Spaltung selbst ist ein wichtiger Eintrag mit Dialog.
 - **Verschmelzung der Religion 0:** Verschmilzt sie mit einer anderen, **bleibt Religion 0 immer bestehen** (auch wenn die andere größer ist): deren Gläubige werden Gläubige des Spielers, und deren Eigenschaft kommt dazu (6.2). Der Spieler gewinnt damit Faith.
-- **Offen:** Soll der Spieler die Spaltung **verhindern** oder **zurücknehmen** können (Covenant of One auf die abgespaltene Religion ist die vorgesehene Antwort)? Empfehlung: ja, nur über die Fähigkeit; keine eigene Spielregel.
+- **Entschieden (Nutzer):** Der Spieler kann eine Spaltung seiner Religion **nur über Fähigkeiten** verhindern oder zurücknehmen (Covenant of One auf die abgespaltene Religion, Prophet's Light, Eigenschafts-Eingriffe); keine eigene Spielregel.
 
 ## 7. Tod der Religion
 
-- Eine Religion **stirbt**, wenn **weniger als 1 % aller Einwohner der Welt** oder **weniger als 20 Gläubige** ihr anhängen, und das **2 Jahre in Folge** (jährlich geprüft). Neu gegründete Religionen haben eine **Schonfrist von 5 Jahren** (**Offen**: sonst stirbt eine Volksglaube-Gründung im kleinen Volk sofort; Empfehlung: Schonfrist 5 Jahre, mindestens 20 Gläubige zur Gründung).
+- Eine Religion **stirbt**, wenn **weniger als 1 % aller Einwohner der Welt** oder **weniger als 20 Gläubige** ihr anhängen, und das **2 Jahre in Folge** (jährlich geprüft). Neu gegründete Religionen haben eine **Schonfrist von 5 Jahren** (in dieser Zeit wird nicht auf Tod geprüft) und brauchen **mindestens 20 Gläubige bei Gründung** (Abschnitt 3). Entschieden (Nutzer).
 - **Folgen:** Alle Einwohner der Religion (Schwankende) verlieren sie (255). Der **Gott stirbt mit ihr** (Schritt 2), **sofort**, seine Ladungen sind **verloren** (Rivalen); Eintrag in der Chronik (wichtig bei Religion 0 und bei Religionen mit Gott, sonst still), der Platz wird frei. Die Religion des Spielers stirbt nur über die Siegbedingung: keine Gläubigen mehr = Spielende, unverändert.
 - Der Tod der Religion ist **endgültig**; „vergessene Götter“ siehe Abschnitt 13.
 
@@ -164,7 +166,7 @@ Neue Kategorie **Faiths** (Ziel: eine Religion; Wahl in der Liste „Faiths“ o
 | 26 | Blessed Doctrine | Epic | Religion | gibt der Religion eine **zufällige** Eigenschaft (Ausschlüsse gelten, nicht schon vorhandene) auf **Stufe 2**; über die natürlichen Plätze hinaus erlaubt (bis 7); ist die Religion die des Spielers, ist die Eigenschaft ebenso zufällig (kein Wählen). Unzulässig, wenn alle verfügbaren Eigenschaften vorhanden oder ausgeschlossen sind |
 | 27 | Lost Doctrine | Rare | Religion | entfernt eine **zufällige** Eigenschaft der Religion (nicht die einzige: unzulässig bei 1 Eigenschaft); der Platz wird frei |
 | 28 | Sunder the Faith | Epic | Religion | löst **sofort eine Spaltung** aus (6.1, Mindestzahl Völker entfällt); auch auf die eigene Religion erlaubt (der Spieler wirft selbst); unzulässig ohne freien Religionsplatz oder ohne Volk mit ≥ 20 Gläubigen, die ≤ 70 % der Religion sind |
-| 29 | Spark of a New Faith | Epic | Volk | gründet in dem Volk **sofort eine neue Religion** (Eigenschaften nach 4.5 aus dem Gründervolk); **25 %** der Einwohner nehmen sie an (zuerst die religionslosen und schwankenden, dann Hexfelder um die Hauptstadt) mit Glauben 0,6; unzulässig ohne freien Religionsplatz oder bei weniger als 40 Einwohnern. Die Religion hat **keinen Gott** (Schritt 2: Kandidat für einen Rivalen-Gott) |
+| 29 | Spark of a New Faith | Epic | Volk | gründet in dem Volk **sofort eine neue Religion** (Eigenschaften nach 4.5 aus dem Gründervolk); **25 %** der Einwohner nehmen sie an (zuerst die religionslosen und schwankenden, dann Hexfelder um die Hauptstadt) mit Glauben 0,6; unzulässig ohne freien Religionsplatz oder bei weniger als 80 Einwohnern (25 % müssen mindestens 20 Gläubige ergeben, Abschnitt 3). Die Religion hat **keinen Gott** (Schritt 2: Kandidat für einen Rivalen-Gott) |
 | 30 | Covenant of One | Legendary | zwei Religionen | **verschmilzt** zwei gewählte Religionen sofort (6.2: die größere bleibt; mit Religion 0 bleibt Religion 0); zwei Zielwahlen nacheinander; unzulässig bei weniger als zwei Religionen |
 
 - Die bestehenden **Prophet's Light** (Glaube der Einwohner +0,15, Andacht +0,03) und **Doubt** (−0,15 an alle Religionen) wirken jetzt auf den Glauben an die **jeweilige** Religion: Light auf Religion 0 (bzw. die des wirkenden Gottes, Schritt 2), Doubt auf alle Religionen im Volk.
@@ -234,7 +236,7 @@ Mehrere Eigenschaften mischen die Gewichte. Die genaue Tabelle (je Eigenschaft �
 
 ### 12.4 Anzeige und Simulation
 
-- Faiths-Panel zeigt „Rival god“ mit Faith und Zahl der Ladungen? **Offen:** nein (Empfehlung: nur dass es einen Gott gibt, nicht seine Ladungen); die Karte zeigt nichts Neues. Chronik wie oben.
+- Faiths-Panel zeigt „Rival god“ mit Faith und Zahl der Ladungen? **Entschieden (Nutzer):** nur „Rival god“ (dass es einen Gott gibt), nicht seine Ladungen oder sein Faith; die Karte zeigt nichts Neues. Chronik wie oben.
 - Simulation: Häufigkeit des Erwachens, Zahl der Rivalen, Einsätze je Gott, Wirkung auf Völker des Spielers, Spielende durch Rivalen (Doubt, Restless Spirits in Serie auf den Spieler: Deckel prüfen), Verhältnis zu den Eigenschaften.
 
 ## 13. Zukunft (nicht in Schritt 1 und 2)
@@ -260,10 +262,7 @@ Mehrere Eigenschaften mischen die Gewichte. Die genaue Tabelle (je Eigenschaft �
 
 Entschieden (Nutzer): Religion als eigenes Objekt, höchstens 16, eine je Einwohner; Eigenschaften-Pool statt fester Werte (Muster der Anführer-Attribute); alle Religionen, auch die des Spielers, können sich spalten und verschmelzen; Ausbreitung, Bekehrung, Unterdrückung über Eigenschaften; Tod bei < 1 % der Einwohner oder < 20 Gläubigen 2 Jahre in Folge, der Gott stirbt mit; Schritt 1 ohne Götter, Schritt 2 Rivalen; Rivalen mit Faith, Preis, Pool und Fähigkeiten wie der Spieler; Verhalten aus den Eigenschaften; kein Sonderfall für die Völker des Spielers; Spielende unverändert; ein toter Gott stirbt sofort, Ladungen verloren; vergessene Götter in die Zukunft.
 
-Offen (Empfehlung):
-1. **Schonfrist** neuer Religionen (5 Jahre) und Mindestgläubige bei Gründung (20). Empfehlung: ja.
-2. **Rebellenvölker** gründen eigene Religion (Abschnitt 3): Empfehlung nein.
-3. **Spaltung der Spielerreligion verhindern/zurücknehmen** (6.3): Empfehlung nur über Fähigkeiten (Covenant of One), Warnung über „Tense“.
-4. **Creed-Deckel** ±8 und die Skalierung linear mit dem Anteil (4.4): Empfehlung so starten, Simulation prüft.
-5. **Rivalen-Anzeige** (12.4): Empfehlung nur „Rival god“, keine Ladungen, kein Faith.
-6. **Namen der Religionen** (Abschnitt 2): Empfehlung „Faith of the <Volk>“.
+Ebenfalls entschieden (Nutzer, später): Schonfrist neuer Religionen 5 Jahre und mindestens 20 Gläubige bei Gründung (3, 7); Rebellenvölker gründen keine eigene Religion (3); Spaltung der Spielerreligion nur über Fähigkeiten verhinderbar/rücknehmbar (6.3); Creed-Deckel ±8, linear mit dem Anteil, Simulation prüft (4.4); Rivalen-Anzeige nur „Rival god“ (12.4); Namen „Faith of the <Volk>“ (2).
+
+Offen:
+1. **Spaltung kann zu einer Rebellion führen** (Nutzer: ja, Regel noch zu entwerfen; Entwurf liegt dem Hauptprozess vor, noch nicht eingetragen).
