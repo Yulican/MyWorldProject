@@ -492,7 +492,7 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
         ptype = economy.type[pslot];
       }
       const p = BUILDINGS[ptype];
-      if (!isMaterial(p.good)) continue;
+      if (!isMaterial(p.good) || !buildingFits(sim, cell, ptype)) continue;
       const pshare = (pslot >= 0 ? REPAIR_SHARE : 1) * leaderLever(sim, cell, L.buildCost);
       if (wood < p.wood * pshare || stone < p.stone * pshare) continue;
       const netWood2 = netFast(sim, cell, Material.Wood, ptype, -1);

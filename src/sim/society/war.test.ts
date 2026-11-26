@@ -82,14 +82,14 @@ const borders = (sim: Simulation, cell: number, civ: number) => {
 type Fixture = { sim: Simulation; att: number; def: number; seats: number[] };
 
 /**
- * A grown world (seed 12, year 200, no war yet) whose first people gets
+ * A grown world (seed 17, year 200, no war yet) whose first people gets
  * `districts` new seats far from its capital; the districts of these seats
  * break away as a new people (`def`, its capital the first seat) next to the
  * old one (`att`). Soldiers: 10 melee in every settlement of att, 8 in every
  * settlement of def; strengths set to match.
  */
 function fixture(districts: number): Fixture {
-  const sim = createSimulation(generateWorld({ seed: 12 }));
+  const sim = createSimulation(generateWorld({ seed: 17 }));
   runYears(sim, 200);
   // The base rules of war: without the shifts of the peoples' leaders (war roll, threshold, army shares ...).
   dismissLeaders(sim);

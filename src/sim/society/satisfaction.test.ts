@@ -191,7 +191,7 @@ function runToRebellionCheck(sim: Simulation): void {
 }
 
 test('dissatisfied settlements stronger than their mother rise up as new peoples, one per road-joined group, and go to war (war phase 5)', () => {
-  const sim = createSimulation(generateWorld({ seed: 1 }));
+  const sim = createSimulation(generateWorld({ seed: 2 }));
   runYears(sim, 200);
   const owner = cellOwners(sim);
   const parent = livingCivilizations(sim).sort((a, b) => b.territory - a.territory)[0];
