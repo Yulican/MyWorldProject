@@ -110,7 +110,7 @@ Die Einflüsse wirken auf bewohnte und genutzte Hexfelder und gehen in die Prüf
 ## 12. Überschriebene und betroffene Regeln
 
 - `Requirement Gacha.md`: §6.1 (Nr. 1, 2, 5, 8, 9), §7.3, §7.4, §7.9, §9, §11, §12, §13.
-- `Requirement Regionale Rohstoffe.md`: neuer Abschnitt 12 (Ressourcen wachsen nach, Kapazität folgt dem Biom).
+- `Requirement Regionale Rohstoffe.md`: §3 Handels-Bauziel, neuer Abschnitt 12 (Ressourcen wachsen nach, Kapazität folgt dem Biom).
 - `Requirement Speichern und Laden.md`: §2, §8 (neue Felder, `SAVE_VERSION`).
 - `Requirement Kartenmodi.md`: §8, §10 (Datenquellen ändern sich im Spiel; kein neuer Modus).
 - Unverändert, aber betroffen: `Requirement Zufriedenheit.md` (Abwanderung aus Siedlungen mit Biomwechsel verändert die Zufriedenheit nur über die bestehenden Regeln), `Requirement Handel.md` (Warenvorkommen folgen der Versorgung).
@@ -127,3 +127,4 @@ Die Einflüsse wirken auf bewohnte und genutzte Hexfelder und gehen in die Prüf
 - Kein Desert neben Wasser nur für Hexfelder, die bei der Weltbildung nicht Desert waren.
 - Benchmark: kein neues Szenario; der `gacha`-Hook beschleunigt die natürliche Prüfung (alle Hexfelder alle 5 Ticks).
 - `climax` und `trend` werden mitgespeichert.
+- Zu diesem Update gehört die Biom-Korrektur der Holzfällerlager (nur in Wald/Dschungel, wie in `Requirement Regionale Rohstoffe.md` §3 vorgesehen); der dadurch entstandene Holzmangel außerhalb von Wald wird über das Handels-Bauziel aufgefangen (dort §3). Später: Vorteil von Wald/Hügeln über die Gebäude selbst stärken.
