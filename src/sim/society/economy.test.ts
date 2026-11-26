@@ -25,7 +25,7 @@ import {
   withBuildings,
 } from './buildings';
 import { MIL } from './military';
-import { EXPANSION_GROUP, buildingFits, capacityAfterRepair, isSettlementTarget, runEconomy, updateCellSupply, usableSlots } from './economy';
+import { EXPANSION_GROUP, TRADE_GOAL, buildingFits, capacityAfterRepair, isSettlementTarget, runEconomy, tradeCovers, updateCellSupply, usableSlots } from './economy';
 import { Deposit } from '../world/deposits';
 import { PAIRS } from './diplomacy';
 import { MERCHANT_LOAD, TRADE_GOODS, TradeGood, updateTradeNeeds } from './trade';
@@ -144,6 +144,12 @@ test('a ruin is repaired for half the cost and half the time', () => {
   runYears(sim, 60);
   const { economy } = sim;
   const cell = sim.world.startCell;
+  // Only the ruin below in the settlement's half: no upkeep of other buildings holds the repair back.
+  for (let s = cell * economy.slots; s < cell * economy.slots + economy.half; s++) {
+    economy.state[s] = SlotState.Empty;
+    economy.type[s] = -1;
+  }
+  updateCellSupply(sim, cell);
   // The building that raises the start hex's capacity most, standing...
   let type = -1;
   let gain = 0;
@@ -397,4 +403,47 @@ test('city tier follows the share of used slots: 50 % small, 80 % big, no roundi
   // No buildings is always a tribe.
   assert.equal(cityTier(0, 4), CityTier.Tribe);
   assert.equal(cityTier(0, 0), CityTier.Tribe);
+});
+
+test('trade goal: what a hex lacks counts as covered when its people and partners spare it, without its own surplus', () => {
+  const sim = createSimulation(generateWorld({ seed: 7 }));
+  const { trade, world } = sim;
+  const c = world.startCell;
+  const civ = world.owner[c];
+  assert.ok(civ > 0);
+  const other = civ + 1;
+  trade.civSpare = new Float32Array((other + 1) * TRADE_GOODS);
+  trade.civSpare[civ * TRADE_GOODS + TradeGood.Wood] = 10;
+  trade.surplus[c * TRADE_GOODS + TradeGood.Wood] = 4;
+  sim.diplomacy.partners[civ] = [];
+  // The people spare 10, 4 of them the hex's own: 6 for it.
+  assert.equal(tradeCovers(sim, c, 6, 0), true);
+  assert.equal(tradeCovers(sim, c, 7, 0), false);
+  // Stone lacking and spared by nobody: no goal; nothing lacking: no check.
+  assert.equal(tradeCovers(sim, c, 6, 1), false);
+  assert.equal(tradeCovers(sim, c, -5, 0), true);
+  // A trade partner's surplus counts too.
+  trade.civSpare[other * TRADE_GOODS + TradeGood.Wood] = 3;
+  trade.civSpare[other * TRADE_GOODS + TradeGood.Stone] = 2;
+  sim.diplomacy.partners[civ] = [other];
+  assert.equal(tradeCovers(sim, c, 9, 2), true);
+  assert.equal(tradeCovers(sim, c, 9.5, 2), false);
+});
+
+test('trade goal: settlements set goals traders serve, so more wood and stone is traded (Regionale Rohstoffe 3)', () => {
+  const traded = (years: number) => {
+    const before = TRADE_GOAL.years;
+    TRADE_GOAL.years = years;
+    try {
+      const sim = createSimulation(generateWorld({ seed: 7 }));
+      runYears(sim, 300);
+      return sim.trade.delivered[TradeGood.Wood] + sim.trade.delivered[TradeGood.Stone];
+    } finally {
+      TRADE_GOAL.years = before;
+    }
+  };
+  assert.equal(TRADE_GOAL.years, 2);
+  const off = traded(0);
+  const on = traded(2);
+  assert.ok(on > off, `${on} wood and stone traded with the trade goal, ${off} without`);
 });

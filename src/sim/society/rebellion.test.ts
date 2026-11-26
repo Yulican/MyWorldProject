@@ -27,9 +27,9 @@ function week(sim: Simulation): void {
   advanceWar(sim);
 }
 
-/** Seed 12 at year 200: no war yet; people 1 has 24 settlements in 4 road-joined groups around its capital. */
+/** Seed 13 at year 200 (with dynamic biomes): no war yet; people 1 has its settlements in several road-joined groups around its capital. */
 function grown(): Simulation {
-  const sim = createSimulation(generateWorld({ seed: 12 }));
+  const sim = createSimulation(generateWorld({ seed: 13 }));
   runYears(sim, 200);
   assert.equal(sim.war.wars, 0);
   return sim;

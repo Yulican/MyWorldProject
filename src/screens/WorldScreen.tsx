@@ -21,6 +21,7 @@ import {
   ABILITIES,
   TargetKind,
   canCast,
+  hexBiome,
   hexEconomy,
   hexEffects,
   hexMilitary,
@@ -310,6 +311,7 @@ export function WorldScreen() {
             strategic={isWaterBiome(sim.world.biome[panel.cell]) ? null : strategicStock(sim, panel.cell)}
             war={hexWar(sim, panel.cell)}
             god={hexEffects(sim, panel.cell)}
+            biomeTrend={isWaterBiome(sim.world.biome[panel.cell]) ? null : hexBiome(sim, panel.cell)}
             onClose={closePanel}
           />
         )}

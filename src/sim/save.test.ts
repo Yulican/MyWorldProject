@@ -8,6 +8,7 @@ import { isRng } from './rng';
 import { SAVE_HEADER_BYTES, SAVE_VERSION, adler32, continueSave, deserializeWorld, saveBytes, serializeWorld, startSave } from './save';
 import { TICKS_PER_YEAR, createSimulation, stepSimulation, stepSimulationPart, type Simulation } from './society/simulation';
 import { generateWorld } from './world/generate';
+import { Ab, SHIFT_WETTER, castAbility } from './society/gacha';
 
 function run(sim: Simulation, years: number): void {
   for (let t = 0; t < years * TICKS_PER_YEAR && !sim.gameOver; t++) stepSimulation(sim);
@@ -78,6 +79,33 @@ test('a world under the god (gacha scenario setup) continues identically', () =>
   const sim = load(agedSave());
   castGacha(sim);
   assertContinues(sim, 3, 5);
+});
+
+test('dynamic biomes: pinned hexes, changed biomes, overgrazing years and regrowing resources continue identically', () => {
+  const sim = load(agedSave());
+  assert.ok(sim.biomes.changes > 0, 'biomes changed in 300 years');
+  const c = sim.world.startCell;
+  sim.gacha.charges[Ab.BiomeShift]++;
+  assert.ok(castAbility(sim, Ab.BiomeShift, c, SHIFT_WETTER));
+  sim.gacha.charges[Ab.ExhaustedSoil]++;
+  assert.ok(castAbility(sim, Ab.ExhaustedSoil, c));
+  sim.biomes.grazeYears[c] = 5;
+  assert.equal(sim.biomes.pinned[c], 1);
+  const bytes = serializeWorld(sim);
+  const copy = load(bytes);
+  assert.deepEqual(copy.biomes.pinned, sim.biomes.pinned);
+  assert.deepEqual(copy.biomes.climax, sim.biomes.climax);
+  assert.deepEqual(copy.biomes.trend, sim.biomes.trend);
+  assert.deepEqual(copy.biomes.grazeYears, sim.biomes.grazeYears);
+  assertContinues(sim, 12, 2);
+});
+
+test('a save of the format before dynamic biomes (version 1) is refused', () => {
+  const bytes = serializeWorld(createSimulation(generateWorld({ seed: 7 })));
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(4, 1, true);
+  const r = deserializeWorld(bytes);
+  assert.ok(!r.ok && r.error.code === 'version' && r.error.version === 1);
+  assert.ok(SAVE_VERSION >= 2);
 });
 
 test('a save in slices is the same as one in a call, and loads', () => {

@@ -77,6 +77,7 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 - Die Modus-Färbung ist Teil der **Kachelbilder** (Detail- und Übersichtskacheln). Eine Kachel trägt als Signatur den Modus, Untermodus, ausgewähltes Volk und die Eimerwerte ihrer Hexe.
 - **Ein Moduswechsel zeichnet Kacheln nur, wenn die Karte ruht** (`setResting`). Bis dahin bleiben die alten Kacheln sichtbar (Modus „von gestern“ ist kurz zu sehen, kein Flackern). Die Übersicht (`buildTerrainOverview`) wird wie bisher erst nach `OVERVIEW_REST_MS` neu gebaut.
 - Ändern sich Werte während des Spiels (Snapshot), werden nur Kacheln neu gezeichnet, deren Eimerwerte sich ändern, und nur bei ruhender Karte.
+- **Dynamische Biome** (`Requirement Dynamische Biome.md` §9): Biomwechsel und Nachwachsen ändern Gelände und Fertility-Werte während des Spiels; Neuzeichnung wie oben nur bei ruhender Karte, kein Marker, kein neuer Modus.
 - Das Wischen selbst bleibt ohne Mehrarbeit: keine Modusberechnung im Frame; der Karten-Puffer entsteht im Snapshot der Spielzeit.
 
 ## 9. Performance und Benchmark
@@ -99,6 +100,7 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 - Supply, Fertility, Deposits, Economy: `Requirement Regionale Rohstoffe.md` (Versorgung §3, Vorkommen, Stadtstufen §11).
 - Diplomacy: `Requirement Diplomatie.md` §1, §4 (Anzeige). War/Military: `Requirement Krieg.md`. Government: `Requirement Zentralregierung.md`. Trade: `Requirement Handel.md` §11.
 - Speichern: `Requirement Speichern und Laden.md` §2 (Trailer).
+- Dynamische Biome: `Requirement Dynamische Biome.md` (Datenquellen Gelände und Fertility ändern sich im Spiel).
 - Ändert sich eine dieser Datenquellen (z. B. Zufriedenheitsskala), ändern sich die Skalen hier.
 
 ## 11. Offene Punkte

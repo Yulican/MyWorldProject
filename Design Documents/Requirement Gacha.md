@@ -1,6 +1,7 @@
 # Requirement: Gacha und Fähigkeiten
 
 Stand: **Entwurf, Grundregeln und offene Details vom Nutzer entschieden (Faith nach Spielzeit, 3 Fähigkeiten je Ziehung, Inventar, 4 Seltenheiten, alle 25 Fähigkeiten in Version 1); Faith-Faktor, Preisformel und Stufengewichte sind in der Simulation kalibriert und vom Nutzer gewählt (`tools/gachaStats.ts`, 12 Welten × 500 Jahre); Dauern, Stärken und Flächen der Fähigkeiten sind Startwerte „vorläufig, wird kalibriert“.** Ablauf: Design → Simulation → Umsetzung. Spieltexte sind Englisch („Faith“, „Gacha“, „Charge“).
+**Geändert durch `Requirement Dynamische Biome.md`:** Ressourcen wachsen nach (§7.9 „Kein Nachwachsen“ gilt nicht mehr), Drought verschiebt den Klimax (stuft Biome über die natürliche Rückkehr neu ein), Fertile Blessing beschleunigt die Rückkehr Richtung grün, ein per Biome Shift gesetztes Biom ist dauerhaft fixiert (`pinned`). Alle Punkte entschieden; Zahlen dort sind Startwerte bis zur Simulation.
 
 Baut auf `Game Design Gott einer Zivilisation` (Abschnitte 7 und 10), `Requirement Anführer.md` (Eingriffe auf Anführer), `Requirement Zufriedenheit.md`, `Requirement Diplomatie.md`, `Requirement Handel.md` und `Requirement Krieg.md` auf. Rivalen-Götter (Game Design, Abschnitt 8) bleiben vorerst außen vor.
 
@@ -64,15 +65,15 @@ Alle 25 gehören zu Version 1 (vom Nutzer gesehen und bestätigt, bis auf die zw
 
 | Nr. | Name | Stufe | Fläche | Wirkung |
 |---|---|---|---|---|
-| 1 | Fertile Blessing | Common | Radius 1 | Fruchtbarkeit sofort auf Kapazität und die natürliche Kapazität der Fruchtbarkeit ×1,25 (höchstens 1) für 20 Jahre; die Ernte steigt über die bestehende Versorgung/Ernte (Gott-Schicht, Abschnitt 7.1) |
-| 2 | Exhausted Soil | Common | 1 Hexfeld | alle Ressourcen des Hexfelds (Fruchtbarkeit, Wild, Fisch, Holz, Stein, Erz) sofort auf 10 % ihres Werts; der Verlust ist **dauerhaft**: es gibt kein Nachwachsen (Abschnitt 7.9) |
+| 1 | Fertile Blessing | Common | Radius 1 | Fruchtbarkeit sofort auf Kapazität und die natürliche Kapazität der Fruchtbarkeit ×1,25 (höchstens 1) für 20 Jahre; die Ernte steigt über die bestehende Versorgung/Ernte (Gott-Schicht, Abschnitt 7.1); zusätzlich Rückkehr der Biome zum Klimax ×2 Richtung „grün“ (`Requirement Dynamische Biome.md` §8) |
+| 2 | Exhausted Soil | Common | 1 Hexfeld | alle Ressourcen des Hexfelds (Fruchtbarkeit, Wild, Fisch, Holz, Stein, Erz) sofort auf 10 % ihres Werts; der Verlust wächst **nach** (Abschnitt 7.9, `Requirement Dynamische Biome.md` §5; Stein und Erz wachsen nicht nach) |
 | 3 | Wide Foundations | Rare | 1 Hexfeld | +1 Bauplatz der Siedlung (Abschnitt 7.5); dauerhaft, ohne Grenze |
 | 4 | Cramped Ground | Rare | 1 Hexfeld | −1 Bauplatz, nie unter die belegten Plätze; sind **alle** Plätze des Hexfelds belegt, ist es ein **unzulässiges Ziel** (Abschnitt 7.5); dauerhaft, ohne Grenze |
-| 5 | Drought | Rare | Radius 3 | Feuchtigkeit (`moisture`) −0,25 für 20 Jahre, dadurch weniger Regenwasser in der Versorgung (`supply.ts`, `RAIN_WATER × moisture`); danach zurück. Biome werden nicht neu eingestuft |
+| 5 | Drought | Rare | Radius 3 | Feuchtigkeit (`moisture`) −0,25 für 20 Jahre, dadurch weniger Regenwasser in der Versorgung (`supply.ts`, `RAIN_WATER × moisture`); danach zurück. Der Klimax der Biome folgt der aktuellen `moisture` und verschiebt sich trockener; die Hexfelder wandern über die natürliche Rückkehr dorthin (`Requirement Dynamische Biome.md` §8), nicht sofort |
 | 6 | Rich Vein | Rare | 1 Hexfeld | legt ein Sondervorkommen (Metall oder Mineral) auf das Hexfeld; Art zufällig unter Copper, Tin, Iron, Gold, Salt, Flint, Marble, Gems, gewichtet nach `deposits.ts`, nur eine zum Biom passende; Zielprüfer: Landhexfeld ohne Sondervorkommen, **kein Wald** (Forest ist kein zulässiges Ziel). Förderung, Handel und Kriegsgüter laufen über die bestehenden Systeme |
 | 7 | Great River | Legendary | Pfad bis 12 Hexfelder | bildet oder verlängert einen Fluss (Abschnitt 7.2) |
 | 8 | Wild Fire | Epic | Start 1 Hexfeld, breitet sich aus | Wald brennt, Holz weg, Gebäude werden Ruinen, später Ebene (Abschnitt 7.3) |
-| 9 | Biome Shift | Legendary | Radius 1 | wechselt das Biom der Hexfelder zu einem verwandten (Abschnitt 7.4) |
+| 9 | Biome Shift | Legendary | Radius 1 | wechselt das Biom der Hexfelder zu einem verwandten und **fixiert** es dauerhaft (Abschnitt 7.4) |
 
 ### 6.2 Völker (8)
 
@@ -151,7 +152,7 @@ Alle Dauer-Effekte (Fertile Blessing, Drought, Völker-Fähigkeiten) laufen übe
 
 - Zündung: Hexfeld der Biome Forest, Jungle, Savanna (brennbar); Zielprüfer: Zielhexfeld brennbar.
 - Ablauf in Wochen-Ticks: ein brennendes Hexfeld brennt **6 Wochen**; jede Woche entzündet es jeden brennbaren Nachbarn mit **15 %**; ein Hexfeld brennt nur einmal; höchstens **40 Hexfelder** je Brand.
-- Während es brennt: Gefahr +0,3 (Gott-Schicht, exakter Rückbau), Einwohner −3 % je Woche. Ausgebrannt: **Holz 0**, Wild ×0,3, und das Biom wird **Plains** (Kapazität, `danger`, `moveCost` neu aus der Biomtabelle wie bei Biome Shift, 7.4); die Ressourcen sind **dauerhaft** verloren (kein Nachwachsen, 7.9). Straßen und Besitzer bleiben; **stehende Gebäude auf ausgebrannten Hexfeldern werden zu Ruinen** (bestehendes Ruinensystem `ruins`).
+- Während es brennt: Gefahr +0,3 (Gott-Schicht, exakter Rückbau), Einwohner −3 % je Woche. Ausgebrannt: **Holz 0**, Wild ×0,3, und das Biom wird **Plains** (Kapazität, `danger`, `moveCost` neu aus der Biomtabelle wie bei Biome Shift, 7.4); die Ressourcen wachsen **nach** (7.9; Holz mit dem nachwachsenden Wald), das Hexfeld ist **nicht fixiert** und kehrt, wo der Klimax Forest ist, über die Rückkehr zu Forest zurück (`Requirement Dynamische Biome.md` §3, §8). Straßen und Besitzer bleiben; **stehende Gebäude auf ausgebrannten Hexfeldern werden zu Ruinen** (bestehendes Ruinensystem `ruins`).
 - Liste der brennenden Hexfelder (≤ 64 Einträge: Hexfeld, Restwochen); pro Tick nur diese Liste; eigenes Kartensymbol.
 
 ### 7.4 Biome Shift
@@ -162,7 +163,8 @@ Alle Dauer-Effekte (Fertile Blessing, Drought, Völker-Fähigkeiten) laufen übe
   `Desert ↔ Savanna ↔ Plains ↔ Forest ↔ Jungle ↔ Swamp`, `Tundra ↔ Plains`, `Hills ↔ Plains` und `Mountains ↔ Hills` (entschieden: Tundra und Hills werden in beide Richtungen zu Plains, Mountains in beide Richtungen zu Hills).
 
   Wetter = in Richtung Swamp, trockener = in Richtung Desert; am Kettenende bleibt das Hexfeld.
-- Danach neu aus der Biomtabelle: `resourceCapacity` (× `terrainVariation`), `danger`, `moveCost`; ein Verlust an aktuellen Ressourcen ist dauerhaft (kein Nachwachsen, 7.9). `moisture`/`temperature`, Straßen, Gebäude, Besitzer und Bewohner bleiben; wer im neuen Biom nicht leben kann, wandert über die bestehenden Regeln ab. Kacheln neu gezeichnet.
+- Danach neu aus der Biomtabelle: `resourceCapacity` (× `terrainVariation`), `danger`, `moveCost`; der Bestand wächst oder sinkt zur neuen Kapazität (7.9). `moisture`/`temperature`, Straßen, Gebäude, Besitzer und Bewohner bleiben; wer im neuen Biom nicht leben kann, wandert über die bestehenden Regeln ab. Kacheln neu gezeichnet.
+- **Fixierung (entschieden, `Requirement Dynamische Biome.md` §8):** jedes durch Biome Shift gesetzte Hexfeld bekommt das Flag `pinned`; das Biom bleibt **dauerhaft**, bis der Spieler es erneut ändert. Natürliche Übergänge und Zivilisationseinflüsse überspringen es (entschieden). Das Nachwachsen der Ressourcen läuft weiter. `pinned` wird mit dem Spielstand gespeichert (Abschnitt 9). Anzeige im Hexfeld-Panel: „Set by the god“.
 
 ### 7.5 Bauplatz-Modifikator (Wide Foundations, Cramped Ground)
 
@@ -193,9 +195,9 @@ Neuer Teilwert in der Zufriedenheit jeder Siedlung (`Requirement Zufriedenheit.m
 - **Ziel:** Reroll Destiny ruft die Zielwahl (§6) neu auf; Ausgangswert und Fortschritt zurück. Das ist die **einzige** Ausnahme von „kein Zielwechsel“.
 - Chronik: ein vom Gott gesetzter Wechsel bekommt einen stillen Eintrag mit „by the god“. Das Panel „Leader ›“ zeigt das Ergebnis ohne Änderung; das **Todesalter wird nicht angezeigt** (entschieden).
 
-### 7.9 Kein Nachwachsen (entschieden)
+### 7.9 Nachwachsen (geändert)
 
-Ressourcenverluste durch Exhausted Soil, Wild Fire und Biome Shift sind **dauerhaft**: Die Fähigkeiten setzen die Werte, die Kapazität bleibt wie gesetzt, und es gibt kein Nachwachsen der Ressourcen im Kern. Ein Nachwachsen kann später als eigenes Feature kommen (Abschnitt 13). Alle Stellen dieses Dokuments, die „wächst nach“ sagten, gelten damit nicht mehr.
+**Ersetzt die frühere Entscheidung „Kein Nachwachsen“.** Ressourcenverluste durch Exhausted Soil, Wild Fire und Biome Shift **wachsen nach**: die Fähigkeiten setzen die Werte; danach wachsen die Ressourcen im Kern zur Kapazität des (neuen) Bioms zurück (Startwert 2 % der Lücke je Jahr). Entschieden: Fruchtbarkeit, Wild, Fisch, Holz wachsen nach, Stein und Erz nicht; einheitliche Rate; keine Sperre bei Ernte (`Requirement Dynamische Biome.md` §5, §13).
 
 ## 8. Anzeige
 
@@ -211,7 +213,7 @@ Ressourcenverluste durch Exhausted Soil, Wild Fire und Biome Shift sind **dauerh
 - Spielerzustand (nicht Teil des Hexfeld-Zustands): `faith` (`Float64`), `pulls` (Anzahl bisheriger Ziehungen für den Preis, `Int32`), `charges` (`Int32Array`, 25 Einträge), Zufallsgenerator „gacha“.
 - Gott-Schicht: Effektliste (Abschnitt 7.1), `godLev` (Volk × Hebel, `Float32Array`), `godDevotion` (je Volk), `ageShift`, `honed` (je Anführer), `heirInherits`, `youngHeir` (je Volk), `slotMod` (je Hexfeld), Feuerliste (Abschnitt 7.3), Zähler für den Teilwert „Divine“.
 - Fähigkeitstabelle: `ABILITIES` mit Id, Name, Kategorie, Stufe, Zielart, Fläche, Dauer, Zielprüfer, Wirkung (eine reine Funktion je Fähigkeit im Kern, kein React). Kern und Zufall sind **portierbar** (flache Arrays, deterministisch pro Seed).
-- **Speichern/Laden** (`Requirement Speichern und Laden.md`): der gesamte Gottes-Zustand dieses Abschnitts (Faith, `pulls`, `charges`, Zufallsgenerator „gacha“, Effektliste mit Restdauer, `godLev`, `godDevotion`, `ageShift`, `honed`, `heirInherits`, `youngHeir`, `slotMod`, Feuerliste, „Divine“-Zähler) ist Teil des Spielstands; neue Felder hier müssen dort aufgenommen und die Formatversion erhöht werden. Nicht gespeichert: Einsatz-Modus/Zielwahl der Anzeige.
+- **Speichern/Laden** (`Requirement Speichern und Laden.md`): der gesamte Gottes-Zustand dieses Abschnitts (Faith, `pulls`, `charges`, Zufallsgenerator „gacha“, Effektliste mit Restdauer, `godLev`, `godDevotion`, `ageShift`, `honed`, `heirInherits`, `youngHeir`, `slotMod`, Feuerliste, „Divine“-Zähler, und neu die Biom-Felder `pinned`, `climax`, `trend`, `grazeYears` aus `Requirement Dynamische Biome.md` §10) ist Teil des Spielstands; neue Felder hier müssen dort aufgenommen und die Formatversion erhöht werden. Nicht gespeichert: Einsatz-Modus/Zielwahl der Anzeige.
 - Faith-Zufluss läuft **je Tick** im Kern; die Ziehung selbst ist ein Aufruf des Kerns (`pullGacha(sim)`), kein Zeitgeber der App.
 
 ## 10. Performance, Benchmark, Simulation
@@ -230,13 +232,14 @@ Ressourcenverluste durch Exhausted Soil, Wild Fire und Biome Shift sind **dauerh
 - `Requirement Anführer.md`: §1, §4, §5, §9, §10 (Eingriff des Gottes jetzt in 1.0; Todesalter-Verschiebung, Attribut- und Zieleingriff, Teilwert „Leader“ bleibt auf ±8).
 - `Requirement Zufriedenheit.md`: neuer Teilwert „Divine“ (7.6); Chronik-Einträge (stille Einsatz-Einträge).
 - `Requirement Regionale Rohstoffe.md`: Ressourcenänderung, Sondervorkommen (Rich Vein), Bauplätze (Wide Foundations, Cramped Ground, §7.5), Ressourcen und Wasser (Fertile Blessing, Exhausted Soil, Drought, Great River).
+- `Requirement Dynamische Biome.md`: Nachwachsen (7.9), Klimax und Drought, Fertile Blessing, Fixierung durch Biome Shift (7.4), Wild Fire.
 - `Requirement Handel.md`, `Requirement Krieg.md`, `Requirement Diplomatie.md`: Hebel für Ernte/Handel (Golden Harvest), Siedeln (Wanderlust).
 - Game Design (Abschnitte 1, 2, 7, 10, 12): Faith statt Einflusspunkte, Gacha-Regeln.
 - Game Design Abschnitt 7: Glaubenswert und `faithYear` (Prophet's Light/Doubt).
 
 ## 12. Offene Punkte
 
-Entschieden (Nutzer): kein Nachwachsen der Ressourcen (7.9); Great River auf einem Fluss verstärkt ihn (+1 bis zur Mündung); eine überflutete Siedlung verliert alle Einwohner; Golden Harvest auch auf die Nahrungsernte; Rich Vein nicht auf Wald; Biome Shift Tundra/Hills → Plains, Mountains → Hills; keine Gott-Obergrenzen je Hebel (nur „Divine“ ±15); Young Heir und Dynasty's Heir unzulässig bei schon gesetztem Flag; keine Pfadvorschau für Great River; Übersichts-Neuzeichnung bleibt bei 1 s Ruhe; Startvorrat 0; Wanderlust und Young Heir; keine Grenze für Bauplätze und Attribute; zufällige Attribute; Wild Fire macht Ruinen; Great River in einer Senke macht einen See; Todesalter nicht angezeigt; Doubt senkt den Glauben an alle Götter; Anbetung ab 55 % Gläubigen, Ende unter 45 % (7.7); überflutete Siedlung bei See (7.2). Noch offen:
+Entschieden (Nutzer): ~~kein Nachwachsen der Ressourcen~~ (ersetzt: Ressourcen wachsen nach, 7.9 und `Requirement Dynamische Biome.md`); Biome Shift fixiert dauerhaft; Drought verschiebt den Klimax; Great River auf einem Fluss verstärkt ihn (+1 bis zur Mündung); eine überflutete Siedlung verliert alle Einwohner; Golden Harvest auch auf die Nahrungsernte; Rich Vein nicht auf Wald; Biome Shift Tundra/Hills → Plains, Mountains → Hills; keine Gott-Obergrenzen je Hebel (nur „Divine“ ±15); Young Heir und Dynasty's Heir unzulässig bei schon gesetztem Flag; keine Pfadvorschau für Great River; Übersichts-Neuzeichnung bleibt bei 1 s Ruhe; Startvorrat 0; Wanderlust und Young Heir; keine Grenze für Bauplätze und Attribute; zufällige Attribute; Wild Fire macht Ruinen; Great River in einer Senke macht einen See; Todesalter nicht angezeigt; Doubt senkt den Glauben an alle Götter; Anbetung ab 55 % Gläubigen, Ende unter 45 % (7.7); überflutete Siedlung bei See (7.2). Noch offen:
 
 - **Folgeaufgabe Bauplatz-Arrays** (7.5).
 - **Honed Mind:** ×1,5 auf additive Abweichungen, Faktor^1,5 auf multiplikative.
@@ -247,7 +250,7 @@ Entschieden (Nutzer): kein Nachwachsen der Ressourcen (7.9); Great River auf ein
 
 ## 13. Später (nicht in Version 1)
 
-- Nachwachsen der Ressourcen (heute dauerhafte Verluste, 7.9).
+- ~~Nachwachsen der Ressourcen~~ (jetzt Teil von 1.0, `Requirement Dynamische Biome.md`).
 - Rivalen-Götter mit eigenem Faith und eigenen Ladungen.
 - Handel mit Ladungen, Verschmelzen, Pity-System (bewusst ausgeschlossen).
 - Weitere Fähigkeiten nach Kultureffekten (Seafarers' Whisper, sobald Kultur im Spiel etwas bewirkt) und Fähigkeiten auf Kriege und Verträge.

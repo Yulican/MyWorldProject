@@ -1,6 +1,6 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
-Stand: Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
+Stand: Abschnitt 3 Handels-Bauziel (entschieden, Zahlen gewählt), Holzfäller nur in Wald/Dschungel; davor: Abschnitt 12 (dynamische Biome, Ressourcen wachsen nach: Entwurf, alle Regeln entschieden, Zahlen Startwerte) neu, Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
 (Ablauf: Design → Simulation → Umsetzung), Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
@@ -45,6 +45,29 @@ abgestimmt.
 - Damit können viele Siedlungen der Ebene zusammen eine Stadt versorgen,
   ein Wald aber mehrere Städte, und er kann ausführen. Große Städte werden
   seltener; das ist gewollt.
+- **Handels-Bauziel (entschieden, Zahlen vom Nutzer gewählt):** Kann die
+  eigene Ernte Holz und Stein eines Gebäudes nicht innerhalb von 5 Jahren
+  bezahlen, setzt die Siedlung das Gebäude trotzdem als Bauziel, wenn die
+  fehlende Menge (Kosten minus Bestand, je Material) aus dem Überschuss
+  ihres Volks und ihrer Handelspartner verfügbar ist (Summe von deren
+  Überschuss minus eigener Überschuss; Volks-/Partner-Ebene, keine Routen-
+  oder Entfernungsprüfung, gleiche Ebene wie die Interessenprüfung der
+  Händler). Wartegrenze `tradeGoal` = 2 Jahre (entschieden). Das Netto-Unterhaltskriterium
+  des Gebäudes bleibt. So erzeugen Mangelsiedlungen Nachfrage, und Händler
+  liefern Wälder-Holz und Hügel-Stein dorthin.
+- **Bewusst nicht:** Grundsammeln bleibt 2 (entschieden); keine Änderung der Holz-/Stein-
+  Kapazitäten der Biome; keine selbst geplanten Holzfällerlager oder
+  Steinbrüche (getestet, verworfen: weniger Grundsammeln bricht die Wirtschaft
+  ein). Der Vorteil von Wald/Hügeln (Bau) gegenüber dem Mangel anderswo
+  bleibt als Kontrast erhalten, ohne pauschalen Ausgleich.
+- **Simulation** (`tools/woodGroups.ts`, 12 Welten × 500 Jahre): Bevölkerung
+  21,9k (vor der Biom-Korrektur 21,8k, danach 20,2k), Siedlungen 288, Handel
+  65,8k (danach 55,8k), Holz/Stein gehandelt 1996/563 (danach 658/119),
+  Aufstände 5,5; Gebäude je Siedlung Wald 2,8, Hügel/Gebirge 2,5 (vorher 1,9),
+  übrige 2,4.
+- **Später (nicht jetzt):** den Vorteil von Wald und Hügeln über die Gebäude
+  selbst stärken, z. B. bessere Gebäude oder Stadtstufen, die viel Holz oder
+  Stein brauchen.
 
 ## 4. Verlässliche Handelsabkommen (Schritt 1)
 
@@ -344,3 +367,11 @@ Regel (1–2 Gebäude = kleine, ab 3 = große Stadt), die auf 4 Plätze ausgeleg
   mit).
 
 Stand der Zahlen: Startwerte (50 % und 80 %), vom Nutzer gewählt.
+
+## 12. Dynamische Biome und nachwachsende Ressourcen
+
+Neu, Details in `Requirement Dynamische Biome.md` (Zahlen Startwerte bis zur Simulation):
+
+- **Biome sind veränderlich** (Rückkehr zum Klimax, Nachbardruck, Einflüsse der Völker). Wechselt das Biom eines Hexfelds, folgt die **Kapazität** (`resourceCapacity`) dem neuen Biom (Tabelle in Abschnitt 3, × `terrainVariation`); `danger` und `moveCost` ebenfalls. Das gilt auch für Siedlungs-Hexfelder (halbe Wechselchance, Abwanderung über die bestehenden Regeln der Versorgung).
+- **Ressourcen wachsen nach** (Startwert 2 % der Lücke zur Kapazität je Jahr): ersetzt die Aussage, Ressourcenverluste (Exhausted Soil, Wild Fire, Biome Shift) seien dauerhaft. Entschieden: Fruchtbarkeit, Wild, Fisch, Holz wachsen nach, Stein und Erz nicht; einheitliche Rate; keine Sperre bei Ernte (die Ernte verbraucht den Bestand heute nicht).
+- **Bauplätze** (Abschnitt 6, 11): Die nutzbaren Plätze hängen vom Biom ab (6 auf der Ebene, 4 sonst); ein Wechsel von oder zu Plains ändert sie. Sie liegen wie bisher **nie unter den belegten** Plätzen (`Requirement Gacha.md` §7.5); die Stadtstufe folgt dem Anteil. Biomgebundene Gebäude (Holzfällerlager, Sägewerk, Steinbruch, Steinmetz; Abschnitt 3) auf einem Hexfeld, das nicht mehr passt, werden Ruinen (entschieden, `Requirement Dynamische Biome.md` §7).

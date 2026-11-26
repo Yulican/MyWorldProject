@@ -668,7 +668,11 @@ function applyAbility(sim: Simulation, ability: number, target: number, option: 
         const c = shiftCells[i];
         if (!shiftable(sim, c)) continue;
         const to = shiftedBiome(w.biome[c], option);
-        if (to >= 0) setBiome(sim, c, to);
+        if (to < 0) continue;
+        setBiome(sim, c, to);
+        // Set by the god: stays until the next Biome Shift (Requirement Dynamische Biome 8).
+        sim.biomes.pinned[c] = 1;
+        sim.biomes.trend[c] = 0;
       }
       return;
     }
@@ -745,6 +749,31 @@ function applyLand(sim: Simulation, slot: number): void {
     updateCellSupply(sim, c);
   }
   g.effCount[slot] = n;
+  if (ability === Ab.Drought) droughtChronicle(sim, slot, 'A drought parches');
+}
+
+/** Quiet chronicle entry when a Drought begins or ends over a settlement (Requirement Dynamische Biome 9). */
+function droughtChronicle(sim: Simulation, slot: number, what: string): void {
+  const g = sim.gacha;
+  const o = slot * MAX_AREA;
+  for (let i = 0; i < g.effCount[slot]; i++) {
+    const c = g.effCells[o + i];
+    if (sim.cellPop[c] <= 0) continue;
+    const civ = sim.civs[sim.world.owner[c]];
+    sim.chronicle.push({ tick: sim.tick, text: `${what} the land of the ${civ?.name ?? 'wanderers'}.`, cell: c, important: false });
+    return;
+  }
+}
+
+/** True while a Fertile Blessing lies on hex `cell` (dynamic biomes: its return towards green is faster). */
+export function blessedCell(sim: Simulation, cell: number): boolean {
+  const g = sim.gacha;
+  for (let i = 0; i < MAX_EFFECTS; i++) {
+    if (g.effAbility[i] !== Ab.FertileBlessing) continue;
+    const o = i * MAX_AREA;
+    for (let k = 0; k < g.effCount[i]; k++) if (g.effCells[o + k] === cell) return true;
+  }
+  return false;
 }
 
 /** Ends entry `slot`: land changes are taken off, a people's god layer is recomputed. */
@@ -755,6 +784,7 @@ function endEffect(sim: Simulation, slot: number): void {
   if (ability < 0) return;
   g.effAbility[slot] = -1;
   if (ability === Ab.FertileBlessing || ability === Ab.Drought) {
+    if (ability === Ab.Drought) droughtChronicle(sim, slot, 'The drought ends over');
     const o = slot * MAX_AREA;
     for (let i = 0; i < g.effCount[slot]; i++) {
       const c = g.effCells[o + i];
@@ -1071,6 +1101,8 @@ function burnOut(sim: Simulation, cell: number): void {
   w.resources[cell * RESOURCE_COUNT + Resource.Game] *= GACHA.fireGame;
   ruinBuildings(sim, cell);
   setBiome(sim, cell, Biome.Plains);
+  // Not set by the god: the plains return to their climax (Requirement Dynamische Biome 8).
+  sim.biomes.pinned[cell] = 0;
 }
 
 // ---------------------------------------------------------------------------
