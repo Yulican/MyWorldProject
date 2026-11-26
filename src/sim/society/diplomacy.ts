@@ -1,3 +1,4 @@
+import { FAITH } from './faithHooks';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import type { Term } from '../terms';
@@ -301,6 +302,7 @@ export function trustTerms(sim: Simulation, a: number, b: number): Term[] {
   const terms: Term[] = [{ label: 'Base', value: TRUST_BASE + lev[a * LEVERS + L.trustBase] }];
   if (lev[a * LEVERS + L.trust] !== 0) terms.push({ label: 'Leader', value: lev[a * LEVERS + L.trust] });
   if (dip.peace[k] > 0) terms.push({ label: 'Peaceful neighbors', value: dip.peace[k] });
+  if (FAITH.trust !== null && FAITH.trust[k] !== 0) terms.push({ label: 'Faith', value: FAITH.trust[k] });
   if (dip.open[pair(b, a)]) terms.push({ label: 'Their borders are open to us', value: AGREEMENT_TRUST });
   if (dip.freeTrade[k]) terms.push({ label: 'Free trade agreement', value: AGREEMENT_TRUST });
   if (dip.migration[k]) terms.push({ label: 'Migration agreement', value: AGREEMENT_TRUST });
@@ -932,7 +934,7 @@ function refreshRelations(sim: Simulation, living: number[]): void {
 export function trustValue(sim: Simulation, a: number, b: number): number {
   const dip = sim.diplomacy;
   const k = pair(a, b);
-  let sum = TRUST_BASE + sim.leaders.lev[a * LEVERS + L.trustBase] + sim.leaders.lev[a * LEVERS + L.trust] + dip.peace[k];
+  let sum = TRUST_BASE + sim.leaders.lev[a * LEVERS + L.trustBase] + sim.leaders.lev[a * LEVERS + L.trust] + dip.peace[k] + (FAITH.trust !== null ? FAITH.trust[k] : 0);
   if (dip.open[pair(b, a)]) sum += AGREEMENT_TRUST;
   if (dip.freeTrade[k]) sum += AGREEMENT_TRUST;
   if (dip.migration[k]) sum += AGREEMENT_TRUST;

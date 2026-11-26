@@ -1,3 +1,4 @@
+import { FAITH } from './faithHooks';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import { sumTerms, type Term } from '../terms';
@@ -190,6 +191,8 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
     if (sim.leaders.sat[civ.id] !== 0) terms.push({ label: 'Leader', value: sim.leaders.sat[civ.id] });
     // The god's Grateful Hearts / Restless Spirits (Requirement Gacha 7.6), capped on their own.
     if (sim.gacha.divine[civ.id] !== 0) terms.push({ label: 'Divine', value: sim.gacha.divine[civ.id] });
+    if (FAITH.creed !== null && FAITH.creed[civ.id] !== 0) terms.push({ label: 'Creed', value: FAITH.creed[civ.id] });
+    if (FAITH.heresy !== null && FAITH.heresy[civ.id] !== 0) terms.push({ label: 'Heresy', value: FAITH.heresy[civ.id] });
   }
   return terms;
 }
@@ -213,6 +216,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   if (civ) {
     for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
     sum += sim.leaders.sat[civ.id] + sim.leaders.conn[civ.id] + sim.gacha.divine[civ.id];
+    if (FAITH.creed !== null) sum += FAITH.creed[civ.id] + FAITH.heresy![civ.id];
   }
   return clampSatisfaction(sum);
 }

@@ -1,6 +1,7 @@
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { GOV_TUNING } from './taxes';
 import type { Simulation } from './simulation';
+import { FAITH } from './faithHooks';
 
 // Leaders ("Design Documents/Requirement Anführer.md"), the leaf part: the numbers, the lever set per
 // people, the state and the event counters. No imports besides types, so war.ts, diplomacy.ts,
@@ -419,6 +420,9 @@ export function combineLevers(sim: Simulation, civ: number): void {
   const own = sim.leaders.own;
   const god = sim.gacha ? sim.gacha.godLev : null;
   for (let k = 0; k < LEVERS; k++) lev[o + k] = god === null ? own[o + k] : LEVER_KIND[k] ? own[o + k] * god[o + k] : own[o + k] + god[o + k];
+  // The third layer, "Glaube" (religion prototype, faithHooks.ts).
+  const faith = FAITH.lev;
+  if (faith !== null && o + LEVERS <= faith.length) for (let k = 0; k < LEVERS; k++) lev[o + k] = LEVER_KIND[k] ? lev[o + k] * faith[o + k] : lev[o + k] + faith[o + k];
 }
 
 /** An experience of the leader of `civ` (war won, uprising ...); counted only while it has one. */

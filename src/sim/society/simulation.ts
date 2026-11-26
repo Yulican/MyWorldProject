@@ -73,6 +73,7 @@ import {
   updateDiplomacy,
   type Diplomacy,
 } from './diplomacy';
+import { FAITH } from './faithHooks';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { GODS, PLAYER_GOD, advanceGod, createGacha, resetGodCiv, setWorship, startGodTick, updateWorship, type Gacha } from './gacha';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
@@ -570,7 +571,7 @@ export function livingCivilizations(sim: Simulation): Civilization[] {
 // ---------------------------------------------------------------------------
 // Inhabitants
 
-function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, faith: number): void {
+function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, faith: number, parent = -1): void {
   const { pop } = sim;
   const i = allocateSlot(pop);
   pop.alive[i] = 1;
@@ -581,6 +582,7 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
   pop.count++;
   sim.cellPop[cell]++;
   sim.cellCivPop[cell * sim.civSlots + civ]++;
+  if (FAITH.on) FAITH.added!(sim, i, parent, cell);
 }
 
 /** The military's year (military.ts: updateMilitary): pay, dismissals, training; trained adults leave the population, dismissed soldiers return to it. */
@@ -745,11 +747,17 @@ function updateInhabitant(sim: Simulation, i: number): void {
   // booked under whichever of these pulled hardest.
   const before = pop.faith[i];
   const neighborFaith = world.population[cell] > 0 ? world.faith[cell] : before;
+  let faith: number;
+  if (FAITH.on) {
+    // Religion layer (religion.ts): faith in the inhabitant's own religion, spread, conversion.
+    faith = FAITH.step!(sim, i, civId, cell, before);
+    pop.faith[i] = faith;
+  } else {
   const pull = (neighborFaith - before) * 0.1;
   // The god's layer (Prophet's Light, Doubt) adds its devotion in every people, worshipping or not.
   const devotion = (civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 + sim.leaders.lev[civId * LEVERS + L.devotion] : 0) + sim.gacha.godDevotion[civId * GODS + PLAYER_GOD];
   const fading = civ.worshipsPlayer ? 0 : 0.005;
-  const faith = clamp(before + pull + devotion - fading, 0, 1);
+  faith = clamp(before + pull + devotion - fading, 0, 1);
   pop.faith[i] = faith;
   const wasBeliever = before >= BELIEVER_FAITH;
   if (wasBeliever !== faith >= BELIEVER_FAITH) {
@@ -759,6 +767,7 @@ function updateInhabitant(sim: Simulation, i: number): void {
     } else if (pull > devotion) ledger.wonByNeighbors++;
     else ledger.grewDevout++;
   }
+  }
 
   // Full birth rate up to half the hex's capacity, none once it is overfull;
   // satisfied settlements have more children, unhappy ones fewer.
@@ -766,7 +775,7 @@ function updateInhabitant(sim: Simulation, i: number): void {
   if (age >= 16 && age <= 42 && rng() < birth) {
     const childFaith = clamp(faith * 0.9 + neighborFaith * 0.1 + (rng() - 0.5) * 0.1, 0, 1);
     if (childFaith >= BELIEVER_FAITH) ledger.born++;
-    addInhabitant(sim, cell, civId, 0, childFaith);
+    addInhabitant(sim, cell, civId, 0, childFaith, i);
   }
 
 }
@@ -1147,7 +1156,7 @@ function splitCutOffLandOnce(sim: Simulation, owner: Uint8Array): void {
         if (!pop.alive[i] || pop.civ[i] !== parent.id || !inGroup[pop.cell[i]]) continue;
         if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
         changeCiv(sim, i, civ.id);
-        pop.faith[i] *= 0.6;
+        if (!FAITH.on) pop.faith[i] *= 0.6;
       }
       for (const c of cells) {
         owner[c] = civ.id;
@@ -1225,7 +1234,7 @@ function refreshSnapshot(sim: Simulation): void {
     if (pop.age[i] >= ADULT_AGE) sim.cellAdults[pop.cell[i]]++;
     faithSum[pop.cell[i]] += pop.faith[i];
     civFaithSum[pop.civ[i]] += pop.faith[i];
-    if (pop.faith[i] >= BELIEVER_FAITH) believers[pop.civ[i]]++;
+    if (pop.faith[i] >= BELIEVER_FAITH && (!FAITH.on || FAITH.rel[i] === 0)) believers[pop.civ[i]]++;
   }
 
   const civPop = snapCivPop.fill(0);
