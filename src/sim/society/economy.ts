@@ -60,6 +60,12 @@ const STEPS_PER_YEAR = 4;
 const BUILD_FROM_CROWDING = 0.5;
 /** A settlement saves up for a building its harvest pays for within this many years. */
 export const SAVE_UP_YEARS = 5;
+/**
+ * Trade goal (Requirement Regionale Rohstoffe 3): a building the own harvest can't pay within SAVE_UP_YEARS is
+ * still set as the goal when the surplus of the own people and its trade partners covers what is missing; it
+ * counts as this many years of waiting. 0 = off (tools' comparison).
+ */
+export const TRADE_GOAL = { years: 2 };
 
 /** Building slots of a hex on plains and elsewhere: plains build up, woods and mountains supply them. */
 const PLAINS_SLOTS = SETTLEMENT_SLOTS;
@@ -473,6 +479,18 @@ function planBuilding(sim: Simulation, cell: number, repairsOnly = false): boole
       if (wait <= SAVE_UP_YEARS && (gain > bestGain || wait < bestTime)) {
         bestGain = gain;
         bestTime = wait;
+        bestSlot = slot;
+        bestType = type;
+        firstType = -1;
+      } else if (
+        TRADE_GOAL.years > 0 &&
+        wait > SAVE_UP_YEARS &&
+        (gain > bestGain || TRADE_GOAL.years < bestTime) &&
+        tradeCovers(sim, cell, costWood - wood, costStone - stone)
+      ) {
+        // Out of reach by the own harvest, but traders can bring what is missing.
+        bestGain = gain;
+        bestTime = TRADE_GOAL.years;
         bestSlot = slot;
         bestType = type;
         firstType = -1;
@@ -1007,4 +1025,28 @@ function buildingEffect(good: number, amount: number, percent: number, name: str
   if (good === Good.Barrels) return `−${amount} water → +${amount} water barrels/year`;
   if (percent) return `+${Math.round(percent * 100)} % ${name}`;
   return `+${amount} ${name}${good >= SUPPLY_KINDS ? '/year' : ''}`;
+}
+
+/**
+ * Trade goal: whether the wood and stone hex `cell` lacks for a building (`lackWood`, `lackStone`: cost minus stock)
+ * are spared by its people and their trade partners (trade.civSpare, without the hex's own surplus). People and
+ * partner level like the merchants' interest check: no route or distance check. No allocation.
+ */
+export function tradeCovers(sim: Simulation, cell: number, lackWood: number, lackStone: number): boolean {
+  const { trade } = sim;
+  const civ = sim.world.owner[cell];
+  const partners = sim.diplomacy.partners[civ];
+  for (let m = TradeGood.Wood; m <= TradeGood.Stone; m++) {
+    const lack = m === TradeGood.Wood ? lackWood : lackStone;
+    if (lack <= 0) continue;
+    let spare = (civ + 1) * TRADE_GOODS <= trade.civSpare.length ? trade.civSpare[civ * TRADE_GOODS + m] - trade.surplus[cell * TRADE_GOODS + m] : 0;
+    if (partners) {
+      for (let i = 0; i < partners.length; i++) {
+        const p = partners[i];
+        if ((p + 1) * TRADE_GOODS <= trade.civSpare.length) spare += trade.civSpare[p * TRADE_GOODS + m];
+      }
+    }
+    if (spare < lack) return false;
+  }
+  return true;
 }

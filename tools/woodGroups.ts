@@ -4,29 +4,24 @@
 //   hillRes=0.9       stone capacity of Hills and Mountains (default 0.6/0.9)
 //   price0=1 price1=1.5   trade price of wood/stone (steers which trips are worth it)
 //   woodCost=1 upkeepWood=1 stoneCost=1 upkeepStone=1  factors on all buildings
+//   tradeGoal=2       trade goal's waiting years (core TRADE_GOAL.years; 0 = off)
 // Samples every 10 years from year 100 and averages per settlement; the last row block is the end state.
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
 import { Biome, BIOMES, Resource } from '../src/sim/world/biomes';
 import { BUILDINGS, Good, SlotState, STONE_BIOMES, WOOD_BIOMES } from '../src/sim/society/buildings';
 import { PRICE } from '../src/sim/society/trade';
-import * as ECO from '../src/sim/society/economy';
-import * as BLD from '../src/sim/society/buildings';
+import { TRADE_GOAL } from '../src/sim/society/economy';
 const o = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
-// Rule hooks exist only in the experiment copy of the core (tools/woodRules.patch): forageBase, prodNet (rule 1), tradeGoal (rule 2).
-const RULES = (ECO as unknown as { RULES?: { prodNet: number; tradeGoal: number } }).RULES;
-const FORAGE = (BLD as unknown as { FORAGE?: { base: number } }).FORAGE;
-if ((o.prodNet || o.tradeGoal || o.forageBase) && (!RULES || !FORAGE)) throw new Error('apply tools/woodRules.patch first');
-if (o.prodNet) RULES!.prodNet = Number(o.prodNet);
-if (o.tradeGoal) RULES!.tradeGoal = Number(o.tradeGoal);
-if (o.forageBase) FORAGE!.base = Number(o.forageBase);
+// Trade goal (Requirement Regionale Rohstoffe 3): years of waiting it counts as; tradeGoal=0 = off (the state before).
+if (o.tradeGoal !== undefined) TRADE_GOAL.years = Number(o.tradeGoal);
 
 const worlds = Number(process.argv[2] ?? 12);
 const years = Number(process.argv[3] ?? 500);
-if (o.forestRes) for (const b of [Biome.Forest, Biome.Jungle]) (BIOMES[b].resources as number[])[Resource.Wood] = Number(o.forestRes);
-if (o.hillRes) for (const b of [Biome.Hills, Biome.Mountains]) (BIOMES[b].resources as number[])[Resource.Stone] = Number(o.hillRes);
+if (o.forestRes) for (const b of [Biome.Forest, Biome.Jungle]) (BIOMES[b].resources as unknown as number[])[Resource.Wood] = Number(o.forestRes);
+if (o.hillRes) for (const b of [Biome.Hills, Biome.Mountains]) (BIOMES[b].resources as unknown as number[])[Resource.Stone] = Number(o.hillRes);
 if (o.price0) PRICE[0] = Number(o.price0);
 if (o.price1) PRICE[1] = Number(o.price1);
-for (const b of BUILDINGS as { wood: number; stone: number; upkeepWood: number; upkeepStone: number }[]) {
+for (const b of BUILDINGS as unknown as { wood: number; stone: number; upkeepWood: number; upkeepStone: number }[]) {
   if (o.woodCost) b.wood *= Number(o.woodCost);
   if (o.stoneCost) b.stone *= Number(o.stoneCost);
   if (o.upkeepWood) b.upkeepWood *= Number(o.upkeepWood);

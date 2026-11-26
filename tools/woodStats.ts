@@ -19,12 +19,12 @@ const o = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [s
 const bid = (n: string) => (Biome as Record<string, number>)[n];
 const campBiomes = [...WOOD_BIOMES];
 if (o.forage) {
-  for (const b of BUILDINGS as { good: number; biomes?: readonly number[] }[]) if (b.good === Good.Wood && b.biomes) b.biomes = campBiomes;
+  for (const b of BUILDINGS as unknown as { good: number; biomes?: readonly number[] }[]) if (b.good === Good.Wood && b.biomes) b.biomes = campBiomes;
   for (const n of o.forage.split(',')) (WOOD_BIOMES as number[]).push((Biome as Record<string, number>)[n]);
 }
 if (o.woodBiomes) for (const n of o.woodBiomes.split(',')) (WOOD_BIOMES as number[]).push(bid(n));
-if (o.woodRes) for (const p of o.woodRes.split(',')) { const [n, v] = p.split(':'); (BIOMES[bid(n)].resources as number[])[Resource.Wood] = Number(v); }
-for (const b of BUILDINGS as { name: string; amount: number; wood: number; upkeepWood: number }[]) {
+if (o.woodRes) for (const p of o.woodRes.split(',')) { const [n, v] = p.split(':'); (BIOMES[bid(n)].resources as unknown as number[])[Resource.Wood] = Number(v); }
+for (const b of BUILDINGS as unknown as { name: string; amount: number; wood: number; upkeepWood: number }[]) {
   if (o.campAmount && b.name === 'Lumber camp') b.amount = Number(o.campAmount);
   if (o.woodCost) b.wood *= Number(o.woodCost);
   if (o.upkeepWood) b.upkeepWood *= Number(o.upkeepWood);

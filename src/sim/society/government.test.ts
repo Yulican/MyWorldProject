@@ -54,7 +54,7 @@ test('every settlement belongs to the district of its nearest seat of government
 
 test('taxes go into the treasury of the district’s seat, and no rate goes beyond 50 %', () => {
   const sim = createSimulation(generateWorld({ seed: 1 }));
-  runYears(sim, 150);
+  runYears(sim, 160);
   const before = Float64Array.from(sim.government.treasury);
   const collected = sim.government.collected;
   updateGovernment(sim, sim.world.owner, noRecord);
@@ -117,7 +117,7 @@ test('a government building without upkeep for more than two years falls to ruin
 
 test('the government panel lists every district of a people with all its settlements', () => {
   const sim = createSimulation(generateWorld({ seed: 1 }));
-  runYears(sim, 150);
+  runYears(sim, 160);
   for (const civ of livingCivilizations(sim)) {
     const districts = governmentOf(sim, civ.id);
     assert.ok(districts.length > 0, civ.name);
