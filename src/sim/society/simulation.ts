@@ -76,6 +76,7 @@ import {
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
 import { GODS, PLAYER_GOD, advanceGod, createGacha, resetGodCiv, setWorship, startGodTick, updateWorship, type Gacha } from './gacha';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
+import { advanceBiomes, createBiomes, initBiomes, type Biomes } from './biomes';
 
 // The living world: inhabitants age, have children and die; when a hex can't
 // provide enough food, water or space, a group moves on to a free neighbor
@@ -223,6 +224,8 @@ export type Simulation = {
   war: WarState;
   /** The player's Faith, pulls and charges, and the god's layer of effects (see gacha.ts). */
   gacha: Gacha;
+  /** Dynamic biomes: pinned hexes, climax, trend, overgrazing, the random numbers "biome" (see biomes.ts). */
+  biomes: Biomes;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -288,6 +291,7 @@ export function createSimulation(world: World): Simulation {
     leaders: createLeaders(world.seed),
     war: createWar(world.seed, n),
     gacha: createGacha(world.seed, n),
+    biomes: createBiomes(world),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -305,6 +309,7 @@ export function createSimulation(world: World): Simulation {
     economyCell: -1,
   };
   computeCapacity(sim);
+  initBiomes(sim);
 
   const start = world.startCell;
   const tribe = foundCivilization(sim, 'start', start, null)!;
@@ -386,6 +391,8 @@ export function stepSimulationPart(sim: Simulation): boolean {
   const weekOfYear = sim.tick % TICKS_PER_YEAR;
   switch (sim.part) {
     case TickPart.Start: {
+      // The rotating check of the land: biomes and regrowing resources (biomes.ts).
+      advanceBiomes(sim);
       // Charges cast while the last tick ran in parts take effect now (gacha.ts).
       startGodTick(sim);
       const { pop } = sim;

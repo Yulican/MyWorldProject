@@ -169,6 +169,9 @@ test('the war scenario puts peoples at war in pairs with as many armies as the c
   const { declareWarsEverywhere } = await import('./declareWars');
   const sim = createSimulation(generateWorld({ seed: 5 }));
   for (let t = 0; t < 300 * TICKS_PER_YEAR; t++) stepSimulation(sim);
+  // A rebellion of the world's own history may run already.
+  let rebelWarsBefore = 0;
+  for (let s = 0; s < sim.war.wLive.length; s++) if (sim.war.wLive[s] && sim.war.wRebel[s]) rebelWarsBefore++;
   declareWarsEverywhere(sim);
   const w = sim.war;
   assert.ok(w.wars >= 5, `${w.wars} wars`);
@@ -211,7 +214,7 @@ test('the war scenario puts peoples at war in pairs with as many armies as the c
   let rebelArmies = 0;
   for (let s = 0; s < w.wLive.length; s++) if (w.wLive[s] && w.wRebel[s]) rebelWars++;
   for (let a = 0; a < w.live.length; a++) if (w.live[a] && w.wRebel[w.aWar[a]]) rebelArmies++;
-  assert.equal(rebelWars, REBELLIONS);
+  assert.equal(rebelWars, rebelWarsBefore + REBELLIONS);
   assert.ok(rebelArmies >= REBELLIONS, `${rebelArmies} armies in rebel wars`);
   assert.equal(SCENARIOS.war.war, true);
 });

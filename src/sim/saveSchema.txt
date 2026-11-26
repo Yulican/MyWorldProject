@@ -1,6 +1,14 @@
-save version 1
+save version 2
 sim.baseSupply: Float32Array
 sim.believers: number
+sim.biomes.changes: number
+sim.biomes.climax: Uint8Array
+sim.biomes.desertBorn: Uint8Array
+sim.biomes.grazeYears: Uint8Array
+sim.biomes.pinned: Uint8Array
+sim.biomes.rng: rng
+sim.biomes.trend: Uint8Array
+sim.biomes: object
 sim.bordersSeen: number
 sim.cellAdults: Int32Array
 sim.cellCapacity: Float32Array

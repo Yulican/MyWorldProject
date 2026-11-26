@@ -45,6 +45,7 @@ export { leaderOf, leaderTrait, type LeaderGoal, type LeaderInfo, type LeaderPro
 export { leaderName } from './society/leaders';
 export { hexEconomy, type BuildingInfo, type HexEconomy, type HexGovernment, type HexTrade } from './society/economy';
 export { resourceCapacityTerms } from './world/features';
+export { BIOME_RULE, biomeStep, checkBiomesFast, climateDrift, hexBiome, isChangingBiome, type Biomes, type HexBiome } from './society/biomes';
 export {
   BELIEVER_FAITH,
   EXPANSION_GROUP,

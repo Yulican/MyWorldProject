@@ -144,6 +144,12 @@ test('a ruin is repaired for half the cost and half the time', () => {
   runYears(sim, 60);
   const { economy } = sim;
   const cell = sim.world.startCell;
+  // Only the ruin below in the settlement's half: no upkeep of other buildings holds the repair back.
+  for (let s = cell * economy.slots; s < cell * economy.slots + economy.half; s++) {
+    economy.state[s] = SlotState.Empty;
+    economy.type[s] = -1;
+  }
+  updateCellSupply(sim, cell);
   // The building that raises the start hex's capacity most, standing...
   let type = -1;
   let gain = 0;

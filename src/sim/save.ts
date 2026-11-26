@@ -43,7 +43,7 @@ import type { Simulation } from './society/simulation';
 // another version is refused (SaveError 'version'), never loaded half.
 
 /** Format version of save games; see above for when to bump it. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const SAVE_MAGIC = 0x5653574d; // "MWSV" read as a little-endian u32
 export const SAVE_HEADER_BYTES = 24;
 
@@ -731,7 +731,7 @@ function readValue(r: ReadContext): unknown {
 }
 
 /** The fields every simulation has; a payload without them is not a world. */
-const REQUIRED_FIELDS = ['world', 'rng', 'tick', 'pop', 'civs', 'economy', 'trade', 'diplomacy', 'government', 'military', 'leaders', 'war', 'gacha', 'part'];
+const REQUIRED_FIELDS = ['world', 'rng', 'tick', 'pop', 'civs', 'economy', 'trade', 'diplomacy', 'government', 'military', 'leaders', 'war', 'gacha', 'biomes', 'part'];
 
 /** Reads only the header: the format version of a save, or an error if it isn't one. */
 export function saveVersion(bytes: Uint8Array): { ok: true; version: number } | { ok: false; error: SaveError } {

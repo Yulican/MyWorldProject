@@ -397,7 +397,9 @@ test('Wild Fire: burns 6 weeks, spreads, at most 40 hexes; burnt land is plains 
   assert.ok(burnt.size >= 1 && burnt.size <= GACHA.fireMaxHexes, `${burnt.size} hexes`);
   for (const c of burnt) {
     assert.equal(w.biome[c], Biome.Plains);
-    assert.equal(w.resources[c * RESOURCE_COUNT + Resource.Wood], 0);
+    // Burnt to nothing; the wood regrows from then on (Requirement Dynamische Biome 5), not set by the god.
+    assert.ok(w.resources[c * RESOURCE_COUNT + Resource.Wood] < 0.02);
+    assert.equal(sim.biomes.pinned[c], 0);
     assert.equal(sim.gacha.burning[c], 0);
   }
   assert.equal(eco.state[best * eco.slots], SlotState.Ruin);
