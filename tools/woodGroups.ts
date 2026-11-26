@@ -9,10 +9,19 @@ import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from 
 import { Biome, BIOMES, Resource } from '../src/sim/world/biomes';
 import { BUILDINGS, Good, SlotState, STONE_BIOMES, WOOD_BIOMES } from '../src/sim/society/buildings';
 import { PRICE } from '../src/sim/society/trade';
+import * as ECO from '../src/sim/society/economy';
+import * as BLD from '../src/sim/society/buildings';
+const o = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
+// Rule hooks exist only in the experiment copy of the core (tools/woodRules.patch): forageBase, prodNet (rule 1), tradeGoal (rule 2).
+const RULES = (ECO as unknown as { RULES?: { prodNet: number; tradeGoal: number } }).RULES;
+const FORAGE = (BLD as unknown as { FORAGE?: { base: number } }).FORAGE;
+if ((o.prodNet || o.tradeGoal || o.forageBase) && (!RULES || !FORAGE)) throw new Error('apply tools/woodRules.patch first');
+if (o.prodNet) RULES!.prodNet = Number(o.prodNet);
+if (o.tradeGoal) RULES!.tradeGoal = Number(o.tradeGoal);
+if (o.forageBase) FORAGE!.base = Number(o.forageBase);
 
 const worlds = Number(process.argv[2] ?? 12);
 const years = Number(process.argv[3] ?? 500);
-const o = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 if (o.forestRes) for (const b of [Biome.Forest, Biome.Jungle]) (BIOMES[b].resources as number[])[Resource.Wood] = Number(o.forestRes);
 if (o.hillRes) for (const b of [Biome.Hills, Biome.Mountains]) (BIOMES[b].resources as number[])[Resource.Stone] = Number(o.hillRes);
 if (o.price0) PRICE[0] = Number(o.price0);
@@ -25,7 +34,7 @@ for (const b of BUILDINGS as { wood: number; stone: number; upkeepWood: number; 
 }
 const G = ['wood biome', 'stone biome', 'other'];
 const acc = G.map(() => ({ n: 0, pop: 0, crowd: 0, wStock: 0, sStock: 0, wLow: 0, sLow: 0, wSave: 0, sSave: 0, bld: 0, big: 0, camp: 0, quarry: 0, wSur: 0, wWant: 0, sSur: 0, sWant: 0, wHarv: 0 }));
-const tot = { people: 0, settlements: 0, traded: 0, woodTraded: 0, stoneTraded: 0, merchants: 0, uprisings: 0, campsOff: 0, quarriesOff: 0 };
+const tot = { people: 0, settlements: 0, traded: 0, woodTraded: 0, stoneTraded: 0, merchants: 0, uprisings: 0, campsOff: 0, quarriesOff: 0, endSettl: 0, camps: 0, quarries: 0, sawmills: 0, masons: 0 };
 let samples = 0;
 for (let seed = 1; seed <= worlds; seed++) {
   const sim = createSimulation(generateWorld({ seed }));
@@ -58,6 +67,8 @@ for (let seed = 1; seed <= worlds; seed++) {
       a.sSur += sim.trade.surplus[c * TG + 1]; a.sWant += sim.trade.want[c * TG + 1];
       tot.merchants += sim.trade.merchants[c] / 1;
       if (y === years) {
+        tot.endSettl++;
+        for (let s = c * eco.slots; s < c * eco.slots + eco.half; s++) if (eco.state[s] === SlotState.Standing) { const nm = BUILDINGS[eco.type[s]].name; if (nm === 'Lumber camp') tot.camps++; else if (nm === 'Quarry') tot.quarries++; else if (nm === 'Sawmill') tot.sawmills++; else if (nm === 'Stonemason') tot.masons++; }
         if (camp && !WOOD_BIOMES.includes(b)) tot.campsOff++;
         if (quarry && !STONE_BIOMES.includes(b)) tot.quarriesOff++;
       }
@@ -71,7 +82,7 @@ for (let seed = 1; seed <= worlds; seed++) {
 const f = (v: number, d = 1) => v.toFixed(d);
 console.log(`${worlds} worlds x ${years} y`, process.argv.slice(4).join(' '));
 const allN = acc.reduce((s, a) => s + a.n, 0);
-console.log(`settlements/world (mean of samples) ${f(allN / samples)}  people(end) ${f(tot.people / worlds, 0)}  traded ${f(tot.traded / worlds, 0)} (wood ${f(tot.woodTraded / worlds, 0)}, stone ${f(tot.stoneTraded / worlds, 0)})  merchants ${f(tot.merchants / samples)}  uprisings ${f(tot.uprisings / worlds)}  campsOff ${tot.campsOff} quarriesOff ${tot.quarriesOff}`);
+console.log(`settlements/world (mean of samples) ${f(allN / samples)}  people(end) ${f(tot.people / worlds, 0)}  traded ${f(tot.traded / worlds, 0)} (wood ${f(tot.woodTraded / worlds, 0)}, stone ${f(tot.stoneTraded / worlds, 0)})  merchants ${f(tot.merchants / samples)}  uprisings ${f(tot.uprisings / worlds)}  settlements(end)/world ${f(tot.endSettl / worlds, 0)}  camps ${f(tot.camps / worlds)} quarries ${f(tot.quarries / worlds)} sawmills ${f(tot.sawmills / worlds)} masons ${f(tot.masons / worlds)}`);
 console.log('group'.padEnd(12) + ['share%', 'pop', 'pop/cap', 'woodSt', 'stoneSt', 'wood<5%', 'stone<5%', 'wSave%', 'sSave%', 'bld', 'tier', 'camp%', 'quarry%', 'wSpare', 'wWant', 'sSpare', 'sWant'].map((s) => s.padStart(8)).join(''));
 G.forEach((g, i) => {
   const a = acc[i], n = Math.max(1, a.n);
