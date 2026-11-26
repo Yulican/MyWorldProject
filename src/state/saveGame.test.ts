@@ -146,6 +146,28 @@ test('an invalid save starts a new world with a message and stays in place', () 
   assert.deepEqual([...slot.bytes!], [9, 9, 9, 9]);
 });
 
+test('a save from before dynamic biomes (world version 1) starts a new world with the message, and Load keeps the world', async () => {
+  resetSaveGame();
+  const slot = memorySlot();
+  startSaveGame(slot, { timerless: true });
+  const save = saveFromMenu();
+  finishSlicedSaveNow();
+  assert.ok(await save);
+  const old = slot.bytes!.slice();
+  new DataView(old.buffer).setUint32(4, 1, true);
+  slot.bytes = old;
+  resetSaveGame();
+  assert.doesNotThrow(() => startSaveGame(slot, { timerless: true }));
+  assert.ok(getGameState().sim);
+  assert.equal(getSaveState().message, 'Saved world could not be loaded. A new world was started.');
+  assert.equal(getSaveState().saved, null);
+  const sim = getGameState().sim;
+  assert.equal(await loadFromMenu(), false);
+  assert.equal(getSaveState().message, 'Saved world could not be loaded.');
+  assert.equal(getGameState().sim, sim, 'the running world stays');
+  assert.equal(slot.bytes, old, 'the old save stays in place');
+});
+
 test('after New World the first autosave asks; "Keep old save" turns autosave off until a manual Save', async () => {
   resetSaveGame();
   const slot = memorySlot();

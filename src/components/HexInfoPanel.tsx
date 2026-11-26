@@ -19,6 +19,7 @@ import {
   resourceCapacityTerms,
   sumTerms,
   type GodEffect,
+  type HexBiome,
   type HexEconomy,
   type HexMilitary,
   type HexSatisfaction,
@@ -54,14 +55,23 @@ type Props = {
   war?: readonly string[];
   /** The god's effects running on this hex (Fertile Blessing, Drought, a fire), with years left (see hexEffects). */
   god?: readonly GodEffect[];
+  /** The biome, the one it is becoming and whether the god set it (see hexBiome); null on water. */
+  biomeTrend?: HexBiome | null;
   onClose: () => void;
 };
+
+/** "Forest · Becoming Plains", "Forest · Set by the god" or "Forest" (Requirement Dynamische Biome 9). */
+function biomeText(b: HexBiome): string {
+  const name = BIOMES[b.biome].name;
+  if (b.pinned) return `${name} · Set by the god`;
+  return b.becoming >= 0 ? `${name} · Becoming ${BIOMES[b.becoming].name}` : name;
+}
 
 /**
  * Info about one hex. Starts as a slim bar with the key facts so the map
  * stays usable; tapping the bar expands it to all stats.
  */
-export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy, satisfaction, military, strategic, war, god, onClose }: Props) {
+export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy, satisfaction, military, strategic, war, god, biomeTrend, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
   const col = cell % world.width;
   const row = Math.floor(cell / world.width);
@@ -119,6 +129,7 @@ export function HexInfoPanel({ world, cell, civName, civNameAt, supply, economy,
       {expanded && (
         <ScrollView style={styles.details}>
           <Row label="Hex" value={`${col}, ${row}`} />
+          {biomeTrend && <Row label="Biome" value={biomeText(biomeTrend)} />}
           {!biome.water && <Row label="Moisture" value={percent(world.moisture[cell])} />}
           {!biome.water && (
             <Row label="Fresh water" value={river > 0 || hasFreshWater(world, cell) ? 'Yes' : 'No'} />

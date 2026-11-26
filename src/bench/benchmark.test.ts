@@ -291,17 +291,27 @@ test('the gacha scenario casts all kinds of abilities and keeps the land changin
   assert.equal(SCENARIOS.gacha.gacha, true);
   assert.equal(scenarioFromUrl('myworld://benchmark?scenario=gacha'), 'gacha');
 
-  // As the game clock runs it: tick parts, the hook after each complete tick.
+  // As the game clock runs it: tick parts, the casts after each complete tick, then its slices before the next.
+  const { setBiomeObserver } = await import('../sim/society/biomes');
   const hook = gachaDuringSwipes();
   let burningWeeks = 0;
+  let natural = 0;
   const before = sim.gacha.landTotal;
-  for (let t = 0; t < 2 * TICKS_PER_YEAR; ) {
-    if (stepSimulationPart(sim)) {
-      t++;
-      hook(sim);
-      if (sim.gacha.fireCount > 0) burningWeeks++;
+  setBiomeObserver(() => natural++);
+  try {
+    for (let t = 0; t < 2 * TICKS_PER_YEAR; ) {
+      if (stepSimulationPart(sim)) {
+        t++;
+        hook.afterTick(sim);
+        if (sim.gacha.fireCount > 0) burningWeeks++;
+        assert.ok(hook.slices > 1, 'the accelerated biome check is split');
+        for (let s = 0; s < hook.slices; s++) hook.slice(sim, s);
+      }
     }
+  } finally {
+    setBiomeObserver(null);
   }
   assert.ok(burningWeeks > 1.5 * TICKS_PER_YEAR, `fires burn most weeks (${burningWeeks})`);
   assert.ok(sim.gacha.landTotal - before > 50, 'the land keeps changing');
+  assert.ok(natural > 0, `biomes change naturally, accelerated (${natural})`);
 });

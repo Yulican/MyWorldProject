@@ -8,11 +8,13 @@ import {
   TargetKind,
   canCast,
   castAbility,
+  checkBiomesFast,
   livingCivilizations,
   shiftedBiome,
   type Simulation,
 } from '../sim';
 import { hexDistance } from '../sim/hex';
+import type { BenchTick } from '../state/worldStore';
 
 // The "gacha" benchmark scenario (Requirement Gacha 10): the most the god's
 // abilities change on the map at once. On an aged world the setup casts
@@ -25,6 +27,9 @@ import { hexDistance } from '../sim/hex';
 // changing: new fires while fewer than MIN_BURNING hexes burn, a biome
 // shift back and forth and now and then a new river, so terrain tiles,
 // fires and ruins are redrawn throughout (only while the map rests, as in the game).
+// The natural biome changes (Requirement Dynamische Biome 11) run accelerated
+// too: every land hex is checked every BIOME_EVERY ticks instead of every 5
+// years, split into BIOME_SLICES slices between ticks so no frame carries all.
 
 /** Hexes around the map's center the benchmark's view covers while it swipes (zoom 2, 750 pt swipes). */
 const NEAR = 12;
@@ -52,6 +57,9 @@ const REGROW_EVERY = 5;
 const RIVER_EVERY = 52;
 /** Hexes the biome shift during the swipes flips back and forth (a step wetter, then a step drier). */
 const FLIP_TARGETS = 4;
+/** The accelerated biome check during the swipes: every hex every BIOME_EVERY ticks, in BIOME_SLICES slices per tick. */
+const BIOME_EVERY = 5;
+const BIOME_SLICES = 8;
 
 /** The world's cells by distance from the map's center (the view the benchmark zooms to). */
 function byCenter(sim: Simulation): Int32Array {
@@ -122,12 +130,22 @@ export function castGacha(sim: Simulation): void {
 }
 
 /**
- * The hook the game clock calls after every tick during the gacha
- * benchmark (worldStore.setBenchTick): keeps fires burning, flips a few
- * biomes near the center back and forth and lays a river now and then, so
+ * The game clock's work between ticks during the gacha benchmark
+ * (worldStore.setBenchTick): after every tick it keeps fires burning, flips a
+ * few biomes near the center back and forth and lays a river now and then,
+ * and in slices before the next tick it runs the accelerated biome check, so
  * the land keeps changing during the swipes. One per world.
  */
-export function gachaDuringSwipes(): (sim: Simulation) => void {
+export function gachaDuringSwipes(): BenchTick {
+  return {
+    afterTick: castDuringSwipes(),
+    slices: BIOME_SLICES,
+    slice: (sim, slice) => checkBiomesFast(sim, BIOME_EVERY, slice, BIOME_SLICES),
+  };
+}
+
+/** The casts after every tick (see gachaDuringSwipes). */
+function castDuringSwipes(): (sim: Simulation) => void {
   let order: Int32Array | null = null;
   let world: Simulation['world'] | null = null;
   let weeks = 0;

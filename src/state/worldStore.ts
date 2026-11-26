@@ -396,14 +396,31 @@ export function castCharge(ability: number, target: number, option = 0): 'now' |
 }
 
 /**
- * Benchmark only: called after every complete tick (between ticks, so casts
- * take effect at once), e.g. the gacha scenario's new fires and biome shifts
- * during the swipes (bench/castGacha.ts); null to stop.
+ * Benchmark only: work the game clock does between ticks, e.g. the gacha
+ * scenario's new fires and biome shifts and its accelerated biome check
+ * during the swipes (bench/castGacha.ts). `afterTick` runs after every
+ * complete tick (between ticks, so casts take effect at once); then the
+ * `slices` calls of `slice` (0 .. slices-1) run before the next tick begins,
+ * as many per frame as fit the frame budget, so no frame carries all of them.
  */
-export function setBenchTick(hook: ((sim: Simulation) => void) | null) {
+export type BenchTick = {
+  afterTick: (sim: Simulation) => void;
+  slices: number;
+  slice: (sim: Simulation, slice: number) => void;
+};
+
+/** Sets the benchmark's work between ticks (see BenchTick); null to stop. */
+export function setBenchTick(hook: BenchTick | null) {
   benchTick = hook;
+  benchSlice = 0;
+  benchSliceCount = 0;
 }
-let benchTick: ((sim: Simulation) => void) | null = null;
+let benchTick: BenchTick | null = null;
+/** The next slice of benchTick to run, and how many the last tick asked for (all done when equal). */
+let benchSlice = 0;
+let benchSliceCount = 0;
+/** The longest recent bench slice (ms, decaying), to stop before one that would overrun the frame budget. */
+let benchSliceMs = 1;
 
 /** Benchmark only: extra army markers on the map (the war scenario's worst case), null to stop. */
 export function setExtraArmies(extra: ExtraArmies | null) {
@@ -584,6 +601,17 @@ function runFrame(now: number) {
   let parts = 0;
   const entries = sim.chronicle.length;
   for (;;) {
+    // The benchmark's slices of work after the last tick come before the next tick (see BenchTick).
+    if (benchTick && sim.part === TickPart.Start && benchSlice < benchSliceCount) {
+      const s0 = performance.now();
+      if (parts > 0 && s0 - start + benchSliceMs > budget) break;
+      benchTick.slice(sim, benchSlice++);
+      const ms = performance.now() - s0;
+      logWork('bench slice', s0, ms);
+      benchSliceMs = Math.max(ms, benchSliceMs * 0.9);
+      parts++;
+      continue;
+    }
     // A new tick only while the speed asks for one and nothing notable happened in this frame (or is waiting to be shown).
     if (sim.part === TickPart.Start) {
       if (pendingTicks < 1 || sim.gameOver || ticksPerSecond === 0 || sim.chronicle.length !== entries || saveRequest) break;
@@ -608,8 +636,10 @@ function runFrame(now: number) {
     if (done) {
       if (benchTick) {
         const h0 = performance.now();
-        benchTick(sim);
+        benchTick.afterTick(sim);
         logWork('bench gacha casts', h0, performance.now() - h0);
+        benchSlice = 0;
+        benchSliceCount = benchTick.slices;
       }
     }
   }
@@ -817,6 +847,8 @@ export function loadSimulation(sim: Simulation, app: SavedAppState) {
   syncedLand = -1;
   extraArmies = null;
   benchTick = null;
+  benchSlice = 0;
+  benchSliceCount = 0;
   pendingTicks = 0;
   heldSince = 0;
   lastNotify = 0;
