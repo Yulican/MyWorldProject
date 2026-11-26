@@ -52,6 +52,14 @@ export const PARAMS = {
   margin: 0,
   /** Pressure band: neighbor pressure only towards a biome that is the climax for moisture within +-band of the hex's (0 = off). */
   band: 0,
+  /** Pressure only towards the climax: a neighbor's biome spreads in only if it is one step closer to the hex's climax (1 = on). */
+  towardOnly: 0,
+  /** Climate drift: regional moisture offset +-driftAmp, blobs with sine periods driftPeriod +- driftSpread years (0 amp = off). */
+  driftAmp: 0,
+  driftPeriod: 300,
+  driftSpread: 100,
+  driftBlobs: 6,
+  driftRadius: 10,
 };
 for (const [k, v] of Object.entries(options)) if (k in PARAMS) (PARAMS as Record<string, number>)[k] = Number(v);
 
@@ -90,7 +98,7 @@ const isMovable = (b: number) => DIST[Biome.Plains * BIOME_COUNT + b] < 99;
 const isStillWater = (b: number) => b === Biome.Lake || b === Biome.ShallowSea || b === Biome.DeepOcean;
 const MYSTIC = new Set<number>([13, 14, 15, 16]); // see Deposit in world/deposits.ts (checked below)
 
-type Counters = { changes: number; ret: number; press: number; defor: number; settled: number; reversals: number; ruined: number };
+type Counters = { life: number; lifeN: number; short: number; front: number; changes: number; ret: number; press: number; defor: number; settled: number; reversals: number; ruined: number };
 
 type Hook = {
   rng: () => number;
@@ -98,6 +106,10 @@ type Hook = {
   prev: Int16Array;
   prevAt: Int32Array;
   lastAt: Int32Array;
+  /** Climate drift: per blob period (years), phase and centre; per cell and blob weight. */
+  dPeriod: Float64Array;
+  dPhase: Float64Array;
+  dWeight: Float32Array;
   moves: Uint16Array;
   count: Counters;
 };
@@ -120,6 +132,22 @@ function nearStillWater(sim: Simulation, c: number): boolean {
   return false;
 }
 
+/** Regional moisture offset of hex `c` at tick `tick`. */
+function driftAt(sim: Simulation, h: Hook, c: number, tick: number): number {
+  const A = PARAMS.driftAmp;
+  if (A <= 0) return 0;
+  const K = PARAMS.driftBlobs;
+  const year = tick / TICKS_PER_YEAR;
+  let sw = 0;
+  let sv = 0;
+  for (let k = 0; k < K; k++) {
+    const wk = h.dWeight[c * K + k];
+    sw += wk;
+    sv += wk * Math.sin((2 * Math.PI * year) / h.dPeriod[k] + h.dPhase[k]);
+  }
+  return (A * sv) / (sw + 0.25);
+}
+
 const nbBuf = new Int8Array(BIOME_COUNT);
 const cand = new Float64Array(16);
 const candTo = new Int8Array(16);
@@ -131,7 +159,8 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
   const w = sim.world;
   const cur = w.biome[c];
   if (!isMovable(cur) || MYSTIC.has(w.deposit[c])) return;
-  const clim = landBiome(w.elevation[c], w.temperature[c], w.moisture[c]);
+  const mo = w.moisture[c] + driftAt(sim, h, c, sim.tick);
+  const clim = landBiome(w.elevation[c], w.temperature[c], mo);
   const settled = sim.cellPop[c] > 0;
   const ruins = w.ruins[c] > 0 || (sim.hasBuildings[c] === 1 && !settled);
   const water = nearWater(sim, c);
@@ -171,7 +200,7 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
   // 1. return to the climax (never into a wood while a lumber camp stands)
   let fine = false;
   if (P.margin > 0) {
-    const m = w.moisture[c];
+    const m = mo;
     fine = cur === landBiome(w.elevation[c], w.temperature[c], m - P.margin) || cur === landBiome(w.elevation[c], w.temperature[c], m + P.margin);
   }
   if (isMovable(clim) && cur !== clim && !fine) {
@@ -187,7 +216,10 @@ function checkHex(sim: Simulation, h: Hook, c: number): void {
       if (nbb === cur || !isMovable(nbb)) continue;
       if (P.majority > 1 && nbCount[nbb] < P.majority) continue;
       const to = STEP[cur * BIOME_COUNT + nbb];
-      if (to < 0 || DIST[to * BIOME_COUNT + clim] > 1) continue;
+      if (to < 0) continue;
+      if (P.towardOnly) {
+        if (cur === clim || fine || DIST[to * BIOME_COUNT + clim] >= DIST[cur * BIOME_COUNT + clim]) continue;
+      } else if (DIST[to * BIOME_COUNT + clim] > 1) continue;
       if (P.band > 0 && to !== clim && to !== landBiome(w.elevation[c], w.temperature[c], w.moisture[c] - P.band) && to !== landBiome(w.elevation[c], w.temperature[c], w.moisture[c] + P.band)) continue;
       add(to, P.pNeighbor, 1);
     }
@@ -209,6 +241,19 @@ function change(sim: Simulation, h: Hook, c: number, to: number, kind: number, s
   const k = h.count;
   const from = sim.world.biome[c];
   k.changes++;
+  if (h.lastAt[c] > -1e8) {
+    const yrs = (sim.tick - h.lastAt[c]) / TICKS_PER_YEAR;
+    k.life += yrs;
+    k.lifeN++;
+    if (yrs < 50) k.short++;
+  }
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const nb = sim.world.neighbors[c * DIRECTION_COUNT + d];
+    if (nb >= 0 && sim.world.biome[nb] === to) {
+      k.front++;
+      break;
+    }
+  }
   if (kind === 0) k.ret++;
   else if (kind === 1) k.press++;
   else k.defor++;
@@ -281,9 +326,29 @@ for (let seed = 1; seed <= worlds; seed++) {
     prev: new Int16Array(w.cellCount).fill(-1),
     prevAt: new Int32Array(w.cellCount),
     lastAt: new Int32Array(w.cellCount).fill(-1e9),
+    dPeriod: new Float64Array(PARAMS.driftBlobs),
+    dPhase: new Float64Array(PARAMS.driftBlobs),
+    dWeight: new Float32Array(w.cellCount * PARAMS.driftBlobs),
     moves: new Uint16Array(w.cellCount),
-    count: { changes: 0, ret: 0, press: 0, defor: 0, settled: 0, reversals: 0, ruined: 0 },
+    count: { life: 0, lifeN: 0, short: 0, front: 0, changes: 0, ret: 0, press: 0, defor: 0, settled: 0, reversals: 0, ruined: 0 },
   };
+  {
+    const dr = createRng(deriveSeed(w.seed, 'climate-drift'));
+    const K = PARAMS.driftBlobs;
+    const R = PARAMS.driftRadius;
+    for (let k = 0; k < K; k++) {
+      h.dPeriod[k] = PARAMS.driftPeriod + (dr() * 2 - 1) * PARAMS.driftSpread;
+      h.dPhase[k] = dr() * 2 * Math.PI;
+      const cx = dr() * w.width;
+      const cy = dr() * w.height;
+      for (let c = 0; c < w.cellCount; c++) {
+        let dx = Math.abs((c % w.width) - cx);
+        dx = Math.min(dx, w.width - dx);
+        const dy = Math.floor(c / w.width) - cy;
+        h.dWeight[c * K + k] = Math.exp(-(dx * dx + dy * dy) / (2 * R * R));
+      }
+    }
+  }
   const share0 = new Float64Array(BIOME_COUNT);
   for (const c of land) share0[w.biome[c]] += 1 / land.length;
   let lastChanges = 0;
@@ -329,7 +394,7 @@ for (let seed = 1; seed <= worlds; seed++) {
     let gapN = 0;
     for (const c of land) {
       share[w.biome[c]] += 1 / land.length;
-      if (w.biome[c] !== landBiome(w.elevation[c], w.temperature[c], w.moisture[c]) && isMovable(w.biome[c])) off++;
+      if (w.biome[c] !== landBiome(w.elevation[c], w.temperature[c], w.moisture[c] + driftAt(sim, h, c, sim.tick)) && isMovable(w.biome[c])) off++;
       if (w.biome[c] !== h.initial[c]) moved++;
       if (h.moves[c] >= 3) moved3++;
       for (const r of [Resource.Fertility, Resource.Game, Resource.Wood]) {
@@ -362,6 +427,9 @@ for (let seed = 1; seed <= worlds; seed++) {
       '  pressure %': (100 * h.count.press) / Math.max(1, h.count.changes),
       '  deforest %': (100 * h.count.defor) / Math.max(1, h.count.changes),
       '  at settlement %': (100 * h.count.settled) / Math.max(1, h.count.changes),
+      'mean state life (y)': h.count.life / Math.max(1, h.count.lifeN),
+      'states ended <50y %': (100 * h.count.short) / Math.max(1, h.count.lifeN),
+      'changes with neighbor already %': (100 * h.count.front) / Math.max(1, h.count.changes),
       'reversals % (<50y)': (100 * h.count.reversals) / Math.max(1, h.count.changes),
       'hexes changed 3+ times %': (100 * moved3) / land.length,
       'off-climax %': (100 * off) / land.length,
