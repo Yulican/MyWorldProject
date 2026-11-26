@@ -1,6 +1,7 @@
 // Wood supply and demand over many worlds (analysis of the planBuilding fix and compensation variants).
 // Usage: npx tsx tools/woodStats.ts [worlds=12] [years=300,500] [key=value ...]
 //   woodBiomes=Plains,Savanna,Hills  more biomes whose hexes harvest wood (adds the lumber camp/sawmill there too!)
+//   forage=Plains,Savanna  like woodBiomes, but lumber camp and sawmill stay on Forest/Jungle (own copy of their list)
 //   woodRes=Plains:0.4,Savanna:0.4   wood capacity per biome in BIOMES (only effective in woodBiomes or Forest/Jungle)
 //   campAmount=8       lumber camp yield (default 5)
 //   woodCost=0.7       factor on the wood cost of all buildings
@@ -9,12 +10,18 @@
 import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation } from '../src/sim';
 import { Biome, BIOMES, BIOME_COUNT, Resource } from '../src/sim/world/biomes';
 import { BUILDINGS, SlotState, WOOD_BIOMES, forageYield, withBuildings } from '../src/sim/society/buildings';
+import { setBiomeObserver } from '../src/sim/society/biomes';
 import { Good } from '../src/sim/society/buildings';
 
 const worlds = Number(process.argv[2] ?? 12);
 const checkpoints = (process.argv[3] ?? '300,500').split(',').map(Number);
 const o = Object.fromEntries(process.argv.slice(4).map((a) => a.split('=') as [string, string]));
 const bid = (n: string) => (Biome as Record<string, number>)[n];
+const campBiomes = [...WOOD_BIOMES];
+if (o.forage) {
+  for (const b of BUILDINGS as { good: number; biomes?: readonly number[] }[]) if (b.good === Good.Wood && b.biomes) b.biomes = campBiomes;
+  for (const n of o.forage.split(',')) (WOOD_BIOMES as number[]).push((Biome as Record<string, number>)[n]);
+}
 if (o.woodBiomes) for (const n of o.woodBiomes.split(',')) (WOOD_BIOMES as number[]).push(bid(n));
 if (o.woodRes) for (const p of o.woodRes.split(',')) { const [n, v] = p.split(':'); (BIOMES[bid(n)].resources as number[])[Resource.Wood] = Number(v); }
 for (const b of BUILDINGS as { name: string; amount: number; wood: number; upkeepWood: number }[]) {
@@ -22,10 +29,19 @@ for (const b of BUILDINGS as { name: string; amount: number; wood: number; upkee
   if (o.woodCost) b.wood *= Number(o.woodCost);
   if (o.upkeepWood) b.upkeepWood *= Number(o.upkeepWood);
 }
+let bChanges = 0, bRev = 0;
+const lastFrom = new Map<number, number>();
+setBiomeObserver((sim, c, from, to) => {
+  bChanges++;
+  const l = lastFrom.get(c);
+  if (l !== undefined && (l >> 16) === to && sim.tick - (l & 0xffff) * 52 < 50 * TICKS_PER_YEAR) bRev++;
+  lastFrom.set(c, (from << 16) | Math.min(0xffff, Math.floor(sim.tick / 52)));
+});
 const names = Object.keys(Biome);
 const rows = new Map<number, Record<string, number>[]>();
 for (let seed = 1; seed <= worlds; seed++) {
   const sim = createSimulation(generateWorld({ seed }));
+  bChanges = 0; bRev = 0; lastFrom.clear();
   for (const year of checkpoints) {
     while (sim.tick < year * TICKS_PER_YEAR && !sim.gameOver) stepSimulation(sim);
     const eco = sim.economy;
@@ -64,7 +80,7 @@ for (let seed = 1; seed <= worlds; seed++) {
       'in Forest/Jungle %': (100 * woodSet) / n, 'harvest outside wood biome/settl': nonWoodHarv / n, 'wood stock<5 %': (100 * low) / n,
       'saving for material %': (100 * saving) / n, camps, sawmills: saws, 'wood hex w/o camp %': (100 * noCamp) / Math.max(1, woodSet),
       woodTraded: sim.trade.delivered[0], allTraded: sim.trade.delivered.reduce((s, v) => s + v, 0), merchants: merch, uprisings: text('rose up'),
-      buildings: 0,
+      buildings: 0, 'biome changes/yr': bChanges / year, 'reversals <50y %': (100 * bRev) / Math.max(1, bChanges),
     };
     for (let b = 0; b < BIOME_COUNT; b++) if (byBiome[b]) row['biome ' + names[b] + ' %'] = (100 * byBiome[b]) / n;
     for (const [k, v] of demandByType) row['upkeepWood ' + k] = v / n;
