@@ -1,6 +1,6 @@
 # Requirement: Regionale Rohstoffe und Handelsnetze
 
-Stand: Abschnitt 3 Handels-Bauziel (entschieden, Startwerte), Holzfäller nur in Wald/Dschungel; davor: Abschnitt 12 (dynamische Biome, Ressourcen wachsen nach: Entwurf, alle Regeln entschieden, Zahlen Startwerte) neu, Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
+Stand: Abschnitt 3 Handels-Bauziel (entschieden, Zahlen gewählt), Holzfäller nur in Wald/Dschungel; davor: Abschnitt 12 (dynamische Biome, Ressourcen wachsen nach: Entwurf, alle Regeln entschieden, Zahlen Startwerte) neu, Abschnitt 11 (Stadtstufen) neu, Abschnitt 10 strategische Güter (Krieg); davor: Schritte 1 und 2 umgesetzt mit den Zahlen aus der Simulation
 (Ablauf: Design → Simulation → Umsetzung), Handelsspanne zurückgestellt. Baut auf dem
 internen Handel (`Requirement Handel.md`) und der Diplomatie
 (`Requirement Diplomatie.md`) auf. Zahlen mit „?“ werden in der Simulation
@@ -45,17 +45,17 @@ abgestimmt.
 - Damit können viele Siedlungen der Ebene zusammen eine Stadt versorgen,
   ein Wald aber mehrere Städte, und er kann ausführen. Große Städte werden
   seltener; das ist gewollt.
-- **Handels-Bauziel (entschieden, Startwerte bis zur Umsetzung):** Kann die
+- **Handels-Bauziel (entschieden, Zahlen vom Nutzer gewählt):** Kann die
   eigene Ernte Holz und Stein eines Gebäudes nicht innerhalb von 5 Jahren
   bezahlen, setzt die Siedlung das Gebäude trotzdem als Bauziel, wenn die
   fehlende Menge (Kosten minus Bestand, je Material) aus dem Überschuss
   ihres Volks und ihrer Handelspartner verfügbar ist (Summe von deren
   Überschuss minus eigener Überschuss; Volks-/Partner-Ebene, keine Routen-
   oder Entfernungsprüfung, gleiche Ebene wie die Interessenprüfung der
-  Händler). Wartegrenze `tradeGoal` = 2 Jahre. Das Netto-Unterhaltskriterium
+  Händler). Wartegrenze `tradeGoal` = 2 Jahre (entschieden). Das Netto-Unterhaltskriterium
   des Gebäudes bleibt. So erzeugen Mangelsiedlungen Nachfrage, und Händler
   liefern Wälder-Holz und Hügel-Stein dorthin.
-- **Bewusst nicht:** Grundsammeln bleibt 2; keine Änderung der Holz-/Stein-
+- **Bewusst nicht:** Grundsammeln bleibt 2 (entschieden); keine Änderung der Holz-/Stein-
   Kapazitäten der Biome; keine selbst geplanten Holzfällerlager oder
   Steinbrüche (getestet, verworfen: weniger Grundsammeln bricht die Wirtschaft
   ein). Der Vorteil von Wald/Hügeln (Bau) gegenüber dem Mangel anderswo

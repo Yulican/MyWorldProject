@@ -126,6 +126,10 @@ Händler reisen nur auf Wegen, nie durch Land eines anderen Volks:
   - **Kornspeicher, Wasserträger:** siehe Abschnitt 3.
 - Gebaut wird nur, wenn die Kosten im Vorrat liegen und die Ernte den
   Unterhalt dauerhaft trägt.
+- **Handels-Bauziel (entschieden):** Siedlungen, deren eigene Ernte Holz oder
+  Stein eines Gebäudes nicht trägt, setzen es trotzdem als Bauziel, wenn der
+  Überschuss ihres Volks und ihrer Partner die Lücke deckt. Die Händler
+  bedienen diese Nachfrage mit (Details: `Requirement Regionale Rohstoffe.md` §3).
 
 ## 9. Ergebnisse (12 Welten, je 300 Jahre)
 
