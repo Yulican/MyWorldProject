@@ -193,6 +193,7 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
     if (sim.gacha.divine[civ.id] !== 0) terms.push({ label: 'Divine', value: sim.gacha.divine[civ.id] });
     if (FAITH.creed !== null && FAITH.creed[civ.id] !== 0) terms.push({ label: 'Creed', value: FAITH.creed[civ.id] });
     if (FAITH.heresy !== null && FAITH.heresy[civ.id] !== 0) terms.push({ label: 'Heresy', value: FAITH.heresy[civ.id] });
+    if (FAITH.heresyCell !== null && FAITH.heresyCell[cell] !== 0) terms.push({ label: 'Heresy', value: FAITH.heresyCell[cell] });
   }
   return terms;
 }
@@ -216,7 +217,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   if (civ) {
     for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
     sum += sim.leaders.sat[civ.id] + sim.leaders.conn[civ.id] + sim.gacha.divine[civ.id];
-    if (FAITH.creed !== null) sum += FAITH.creed[civ.id] + FAITH.heresy![civ.id];
+    if (FAITH.creed !== null) sum += FAITH.creed[civ.id] + FAITH.heresy![civ.id] + (FAITH.heresyCell !== null ? FAITH.heresyCell[cell] : 0);
   }
   return clampSatisfaction(sum);
 }

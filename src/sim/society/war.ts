@@ -2780,6 +2780,7 @@ function transferDistrict(sim: Simulation, s: number): boolean {
   for (let i = 0; i < pop.end; i++) {
     if (pop.alive[i] && pop.civ[i] === def && mask[pop.cell[i]]) changeCiv(sim, i, att);
   }
+  if (FAITH.on) FAITH.conquered!(sim, s, mask, att);
   for (let c = 0; c < n; c++) {
     if (!mask[c]) continue;
     owner[c] = att;

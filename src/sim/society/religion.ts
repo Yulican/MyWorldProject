@@ -118,6 +118,26 @@ export const RELIGION = {
   effect: 1,
   /** Switches for the experiments: 1 = on. */
   holyWar: 1,
+  /** 1 = a religion older than 40 years counts that as an event every year for Ancestral Wisdom (the requirement). */
+  ageEvent: 1,
+  /** Holy war: Missionary Zeal also makes a religion eligible; Holy War also grows from foreign-faith events. */
+  holyMission: 0,
+  holyForeign: 0,
+  /** Heresy: 0 = the founding people's settlements (the requirement), 1 = every settlement where the daughter faith holds a majority, whoever owns it. */
+  heresyMode: 0,
+  /** Scale on the trade and build levers of the traits (load, tripRange, dealAmount, lossTrade, tollAsk, buildCost, buildTime). */
+  tradeScale: 1,
+  /** Conquest of a holy war: faith lost by other faiths in the district, pull bonus of the conqueror's faith for conquestYears. */
+  conquest: 1,
+  conquestFaith: -0.3,
+  conquestPull: 0.15,
+  conquestYears: 10,
+  /** Traders carry faith: pressure per trade leg and year x the religion's carry, at the partner's capital. */
+  carryTrade: 1,
+  carryVisit: 0.05,
+  /** A people losing this share of its people in a year counts a Disaster event (proxy for fires, droughts, famine). */
+  disaster: 1,
+  disasterDrop: 0.03,
   /** Experiment: every religion may declare holy wars (upper bound of their number). */
   holyAll: 0,
   heresy: 1,
@@ -127,6 +147,11 @@ export const RELIGION = {
 
 /** Experiments: 1 for levers (L index) of the faith layer that have no effect (tools only; all 0 in the game). */
 export const FAITH_MUTE = new Uint8Array(LEVERS);
+export const FAITH_MUTE_TRAIT = new Uint8Array(25);
+/** Experiments: scale on one trait's lever effects (1 = the requirement; tools only). */
+export const FAITH_SCALE_TRAIT = new Float32Array(25).fill(1);
+const TRADE_LEVERS = new Uint8Array(LEVERS);
+for (const k of [L.load, L.tripRange, L.dealAmount, L.lossTrade, L.tollAsk, L.buildCost, L.buildTime]) TRADE_LEVERS[k] = 1;
 export const MAXR = 16;
 const SLOTS = 7;
 const CIVS = 256;
@@ -151,6 +176,7 @@ type TraitDef = {
   suppress?: number;
   merge?: number;
   schism?: number;
+  carry?: number;
   /** Faith in trust (6a): bond factor, kin shift, xeno factor. */
   bond?: number;
   kin?: number;
@@ -175,11 +201,11 @@ export const TRAITS: TraitDef[] = [
   { name: 'Divine Mandate', theme: 2, lev: [[L.rebel, 1.4], [L.income, 0.05]], sat: -1, src: [K.Uprising], counter: -2, attrs: [21, 22] },
   { name: 'Alms and Mercy', theme: 2, lev: [[L.margin, 5]], sat: 3, src: [K.Hardship, K.Peace], counter: -1, attrs: [13, 20] },
   { name: 'Sacred Tithe', theme: 2, lev: [[L.income, 0.1]], sat: -2, src: [K.Trade], counter: K.Hardship, attrs: [14] },
-  { name: 'Missionary Zeal', theme: 3, lev: [[L.warChance, 0.03]], sat: 0, pull: 1.5, src: [K.Settled, K.Trade, K.Pact, K.WarWon], counter: K.Pressure, attrs: [24] },
+  { name: 'Missionary Zeal', theme: 3, lev: [[L.warChance, 0.03]], sat: 0, pull: 1.5, carry: 2, src: [K.Settled, K.Trade, K.Pact, K.WarWon], counter: K.Pressure, attrs: [24] },
   { name: 'Inquisition', theme: 3, lev: [[L.rebel, 1.2], [L.tollAsk, 1.5]], sat: -3, suppress: 1, merge: 0, schism: 0.7, bond: 1, kin: -14, xeno: 1.5, src: [K.Uprising, K.Foreign, K.War], counter: -1, attrs: [22] },
   { name: 'Steadfast Flock', theme: 3, lev: [[L.closeTrust, 5]], sat: 1, hold: 1.6, merge: 0, schism: 0.7, bond: 1.3, kin: -6, xeno: 1.3, src: [K.Pressure], counter: -1, attrs: [8] },
   { name: 'Open Gates', theme: 4, lev: [[L.trust, 6], [L.openTrust, -5]], sat: 1, hold: 0.8, bond: 1, kin: 3, xeno: 0.5, src: [K.Trade, K.Pact, K.Peace], counter: K.Pressure, attrs: [7] },
-  { name: 'Pilgrim Roads', theme: 4, lev: [[L.load, 1.15], [L.tripRange, 1.15], [L.dealAmount, 1.2]], sat: 0, kin: 1, xeno: 0.8, src: [K.Trade], counter: -1, attrs: [12] },
+  { name: 'Pilgrim Roads', theme: 4, lev: [[L.load, 1.15], [L.tripRange, 1.15], [L.dealAmount, 1.2]], sat: 0, carry: 1.5, kin: 1, xeno: 0.8, src: [K.Trade], counter: -1, attrs: [12] },
   { name: 'Syncretic Spirit', theme: 4, lev: [[L.trust, 3]], sat: 1, merge: 3, schism: 0.5, kin: 6, xeno: 0.5, src: [K.Foreign], counter: -1, attrs: [] },
   { name: 'Ascetic Vows', theme: 5, lev: [[L.upkeepAll, 0.85], [L.reserve, 1.5], [L.birth, 0.95]], sat: -1, devotion: 0.01, src: [K.Hardship], counter: -1, attrs: [16] },
   { name: 'Temple Splendor', theme: 5, lev: [[L.upkeepAll, 1.1], [L.capitalFirst, 1]], sat: 3, devotion: 0.01, src: [K.Trade], counter: K.Hardship, attrs: [15] },
@@ -188,7 +214,7 @@ export const TRAITS: TraitDef[] = [
   { name: 'Spirit Guardians', theme: 6, lev: [[L.defExtra, 0.2], [L.strength, 1.05]], sat: 1, src: [K.WarLost], counter: -1, attrs: [] },
   { name: 'Ancestral Wisdom', theme: 6, lev: [[L.buildCost, 0.9], [L.buildTime, 0.9]], sat: 0, src: [K.Succession, K.Peace], counter: -1, attrs: [] },
   { name: 'Sea Gods', theme: 7, lev: [[L.tripRange, 1.15], [L.lossTrade, 0.7]], sat: 0, src: [K.Trade], counter: -1, attrs: [] },
-  { name: "Wayfarers' Faith", theme: 7, lev: [[L.settleOver, 0.97], [L.travel, 0.85]], sat: -1, src: [K.Settled], counter: -1, attrs: [18] },
+  { name: "Wayfarers' Faith", theme: 7, lev: [[L.settleOver, 0.97], [L.travel, 0.85]], sat: -1, carry: 1.5, src: [K.Settled], counter: -1, attrs: [18] },
   { name: 'Omen Readers', theme: 7, lev: [], sat: 2, src: [K.Disaster], counter: -1, attrs: [] },
 ];
 export const TRAIT_COUNT = 24;
@@ -242,6 +268,10 @@ export type ReligionStats = {
   awake150: number;
   awake300: number;
   merge0: number;
+  lifetimes: number[];
+  conquests: number;
+  carryVisits: number;
+  disasters: number;
   yearsFull: number;
   reachedFull: number;
   /** Person-years in religion 0 or in peoples that follow it, sums per year of alive religions. */
@@ -263,6 +293,7 @@ export type ReligionState = {
   traitId: Uint8Array;
   traitLvl: Uint8Array;
   traitProg: Float32Array;
+  traitBorn: Int32Array;
   tension: Float32Array;
   newClock: Int32Array;
   total: Int32Array;
@@ -293,6 +324,16 @@ export type ReligionState = {
   heresyDaughter: Int16Array;
   heresyMother: Int16Array;
   heresyAbs: Float32Array;
+  heresyOn: Uint8Array;
+  herYear: Int32Array;
+  herMother: Int16Array;
+  herRebelled: Uint8Array;
+  cellHer: Float32Array;
+  cellHerR: Uint8Array;
+  bonusUntil: Int32Array;
+  bonusRel: Uint8Array;
+  rCarry: Float32Array;
+  prevPop: Int32Array;
   /** A faith rebellion declared by this realm this year: daughter religion + 1 (0 none), and the mother religion. */
   rebelFaith: Int16Array;
   rebelMother: Int16Array;
@@ -335,7 +376,7 @@ function newStats(): ReligionStats {
     levelUp: 0, levelDown: 0, traitReplace: 0, schismsOf0: 0, tensionAtSchism0: 0, maxTension0: 0,
     heresyStarts: 0, schismSettlements: 0, schismMulti: 0, schismRebels: 0, faithRebellions: 0, faithJoinsRebel: 0, faithJoinsMother: 0,
     wars: 0, holyWars: 0, holyJoins: 0, holyYears: 0, holyEnded: 0, holyLongest: 0, maxWarAge: 0,
-    awake100: 0, awake150: 0, awake300: 0, merge0: 0, yearsFull: 0, reachedFull: 0, aliveSum: 0, years: 0, followSum: 0,
+    awake100: 0, awake150: 0, awake300: 0, merge0: 0, lifetimes: [], conquests: 0, carryVisits: 0, disasters: 0, yearsFull: 0, reachedFull: 0, aliveSum: 0, years: 0, followSum: 0,
   };
 }
 
@@ -355,6 +396,7 @@ export function installReligion(sim: Simulation): ReligionState {
     traitId: new Uint8Array(MAXR * SLOTS),
     traitLvl: new Uint8Array(MAXR * SLOTS),
     traitProg: new Float32Array(MAXR * SLOTS),
+    traitBorn: new Int32Array(MAXR * SLOTS),
     tension: new Float32Array(MAXR),
     newClock: new Int32Array(MAXR),
     total: new Int32Array(MAXR),
@@ -382,6 +424,16 @@ export function installReligion(sim: Simulation): ReligionState {
     heresyDaughter: new Int16Array(CIVS).fill(-1),
     heresyMother: new Int16Array(CIVS).fill(-1),
     heresyAbs: new Float32Array(CIVS),
+    heresyOn: new Uint8Array(CIVS),
+    herYear: new Int32Array(MAXR).fill(-1),
+    herMother: new Int16Array(MAXR).fill(-1),
+    herRebelled: new Uint8Array(MAXR),
+    cellHer: new Float32Array(cells),
+    cellHerR: new Uint8Array(cells).fill(255),
+    bonusUntil: new Int32Array(cells),
+    bonusRel: new Uint8Array(cells).fill(255),
+    rCarry: new Float32Array(MAXR).fill(1),
+    prevPop: new Int32Array(CIVS),
     rebelFaith: new Int16Array(CIVS),
     rebelMother: new Int16Array(CIVS),
     seenEv: new Int32Array(CIVS * EVENTS),
@@ -419,6 +471,9 @@ export function installReligion(sim: Simulation): ReligionState {
   FAITH.holyRatio = holyRatio;
   FAITH.warStarted = warStarted;
   FAITH.joinSide = joinSide;
+  FAITH.conquered = conquered;
+  FAITH.heresyCell = RELIGION.heresyMode === 1 ? st.cellHer : null;
+  TRAITS[1].src = RELIGION.holyForeign ? [K.War, K.WarWon, K.Foreign] : [K.War, K.WarWon];
   // Religion 0: the start faith of the start people (all of them, 75-100 % faith).
   const pop = sim.pop;
   for (let i = 0; i < pop.end; i++) if (pop.alive[i]) FAITH.rel[i] = 0;
@@ -444,6 +499,8 @@ export function removeReligion(): void {
   FAITH.warStarted = null;
   FAITH.holy = null;
   FAITH.joinSide = null;
+  FAITH.conquered = null;
+  FAITH.heresyCell = null;
 }
 
 function ensureRel(sim: Simulation): void {
@@ -594,6 +651,25 @@ function countAll(st: ReligionState): void {
       st.press[c * MAXR + r] = k / people;
     }
   }
+  const y = year(sim);
+  for (let c = 0; c < cells; c++) {
+    if (st.bonusUntil[c] > y && st.bonusRel[c] !== 255 && sim.cellPop[c] > 0 && st.alive[st.bonusRel[c]]) st.press[c * MAXR + st.bonusRel[c]] += RELIGION.conquestPull;
+  }
+  if (RELIGION.carryTrade) {
+    // Traders carry the faith of their people to the partner's capital (a visit per trade leg and year).
+    const known = sim.diplomacy.agreements;
+    for (const t of known) {
+      for (let d = 0; d < 2; d++) {
+        const from = d === 0 ? t.a : t.b;
+        const to = d === 0 ? t.b : t.a;
+        const r = st.major[from];
+        const cap = sim.civs[to]?.capital ?? -1;
+        if (r < 0 || cap < 0 || !st.alive[r] || sim.cellPop[cap] === 0) continue;
+        st.press[cap * MAXR + r] += RELIGION.carryVisit * st.rCarry[r] * t.legs.length;
+        st.stats.carryVisits += t.legs.length;
+      }
+    }
+  }
   for (let c = 0; c < CIVS; c++) {
     const n = st.popC[c];
     for (let r = 0; r < MAXR; r++) st.share[c * MAXR + r] = n > 0 ? st.cnt[c * MAXR + r] / n : 0;
@@ -628,6 +704,7 @@ function addTrait(st: ReligionState, r: number, t: number, level: number): boole
       st.traitId[r * SLOTS + k] = t;
       st.traitLvl[r * SLOTS + k] = level;
       st.traitProg[r * SLOTS + k] = level === 1 ? RELIGION.newProgress : 40;
+      st.traitBorn[r * SLOTS + k] = year(st.sim);
       st.stats.traitGain[t]++;
       return true;
     }
@@ -713,6 +790,8 @@ function found(st: ReligionState, r: number, civ: number, parent: number, path: 
   st.awakeStreak.fill(0, r * 3, r * 3 + 3);
   st.awakeDone.fill(0, r * 3, r * 3 + 3);
   st.lostOut[r] = 0;
+  st.herYear[r] = -1;
+  st.herRebelled[r] = 0;
   void path;
   if (parent >= 0) return;
   // First trait: the leader's attribute or the strongest culture, level 2.
@@ -756,6 +835,7 @@ function computeRLevers(st: ReligionState): void {
     st.rSup[r] = 0;
     st.rMerge[r] = 1;
     st.rSchism[r] = 1;
+    st.rCarry[r] = 1;
     if (!st.alive[r]) continue;
     for (let k = 0; k < SLOTS; k++) {
       const t = st.traitId[r * SLOTS + k];
@@ -769,6 +849,7 @@ function computeRLevers(st: ReligionState): void {
       if (d.merge === 0) st.rMerge[r] = 0;
       else if (d.merge) st.rMerge[r] *= Math.pow(d.merge, f);
       if (d.schism) st.rSchism[r] *= Math.pow(d.schism, f);
+      if (d.carry) st.rCarry[r] *= Math.pow(d.carry, f);
     }
   }
 }
@@ -796,24 +877,73 @@ function computeCivLevers(st: ReligionState): void {
           creed += d.sat * f * RELIGION.creedScale;
           const g = f * RELIGION.leverScale;
           for (const [lever, v] of d.lev) {
-            if (FAITH_MUTE[lever]) continue;
-            if (LEVER_KIND[lever]) logs[lever] += g * Math.log(v);
-            else adds[lever] += v * g * (lever === L.trust ? flat : 1);
+            if (FAITH_MUTE[lever] || FAITH_MUTE_TRAIT[t]) continue;
+            const g2 = (TRADE_LEVERS[lever] ? g * RELIGION.tradeScale : g) * FAITH_SCALE_TRAIT[t];
+            if (LEVER_KIND[lever]) logs[lever] += g2 * Math.log(v);
+            else adds[lever] += v * g2 * (lever === L.trust ? flat : 1);
           }
         }
       }
     }
-    if (st.heresy[c] !== 0) logs[L.rebel] += Math.log(RELIGION.heresyRebel);
+    if (st.heresyOn[c] !== 0) logs[L.rebel] += Math.log(RELIGION.heresyRebel);
     for (let k = 0; k < LEVERS; k++) st.lev[o + k] = LEVER_KIND[k] ? Math.exp(logs[k]) : adds[k];
     st.creed[c] = Math.max(-RELIGION.creedCap, Math.min(RELIGION.creedCap, creed));
     combineLevers(sim, c);
   }
 }
 
-/** Heresy per people: its start value fading over heresyYears, scaled by the faith's traits (6.4). */
+/** The factor the faith's traits give Heresy in people `c` (6.4). */
+function heresyFactor(st: ReligionState, c: number): number {
+  let factor = 1;
+  for (let r = 0; r < MAXR; r++) {
+    const s = st.share[c * MAXR + r];
+    if (s <= 0 || !st.alive[r]) continue;
+    for (let k = 0; k < SLOTS; k++) {
+      const t = st.traitId[r * SLOTS + k];
+      const base = t === 11 ? RELIGION.heresyInq : t === 13 ? RELIGION.heresyOpen : t === 16 ? RELIGION.heresySync : t === 1 ? RELIGION.heresyHoly : t === 12 ? RELIGION.heresyFlock : 1;
+      if (base !== 1) factor *= Math.pow(base, s * lf(st.traitLvl[r * SLOTS + k]));
+    }
+  }
+  return factor;
+}
+
+/**
+ * Heresy: mode 0 per people (the founding people's settlements), mode 1 per cell (every settlement where the
+ * daughter faith holds a majority). Its start value fades over heresyYears, scaled by the traits (6.4).
+ */
 function computeHeresy(st: ReligionState): void {
   const sim = st.sim;
   const y = year(sim);
+  st.heresyOn.fill(0);
+  if (RELIGION.heresyMode === 1) {
+    st.cellHer.fill(0);
+    st.cellHerR.fill(255);
+    st.heresy.fill(0);
+    if (!RELIGION.heresy) return;
+    const factors = new Float64Array(CIVS).fill(-1);
+    for (let r = 0; r < MAXR; r++) {
+      if (!st.alive[r] || st.herYear[r] < 0) continue;
+      const age = y - st.herYear[r];
+      if (age >= RELIGION.heresyYears) {
+        st.herYear[r] = -1;
+        continue;
+      }
+      for (let c = 0; c < sim.world.cellCount; c++) {
+        const n = sim.cellPop[c];
+        if (n === 0 || st.cellBel[c * MAXR + r] * 2 <= n) continue;
+        const o = sim.world.owner[c];
+        if (o === 0) continue;
+        if (factors[o] < 0) factors[o] = heresyFactor(st, o);
+        const v = Math.max(RELIGION.heresyCap, RELIGION.heresyStart * factors[o] * (1 - age / RELIGION.heresyYears));
+        if (v < st.cellHer[c]) {
+          st.cellHer[c] = v;
+          st.cellHerR[c] = r;
+        }
+        st.heresyOn[o] = 1;
+      }
+    }
+    return;
+  }
   for (let c = 1; c < CIVS; c++) {
     if (st.heresyYear[c] < 0 || !RELIGION.heresy || !sim.civs[c]) {
       st.heresy[c] = 0;
@@ -825,17 +955,8 @@ function computeHeresy(st: ReligionState): void {
       st.heresyYear[c] = -1;
       continue;
     }
-    let factor = 1;
-    for (let r = 0; r < MAXR; r++) {
-      const s = st.share[c * MAXR + r];
-      if (s <= 0 || !st.alive[r]) continue;
-      for (let k = 0; k < SLOTS; k++) {
-        const t = st.traitId[r * SLOTS + k];
-        const base = t === 11 ? RELIGION.heresyInq : t === 13 ? RELIGION.heresyOpen : t === 16 ? RELIGION.heresySync : t === 1 ? RELIGION.heresyHoly : t === 12 ? RELIGION.heresyFlock : 1;
-        if (base !== 1) factor *= Math.pow(base, s * lf(st.traitLvl[r * SLOTS + k]));
-      }
-    }
-    st.heresy[c] = Math.max(RELIGION.heresyCap, RELIGION.heresyStart * factor * (1 - age / RELIGION.heresyYears));
+    st.heresy[c] = Math.max(RELIGION.heresyCap, RELIGION.heresyStart * heresyFactor(st, c) * (1 - age / RELIGION.heresyYears));
+    st.heresyOn[c] = 1;
   }
 }
 
@@ -906,7 +1027,7 @@ function holyOk(st: ReligionState, a: number, b: number): number {
   const r = st.major[a];
   const q = st.major[b];
   if (!RELIGION.holyWar || r < 0 || q < 0 || r === q || !st.alive[r]) return -1;
-  if (!RELIGION.holyAll && !hasTraitShare(st, r, 1, 11)) return -1;
+  if (!RELIGION.holyAll && !hasTraitShare(st, r, 1, 11) && !(RELIGION.holyMission && hasTrait(st, r, 10) >= 0)) return -1;
   if (year(st.sim) - st.lastHoly[r] < RELIGION.holyCooldown) return -1;
   return r;
 }
@@ -939,6 +1060,26 @@ function warStarted(sim: Simulation, att: number, def: number, s: number): void 
     const k = hasTrait(st, r, 1);
     if (k >= 0) st.traitProg[r * SLOTS + k] += 10;
   }
+}
+
+/** A holy war's conquest (6b): other faiths in the district lose faith, the conqueror's faith presses on the district for years. */
+function conquered(sim: Simulation, s: number, mask: Uint8Array, att: number): void {
+  const st = ACTIVE!;
+  if (!RELIGION.conquest || st.holyWar[s] !== 1) return;
+  const r = st.major[att];
+  if (r < 0) return;
+  const pop = sim.pop;
+  const rel = FAITH.rel;
+  const until = year(sim) + RELIGION.conquestYears;
+  for (let c = 0; c < mask.length; c++) if (mask[c]) {
+    st.bonusUntil[c] = until;
+    st.bonusRel[c] = r;
+  }
+  for (let i = 0; i < pop.end; i++) {
+    if (!pop.alive[i] || !mask[pop.cell[i]] || rel[i] === r || rel[i] === 255) continue;
+    pop.faith[i] = Math.max(0, pop.faith[i] + RELIGION.conquestFaith);
+  }
+  st.stats.conquests++;
 }
 
 function joinSide(sim: Simulation, s: number, p: number): number {
@@ -989,14 +1130,26 @@ export function onUprising(sim: Simulation, cells: readonly number[], parent: nu
   if (st === null || parent >= CIVS) return false;
   let heresy = 0;
   for (const c of cells) if (labelOf(c) === 'Heresy') heresy++;
-  if (heresy * 2 < cells.length || st.heresyYear[parent] < 0) return false;
+  if (heresy * 2 < cells.length) return false;
+  let daughter = -1;
+  if (RELIGION.heresyMode === 1) {
+    const count = new Int32Array(MAXR);
+    for (const c of cells) if (st.cellHerR[c] !== 255) count[st.cellHerR[c]]++;
+    let best = 0;
+    for (let r = 0; r < MAXR; r++) {
+      if (count[r] > best) {
+        best = count[r];
+        daughter = r;
+      }
+    }
+  } else if (st.heresyYear[parent] >= 0) daughter = st.heresyDaughter[parent];
+  if (daughter < 0) return false;
   st.stats.faithRebellions++;
-  st.rebelFaith[parent] = st.heresyDaughter[parent] + 1;
-  st.rebelMother[parent] = st.heresyMother[parent];
-  // A rebellion ends the link of the schism once (counted per schism).
-  if (st.heresyAbs[parent] !== 0) {
+  st.rebelFaith[parent] = daughter + 1;
+  st.rebelMother[parent] = RELIGION.heresyMode === 1 ? st.herMother[daughter] : st.heresyMother[parent];
+  if (!st.herRebelled[daughter]) {
+    st.herRebelled[daughter] = 1;
     st.stats.schismRebels++;
-    st.heresyAbs[parent] = 0;
   }
   return true;
 }
@@ -1037,6 +1190,11 @@ function creditEvents(st: ReligionState): void {
       if (st.seenCounter[c] !== 0) addEvent(st, c, K.Succession);
       st.seenCounter[c] = sim.leaders.counter[c];
     }
+    if (RELIGION.disaster && st.prevPop[c] > 50 && st.popC[c] < st.prevPop[c] * (1 - RELIGION.disasterDrop)) {
+      addEvent(st, c, K.Disaster);
+      st.stats.disasters++;
+    }
+    st.prevPop[c] = st.popC[c];
     // Foreign faith of at least 20 % in the people.
     let top = 0;
     let other = 0;
@@ -1091,7 +1249,7 @@ function growTraits(st: ReligionState): void {
       const d = TRAITS[t];
       let n = 0;
       for (const kind of d.src) n += st.yev[r * NK + kind];
-      if (t === 21 && age > 40) n++;
+      if (t === 21 && age > 40 && RELIGION.ageEvent) n++;
       let delta = n > 0 ? Math.min(RELIGION.gainMax, n * RELIGION.gain) : RELIGION.idle;
       let opposed = false;
       if (d.counter >= 0) opposed = st.yev[r * NK + d.counter] > 0;
@@ -1112,6 +1270,7 @@ function growTraits(st: ReligionState): void {
           st.stats.levelDown++;
         } else {
           st.stats.traitLose[t]++;
+          st.stats.lifetimes.push(year(sim) - st.traitBorn[i]);
           st.traitId[i] = 0;
           st.traitLvl[i] = 0;
           st.traitProg[i] = 0;
@@ -1138,6 +1297,7 @@ function growTraits(st: ReligionState): void {
             const t = pickTrait(st, r, (x) => TRAITS[x].src.includes(kind));
             if (t) {
               st.stats.traitLose[st.traitId[r * SLOTS + weakest]]++;
+              st.stats.lifetimes.push(y - st.traitBorn[r * SLOTS + weakest]);
               st.traitId[r * SLOTS + weakest] = 0;
               addTrait(st, r, t, 1);
               st.stats.traitReplace++;
@@ -1178,6 +1338,7 @@ function die(st: ReligionState, r: number): void {
   st.stats.lifeSum += year(sim) - st.founded[r];
   // A daughter's heresy ends with it.
   for (let c = 1; c < CIVS; c++) if (st.heresyDaughter[c] === r) st.heresyYear[c] = -1;
+  st.herYear[r] = -1;
 }
 
 function folkFaiths(st: ReligionState): void {
@@ -1291,6 +1452,7 @@ function splitOff(st: ReligionState, r: number, slot: number, civ: number): void
     st.traitId[slot * SLOTS + k] = st.traitId[r * SLOTS + k];
     st.traitLvl[slot * SLOTS + k] = st.traitLvl[r * SLOTS + k];
     st.traitProg[slot * SLOTS + k] = st.traitProg[r * SLOTS + k];
+    st.traitBorn[slot * SLOTS + k] = st.traitBorn[r * SLOTS + k];
   }
   let weakest = -1;
   for (let k = 0; k < SLOTS; k++) {
@@ -1306,7 +1468,9 @@ function splitOff(st: ReligionState, r: number, slot: number, civ: number): void
   const t = drawTrait(st, slot, st.civHist, civ * NK * 10, RELIGION.secondFromEvents);
   if (t) addTrait(st, slot, t, 1);
   // Heresy in the founding people (a new split renews it).
-  st.heresyYear[civ] = y;
+  st.herYear[slot] = y;
+  st.herMother[slot] = r;
+  if (RELIGION.heresyMode === 0) st.heresyYear[civ] = y;
   st.heresyDaughter[civ] = slot;
   st.heresyMother[civ] = r;
   st.heresyAbs[civ] = 1;
@@ -1353,6 +1517,8 @@ function merges(st: ReligionState): void {
       if (ss >= 0) st.traitProg[keep * SLOTS + ss] += 10;
       // Heresy ends when a daughter merges with its mother.
       for (let c = 1; c < CIVS; c++) if ((st.heresyDaughter[c] === lose && st.heresyMother[c] === keep) || (st.heresyDaughter[c] === keep && st.heresyMother[c] === lose)) st.heresyYear[c] = -1;
+      st.herYear[lose] = -1;
+      if (st.herMother[keep] === lose) st.herYear[keep] = -1;
       setReligion(st, lose, keep, -1);
       st.alive[lose] = 0;
       st.stats.merged++;

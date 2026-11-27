@@ -14,7 +14,7 @@ import { PAIRS } from '../src/sim/society/diplomacy';
 import { LEVERS, L } from '../src/sim/society/leaders';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
-import { FAITH_MUTE, MAXR, RELIGION, TRAITS, TRAIT_COUNT, installReligion, onUprising, religionOf, religionYear, removeReligion, type ReligionState } from '../src/sim/society/religion';
+import { FAITH_MUTE, FAITH_MUTE_TRAIT, FAITH_SCALE_TRAIT, MAXR, RELIGION, TRAITS, TRAIT_COUNT, installReligion, onUprising, religionOf, religionYear, removeReligion, type ReligionState } from '../src/sim/society/religion';
 import { FAITH } from '../src/sim/society/faithHooks';
 
 type Row = Record<string, number>;
@@ -187,6 +187,11 @@ function measure(sim: Simulation, st: ReligionState | null, year: number, overYe
       traitsN += n;
       if (st.total[r] > 0) full++;
     }
+    const ages: number[] = [];
+    const removed = s.lifetimes.slice().sort((a, b) => a - b);
+    for (let r = 0; r < MAXR; r++) if (st.alive[r]) for (let k = 0; k < 7; k++) if (st.traitId[r * 7 + k]) ages.push(Math.floor(sim.tick / TICKS_PER_YEAR) - st.traitBorn[r * 7 + k]);
+    const all = removed.concat(ages).sort((a, b) => a - b);
+    const q = (a: number[], p: number) => (a.length ? a[Math.min(a.length - 1, Math.floor(p * a.length))] : 0);
     const awakeNow = [0, 0, 0];
     for (let r = 1; r < MAXR; r++) if (st.alive[r]) for (let k = 0; k < 3; k++) awakeNow[k] += st.awakeDone[r * 3 + k];
     const warAdd: number[] = [];
@@ -213,6 +218,16 @@ function measure(sim: Simulation, st: ReligionState | null, year: number, overYe
       'blocked by cap (tries)': s.blockedFull,
       'years with 16/16': s.yearsFull,
       'traits per religion': traitsN / Math.max(1, alive),
+      'trait life removed: n': removed.length,
+      'trait life removed: median': q(removed, 0.5),
+      'trait life removed: p10': q(removed, 0.1),
+      'trait life removed: p90': q(removed, 0.9),
+      'trait life incl. alive: median': q(all, 0.5),
+      'trait life incl. alive: p10': q(all, 0.1),
+      'trait life incl. alive: p90': q(all, 0.9),
+      'conquests with conversion': s.conquests,
+      'trade visits carrying faith': s.carryVisits,
+      'disaster events': s.disasters,
       'trait level 1 %': (100 * lv[0]) / Math.max(1, traitsN),
       'trait level 2 %': (100 * lv[1]) / Math.max(1, traitsN),
       'trait level 3 %': (100 * lv[2]) / Math.max(1, traitsN),
@@ -271,8 +286,18 @@ for (const variant of variants) {
   const [name, spec] = variant.split(':');
   Object.assign(RELIGION, defaults);
   FAITH_MUTE.fill(0);
+  FAITH_MUTE_TRAIT.fill(0);
+  FAITH_SCALE_TRAIT.fill(1);
   if (spec) for (const kv of spec.split(',')) {
     const [k, v] = kv.split('=');
+    if (k === 'halve') {
+      for (const t of v.split('+')) FAITH_SCALE_TRAIT[Number(t)] = 0.5;
+      continue;
+    }
+    if (k === 'muteTrait') {
+      for (const t of v.split('+')) FAITH_MUTE_TRAIT[Number(t)] = 1;
+      continue;
+    }
     if (k === 'mute') {
       for (const lever of v.split('+')) FAITH_MUTE[(L as Record<string, number>)[lever]] = 1;
       continue;

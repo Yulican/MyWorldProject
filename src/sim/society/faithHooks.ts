@@ -28,4 +28,8 @@ export const FAITH: {
   holy: Uint8Array | null;
   /** Which side (0 attacker's, 1 defender's, -1 none) people `p` joins in war `s` for its faith (holy war, rebellion over faith). */
   joinSide: ((sim: Simulation, s: number, p: number) => number) | null;
-} = { on: false, lev: null, creed: null, heresy: null, trust: null, rel: new Uint8Array(0), added: null, step: null, holyRatio: null, warStarted: null, holy: null, joinSide: null };
+  /** Per-cell Heresy part (mode 1). */
+  heresyCell: Float32Array | null;
+  /** Cells (mask) of war `s` changed hands to `att`. */
+  conquered: ((sim: Simulation, s: number, mask: Uint8Array, att: number) => void) | null;
+} = { on: false, lev: null, creed: null, heresy: null, trust: null, rel: new Uint8Array(0), added: null, step: null, holyRatio: null, warStarted: null, holy: null, joinSide: null, heresyCell: null, conquered: null };
