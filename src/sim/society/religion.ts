@@ -154,6 +154,9 @@ export const RELIGION = {
   daughterNoWorld: 40,
   mergeBan: 30,
   /** Contagion rule 6.1a (contagion 1 + this = 1): inflow only from sources (share >= contSrc) within contRadius hexes, shares below contVanish vanish. */
+  /** Young daughters (schismMode 1): their believers do not fade during the grace years (1 = on); `hold` factor of a young daughter (1 = off). */
+  youngNoFade: 0,
+  youngHold: 1,
   contagionMode: 0,
   contRadius: 8,
   contSrc: 0.1,
@@ -599,7 +602,7 @@ function onStep(sim: Simulation, i: number, civId: number, cell: number, before:
   if (st.major[civId] === r) {
     f += civ.culture[Culture.Devout] * RELIGION.devout + sim.leaders.lev[civId * LEVERS + L.devotion] + st.rDev[r];
     if (r === 0) f += sim.gacha.godDevotion[civId * GODS + PLAYER_GOD];
-  } else f -= RELIGION.fading;
+  } else if (!(RELIGION.youngNoFade && RELIGION.schismMode === 1 && st.parent[r] >= 0 && st.wonBy[r] === 0 && Math.floor(sim.tick / TICKS_PER_YEAR) - st.founded[r] < RELIGION.daughterGrace)) f -= RELIGION.fading;
   const major = st.major[civId];
   if (major >= 0 && major !== r) f -= st.rSup[major];
   if (f < RELIGION.lose) {
@@ -889,6 +892,7 @@ function computeRLevers(st: ReligionState): void {
       if (d.schism) st.rSchism[r] *= Math.pow(d.schism, f);
       if (d.carry) st.rCarry[r] *= Math.pow(d.carry, f);
     }
+    if (RELIGION.youngHold !== 1 && RELIGION.schismMode === 1 && st.parent[r] >= 0 && st.wonBy[r] === 0 && year(st.sim) - st.founded[r] < RELIGION.youngYears) st.rHold[r] *= RELIGION.youngHold;
   }
 }
 

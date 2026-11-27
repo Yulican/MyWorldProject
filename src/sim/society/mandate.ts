@@ -76,6 +76,8 @@ export const MANDATE = {
   reintegrateShare: 0.4,
   /** Vassal truce: years after its creation without independence. */
   vassalTruce: 0,
+  /** A daughter faith with a majority in a settlement makes it restless; connected ones (2+) always count as a bloc (1 = on). */
+  heresyBloc: 0,
   /** Leader faith (Anführer 6a, 0 = the state faith is the largest share): heir draw (capital share weight), predecessor bonus, conversion shares/chances, forced conversion after forceYears (0 = off) at forceShare, loyalty faith part moves at most faithStep a year (0 = off). */
   leaderFaith: 0,
   capWeight: 0.7,
@@ -120,6 +122,7 @@ type Stats = {
   stateForced: number;
   stateDeath: number;
   stateToDaughter: number;
+  faithEnd: number[];
 };
 
 export type MandateState = {
@@ -140,6 +143,9 @@ export type MandateState = {
   vassalSince: Int32Array;
   vassalPrev: Float32Array;
   succFlag: Uint8Array;
+  forced: Uint8Array;
+  warInfo: Map<number, { size: number; rel: number; serial: number }>;
+  faithWars: { size: number; rebelsWon: boolean; rel: number; serial: number }[];
   forceCnt: Uint8Array;
   /** Blocs (16 places): people, start year, countdown length, active. */
   blocCiv: Int16Array;
@@ -175,6 +181,9 @@ export function installMandate(sim: Simulation): MandateState {
     vassalSince: new Int32Array(CIVS),
     vassalPrev: new Float32Array(n),
     succFlag: new Uint8Array(CIVS),
+    forced: new Uint8Array(n),
+    warInfo: new Map(),
+    faithWars: [],
     forceCnt: new Uint8Array(CIVS),
     blocCiv: new Int16Array(16),
     blocStart: new Int16Array(16),
@@ -185,7 +194,7 @@ export function installMandate(sim: Simulation): MandateState {
     stats: {
       blocsFormed: 0, countdowns: 0, independence: 0, autonomy: 0, reconcile: 0, dissolved: 0, countdownYears: 0, blocCells: 0, blocShare: 0,
       large: 0, small: 0, causes: [0, 0, 0, 0], causesStart: [0, 0, 0, 0], faithCountdowns: 0, faithIndependence: 0, vassalsMade: 0, vassalLife: 0,
-      vassalIndepPeace: 0, vassalIndepWar: 0, vassalReintegrated: 0, vassalFreed: 0, tribute: 0, agitations: 0, failedStart: 0, stateSucc: 0, stateConv: 0, stateForced: 0, stateDeath: 0, stateToDaughter: 0,
+      vassalIndepPeace: 0, vassalIndepWar: 0, vassalReintegrated: 0, vassalFreed: 0, tribute: 0, agitations: 0, failedStart: 0, stateSucc: 0, stateConv: 0, stateForced: 0, stateDeath: 0, stateToDaughter: 0, faithEnd: [0, 0, 0, 0],
     },
   };
   ACTIVE = st;
@@ -361,6 +370,22 @@ function updateLoyalty(st: MandateState): void {
     if (st.restless[c]) st.restless[c] = L0 >= th + MANDATE.hysteresis ? 0 : 1;
     else st.restless[c] = L0 < th ? 1 : 0;
   }
+  // Heresy bloc rule: a daughter faith in the majority makes the settlement restless.
+  st.forced.fill(0);
+  if (MANDATE.heresyBloc && rs !== null) {
+    for (let c = 0; c < n; c++) {
+      const o = w.owner[c];
+      const people = sim.cellPop[c];
+      if (people === 0 || o === 0 || sim.civs[o]?.capital === c) continue;
+      for (let r = 1; r < MAXR; r++) {
+        if (rs.alive[r] && rs.parent[r] >= 0 && r !== st.stateRel[o] && rs.cellBel[c * MAXR + r] * 2 > people) {
+          st.forced[c] = 1;
+          st.restless[c] = 1;
+          break;
+        }
+      }
+    }
+  }
 }
 
 const near = (st: MandateState, c: number, link: number, out: number[]): void => {
@@ -459,8 +484,13 @@ function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB:
   const y = year(sim);
   s.countdownYears += y - st.blocStart[id];
   const th = MANDATE.ratio * wK;
-  if (wB <= th || cells.length === 0) {
+  let forcedN = 0;
+  for (const c of cells) forcedN += st.forced[c];
+  const heresyBloc = MANDATE.heresyBloc === 1 && forcedN >= 2 && forcedN * 2 >= cells.length;
+  const faithBloc = mainCause(st, cells) === 2 || heresyBloc;
+  if ((wB <= th && !heresyBloc) || cells.length === 0) {
     reconcile(st, cells, civ);
+    if (faithBloc) s.faithEnd[2]++;
     return;
   }
   // Faith share of the bloc: settlements with a deviation over 50 %.
@@ -478,7 +508,8 @@ function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB:
   if (pick < wU) {
     // Independence: the existing rebel war.
     const rs = religionOf(sim);
-    const faithDriven = rs !== null && mainCause(st, cells) === 2;
+    const faithDriven = rs !== null && faithBloc;
+    let faithRel = -1;
     if (rs !== null) {
       rs.faithFlag[civ] = faithDriven ? 1 : 0;
       if (faithDriven) {
@@ -499,10 +530,7 @@ function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB:
             rs.stats.schismRebels++;
           }
           s.faithIndependence++;
-          if (rs.wonBy[best] === 0 && rs.parent[best] >= 0) {
-            rs.wonBy[best] = 3;
-            rs.stats.dWon[3]++;
-          }
+          faithRel = best;
         }
       }
     }
@@ -514,6 +542,8 @@ function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB:
       return;
     }
     s.independence++;
+    if (faithBloc) s.faithEnd[0]++;
+    if (faithRel >= 0 && rs !== null) st.warInfo.set(slot, { size: cells.length, rel: faithRel, serial: rs.serial[faithRel] });
     st.legitEvents[civ] += MANDATE.independence;
     if (share >= 0.2) s.large++;
     else s.small++;
@@ -524,6 +554,7 @@ function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB:
   // Autonomy: up to vassalMax groups become vassals.
   makeVassals(st, cells, civ);
   s.autonomy++;
+  if (faithBloc) s.faithEnd[1]++;
   st.legitEvents[civ] += MANDATE.autonomy;
   if (share >= 0.2) s.large++;
   else s.small++;
@@ -750,6 +781,21 @@ function updateLeaderFaith(st: MandateState): void {
   }
 }
 
+/** The tool's hook at the end of a rebel war: faith wars are kept with their bloc size, a won war makes the heresy "won by rebellion". */
+export function recordFaithWar(sim: Simulation, slot: number, rebelsWon: boolean): void {
+  const st = ACTIVE;
+  if (st === null || st.sim !== sim) return;
+  const info = st.warInfo.get(slot);
+  if (!info) return;
+  st.warInfo.delete(slot);
+  st.faithWars.push({ size: info.size, rebelsWon, rel: info.rel, serial: info.serial });
+  const rs = religionOf(sim);
+  if (rebelsWon && rs !== null && rs.serial[info.rel] === info.serial && rs.wonBy[info.rel] === 0 && rs.parent[info.rel] >= 0) {
+    rs.wonBy[info.rel] = 3;
+    rs.stats.dWon[3]++;
+  }
+}
+
 /** The yearly Mandate step (call after the religion step, at the year's end). */
 export function mandateYear(sim: Simulation): void {
   const st = ACTIVE;
@@ -775,7 +821,9 @@ export function mandateYear(sim: Simulation): void {
       best = v;
       id = k;
     }
-    const heavy = b.wB > MANDATE.ratio * wK[b.civ];
+    let forcedN = 0;
+    for (const c of b.cells) forcedN += st.forced[c];
+    const heavy = b.wB > MANDATE.ratio * wK[b.civ] || (MANDATE.heresyBloc === 1 && forcedN >= 2 && forcedN * 2 >= b.cells.length);
     if (id < 0) {
       if (!big) continue;
       if (st.blocId.length > 0) s.blocsFormed++;
@@ -799,7 +847,11 @@ export function mandateYear(sim: Simulation): void {
     if (b.wB <= MANDATE.ratioEnd * MANDATE.ratio * wK[b.civ]) {
       st.blocActive[id] = 0;
       s.countdownYears += y - st.blocStart[id];
-      reconcile(st, b.cells, b.civ);
+      if (forcedN < 2) reconcile(st, b.cells, b.civ);
+      else {
+        st.blocActive[id] = 1;
+        continue;
+      }
       for (const c of b.cells) newId[c] = -1;
       continue;
     }
@@ -817,6 +869,32 @@ export function mandateYear(sim: Simulation): void {
   st.blocId.set(newId);
   vassalsYear(st);
   void connectionValue;
+}
+
+function faithWarRows(st: MandateState): Record<string, number> {
+  const rs = religionOf(st.sim);
+  const won = st.faithWars.filter((w) => w.rebelsWon);
+  const lost = st.faithWars.filter((w) => !w.rebelsWon);
+  const mean = (a: { size: number }[]) => (a.length ? a.reduce((x, w) => x + w.size, 0) / a.length : 0);
+  let died = 0;
+  let smoulder = 0;
+  let wonLater = 0;
+  if (rs !== null) {
+    for (const w of lost) {
+      if (!rs.alive[w.rel] || rs.serial[w.rel] !== w.serial) died++;
+      else if (rs.wonBy[w.rel] > 0) wonLater++;
+      else smoulder++;
+    }
+  }
+  return {
+    'faith wars ended: rebels won': won.length,
+    'faith wars ended: mother won (crushed)': lost.length,
+    'faith wars: bloc size, rebels won (mean settlements)': mean(won),
+    'faith wars: bloc size, crushed (mean settlements)': mean(lost),
+    'crushed heresies: died': died,
+    'crushed heresies: smouldering (alive)': smoulder,
+    'crushed heresies: won later': wonLater,
+  };
 }
 
 /** Numbers for the tool at a checkpoint: loyalty spread, restless share, main causes, double counting of the road distance. */
@@ -888,6 +966,10 @@ export function mandateSnapshot(st: MandateState): Record<string, number> {
     'split: share of realm per event %': end ? (100 * s.blocShare) / end : 0,
     'independence over faith': s.faithIndependence,
     'agitations': s.agitations,
+    'faith blocs ended: independence': s.faithEnd[0],
+    'faith blocs ended: vassal': s.faithEnd[1],
+    'faith blocs ended: reconciliation': s.faithEnd[2],
+    ...faithWarRows(st),
     'state faith changes: succession': s.stateSucc,
     'state faith changes: conversion in office': s.stateConv,
     'state faith changes: forced conversion': s.stateForced,

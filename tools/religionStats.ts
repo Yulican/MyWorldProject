@@ -22,7 +22,7 @@ import { UNREST, installUnrest, removeUnrest, unrestYear } from '../src/sim/soci
 const milDefaults = { ...MIL };
 const warDefaults = { ...WAR };
 const unrestDefaults = { ...UNREST };
-import { MANDATE, installMandate, mandateOf, mandateSnapshot, mandateYear, removeMandate } from '../src/sim/society/mandate';
+import { MANDATE, installMandate, mandateOf, recordFaithWar, mandateSnapshot, mandateYear, removeMandate } from '../src/sim/society/mandate';
 const mandateDefaults = { ...MANDATE };
 
 // Outcomes of rebel wars per world, faith rebellions (F) apart from normal ones (N).
@@ -39,6 +39,7 @@ FAITH.rebelEnd = (sim: Simulation, s: number, type: number) => {
   const groups: number[] = [];
   for (let p = 1; p <= sim.diplomacy.maxId; p++) if (w.side[s * PAIRS + p] === 1 && w.rebelMother[p] === mother) groups.push(p);
   for (let c = 0; c < sim.world.cellCount; c++) if (sim.cellPop[c] > 0 && groups.includes(sim.world.owner[c])) cells++;
+  if (MANDATE.enabled) recordFaithWar(sim, s, won ? false : true);
   r.n++;
   r.years += (sim.tick - w.wStart[s]) / TICKS_PER_YEAR;
   if (won) {
@@ -384,6 +385,9 @@ for (const variant of variants) {
     if (UNREST.enabled) installUnrest(sim);
     if (MANDATE.enabled && st) installMandate(sim);
     let overYear = 0;
+    const trace: string[] = [];
+    let tenseYear = -1;
+    let firstHeresy0 = -1;
     const line: number[] = [];
     for (const year of checkpoints) {
       while (sim.tick < year * TICKS_PER_YEAR && !sim.gameOver) {
@@ -392,6 +396,25 @@ for (const variant of variants) {
           religionYear(sim);
           unrestYear(sim);
           mandateYear(sim);
+          const yy = sim.tick / TICKS_PER_YEAR;
+          if (st.tension[0] >= 70 && tenseYear < 0) tenseYear = yy;
+          let d0 = 0;
+          let d0b = 0;
+          for (let r = 1; r < MAXR; r++) if (st.alive[r] && st.parent[r] >= 0 && st.parentSerial[r] === st.serial[0]) {
+            d0++;
+            d0b += st.total[r];
+          }
+          if (st.stats.schismsOf0 > 0 && firstHeresy0 < 0) firstHeresy0 = yy;
+          if (yy % 5 === 0) {
+            const ms = mandateOf(sim);
+            let stateZero = 0;
+            let follow = 0;
+            for (let c = 1; c < 256; c++) if (sim.civs[c]) {
+              if (ms && ms.stateRel[c] === 0) stateZero++;
+              if (st.major[c] === 0) follow++;
+            }
+            trace.push(`y${yy} believers0=${st.total[0]} heresies0=${d0}(${d0b}) tension0=${st.tension[0].toFixed(0)} schisms0=${st.stats.schismsOf0} statefaith0=${stateZero} follow0=${follow} peoples=${sim.civs.filter(Boolean).length} wars=${sim.war.wars} state-changes(succ/conv/died)=${ms ? ms.stats.stateSucc + '/' + ms.stats.stateConv + '/' + ms.stats.stateDeath : '-'}`);
+          }
           if (sim.tick % (50 * TICKS_PER_YEAR) === 0) line.push(sim.believers);
         } else if (!st && sim.tick % (50 * TICKS_PER_YEAR) === 0) line.push(sim.believers);
       }
@@ -399,6 +422,7 @@ for (const variant of variants) {
       (rows[year] ??= []).push(measure(sim, st, year, overYear));
     }
     series.push(line);
+    if (st && sim.gameOver) process.stdout.write(`GAMEOVER ${name} seed ${seed} year ${overYear} first heresy of 0: ${firstHeresy0}, Tense (>=70): ${tenseYear}\n  ${trace.slice(-14).join('\n  ')}\n`);
     if (st) removeReligion();
     removeUnrest();
     removeMandate();
