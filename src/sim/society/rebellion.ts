@@ -7,6 +7,7 @@ import { Pact } from './pacts';
 import { L, LEVERS } from './leaders';
 import { PAIRS } from './diplomacy';
 import { WAR, MAX_GOALS, MAX_WARS, startRebelWar } from './war';
+import { FAITH } from './faithHooks';
 import { BELIEVER_FAITH, UPRISING_HOOK, changeCiv, drawSoldiers, foundCivilization, record, type Simulation } from './simulation';
 
 // War phase 5a + 5b: uprisings as war ("Design Documents/Requirement
@@ -155,6 +156,7 @@ export function measureRebellion(sim: Simulation, mother: number): boolean {
  * next steps of the war's year (continueRebellion).
  */
 export function checkRebellion(sim: Simulation, mother: number): boolean {
+  if (FAITH.mandate) return false;
   if (!sim.civs[mother] || sim.war.rebelStage !== 0 || inRebellion(sim, mother)) return false;
   const count = markRebels(sim, mother, false);
   if (!measureFlagged(sim, mother, count)) return false;
@@ -172,6 +174,29 @@ export function startRebellion(sim: Simulation, mother: number, all = false): nu
   const w = sim.war;
   if (!sim.civs[mother] || sim.war.rebelStage !== 0 || inRebellion(sim, mother)) return -1;
   const count = markRebels(sim, mother, all);
+  if (count === 0) return -1;
+  measureFlagged(sim, mother, count);
+  if (!prepareRebels(sim, mother)) return -1;
+  while (w.rebelStage !== 0 && w.rebelStage !== 3) continueRebellion(sim);
+  return continueRebellion(sim, false);
+}
+
+/**
+ * Mandate prototype: a rebellion of the given settlements of `mother` at once (the end of a countdown, mandate.ts):
+ * like startRebellion but without the strength check. Returns the war slot, -1 if none began.
+ */
+export function startRebellionCells(sim: Simulation, mother: number, cells: readonly number[]): number {
+  const w = sim.war;
+  if (!sim.civs[mother] || w.rebelStage !== 0 || inRebellion(sim, mother)) return -1;
+  const n = sim.world.cellCount;
+  ensureScratch(n);
+  flag.fill(0, 0, n);
+  const capital = sim.civs[mother]?.capital ?? -1;
+  let count = 0;
+  for (const c of cells) if (c !== capital && sim.world.owner[c] === mother && sim.cellPop[c] > 0) {
+    flag[c] = 1;
+    count++;
+  }
   if (count === 0) return -1;
   measureFlagged(sim, mother, count);
   if (!prepareRebels(sim, mother)) return -1;

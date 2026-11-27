@@ -907,7 +907,7 @@ function computeCivLevers(st: ReligionState): void {
 }
 
 /** The factor the faith's traits give Heresy in people `c` (6.4). */
-function heresyFactor(st: ReligionState, c: number): number {
+export function heresyFactor(st: ReligionState, c: number): number {
   let factor = 1;
   for (let r = 0; r < MAXR; r++) {
     const s = st.share[c * MAXR + r];
@@ -1108,6 +1108,11 @@ function joinSide(sim: Simulation, s: number, p: number): number {
   const att = w.wAtt[s];
   const def = w.wDef[s];
   const dip = sim.diplomacy;
+  // Vassals always join their mother's wars, the mother those of her vassals.
+  if (FAITH.vassal !== null && w.wRebel[s] === 0 && p < FAITH.vassal.length) {
+    if (FAITH.vassal[p] === att || FAITH.vassal[att] === p) return 0;
+    if (FAITH.vassal[p] === def || FAITH.vassal[def] === p) return 1;
+  }
   const trust = (a: number, b: number) => dip.trust[a * PAIRS + b];
   if (w.wRebel[s] === 0) {
     if (st.holyWar[s] !== 1) return -1;

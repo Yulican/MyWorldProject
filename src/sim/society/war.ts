@@ -953,6 +953,7 @@ function markCandidates(sim: Simulation, a: number, civs: number): boolean {
   candidate.fill(0);
   // Only a people at peace starts a war (neither a main party nor an ally in one).
   if (!sim.civs[a] || w.enemy[a] !== 0 || w.allyWarsOf[a] > 0 || w.motherBusy[a] > 0) return false;
+  if (FAITH.vassal !== null && FAITH.vassal[a] >= 0) return false;
   const sa = m.strength[a] ?? 0;
   if (sa <= 0) return false;
   let any = false;

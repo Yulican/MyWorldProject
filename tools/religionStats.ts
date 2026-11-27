@@ -22,6 +22,8 @@ import { UNREST, installUnrest, removeUnrest, unrestYear } from '../src/sim/soci
 const milDefaults = { ...MIL };
 const warDefaults = { ...WAR };
 const unrestDefaults = { ...UNREST };
+import { MANDATE, installMandate, mandateOf, mandateSnapshot, mandateYear, removeMandate } from '../src/sim/society/mandate';
+const mandateDefaults = { ...MANDATE };
 
 // Outcomes of rebel wars per world, faith rebellions (F) apart from normal ones (N).
 type Rw = { n: number; mother: number; indep: number; years: number; retaken: number; kept: number; peoples: number; civs: { id: number; obj: object }[] };
@@ -89,7 +91,7 @@ let current: Simulation | null = null;
 UPRISING_HOOK.fn = (sim: Simulation, cells: readonly number[], parent: number) => {
   rebellions++;
   rebelCells += cells.length;
-  if (!FAITH.on) return;
+  if (!FAITH.on || FAITH.mandate) return;
   const label = (cell: number): string => {
     let worst = '';
     let worstValue = 0;
@@ -318,6 +320,8 @@ function measure(sim: Simulation, st: ReligionState | null, year: number, overYe
     for (let t = 1; t <= TRAIT_COUNT; t++) row[`trait ${String(t).padStart(2)} ${TRAITS[t].name}`] = present[t];
     for (let t = 1; t <= TRAIT_COUNT; t++) row[`  gained ${String(t).padStart(2)} ${TRAITS[t].name}`] = s.traitGain[t];
   }
+  const ms = mandateOf(sim);
+  if (ms) Object.assign(row, mandateSnapshot(ms));
   void year;
   return row;
 }
@@ -328,6 +332,7 @@ for (const variant of variants) {
   Object.assign(MIL, milDefaults);
   Object.assign(WAR, warDefaults);
   Object.assign(UNREST, unrestDefaults);
+  Object.assign(MANDATE, mandateDefaults);
   FAITH_MUTE.fill(0);
   FAITH_MUTE_TRAIT.fill(0);
   FAITH_SCALE_TRAIT.fill(1);
@@ -335,7 +340,7 @@ for (const variant of variants) {
     const [k, v] = kv.split('=');
     const dot = k.indexOf('.');
     if (dot > 0) {
-      const target = ({ mil: MIL, war: WAR, unrest: UNREST } as Record<string, Record<string, number>>)[k.slice(0, dot)];
+      const target = ({ mil: MIL, war: WAR, unrest: UNREST, mandate: MANDATE } as Record<string, Record<string, number>>)[k.slice(0, dot)];
       if (!target || !(k.slice(dot + 1) in target)) throw new Error(`unknown key ${k}`);
       target[k.slice(dot + 1)] = Number(v);
       continue;
@@ -368,6 +373,7 @@ for (const variant of variants) {
     rw.N = newRw();
     const st = on ? installReligion(sim) : null;
     if (UNREST.enabled) installUnrest(sim);
+    if (MANDATE.enabled && st) installMandate(sim);
     let overYear = 0;
     const line: number[] = [];
     for (const year of checkpoints) {
@@ -376,6 +382,7 @@ for (const variant of variants) {
         if (st && sim.tick % TICKS_PER_YEAR === 0) {
           religionYear(sim);
           unrestYear(sim);
+          mandateYear(sim);
           if (sim.tick % (50 * TICKS_PER_YEAR) === 0) line.push(sim.believers);
         } else if (!st && sim.tick % (50 * TICKS_PER_YEAR) === 0) line.push(sim.believers);
       }
@@ -385,6 +392,7 @@ for (const variant of variants) {
     series.push(line);
     if (st) removeReligion();
     removeUnrest();
+    removeMandate();
     process.stderr.write(`${name} seed ${seed} done${overYear ? ` (game over year ${overYear})` : ''} ${(Date.now() - t0) / 1000}s\n`);
   }
   void religionOf;
