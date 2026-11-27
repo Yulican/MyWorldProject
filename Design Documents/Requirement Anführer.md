@@ -143,6 +143,7 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 
 - **Dynastie:** Jedes Volk hat einen **Stammnamen** (vorerst aus einer festen Liste von 64 Namen für alle Völker, keine Namensliste je Kultur). Der erste Anführer heißt „Aron“, der nächste „Aron II“, dann „Aron III“ usw. Der Zähler gehört zum Volk.
 - **Stirbt der Anführer:** Der Nachfolger tritt im selben Jahr an: gleicher Stammname, Zähler +1, Alter 20 bis 40, **1 Attribut** (50 % eines der Attribute des Vorgängers, sonst Zufall, Abschnitt 4), neues **Ziel** (Abschnitt unten). Der Vorgänger-Fortschritt (Zehnjahresuhr, 2. und 3. Attribut, Zielfortschritt) beginnt neu.
+- **Glaube des Anführers:** siehe 6a (Staatsreligion folgt dem Anführer).
 - **Neues Volk** (Aufstand, neuer Stamm, abgeschnittenes Gebiet, Rebellenvolk): **neuer Stamm** (neuer Stammname, Zähler 1), erster Anführer mit zufälligem Attribut und Ziel nach Lage. Bei einem Rebellenvolk gilt das auch für jedes der Völker, die aus den Gruppen entstehen.
 - **Eroberung:** Der Anführer des Verlierers bleibt. Verliert ein Volk seine letzten Bezirke (es gibt das Volk nicht mehr), endet die Amtszeit ohne Nachfolger. Wird die ID eines Volks wiederverwendet (`resetWarCiv`), beginnt ein neuer Stamm.
 - **Zielwahl** (bei jedem Amtsantritt, nach der Lage des Volks, mit Zufallsanteil): zu **60 %** gewichtet nach Lage, zu 40 % gleichverteilt unter den wählbaren Zielen. Gewichte (Startwerte, Grundgewicht 1):
@@ -153,6 +154,16 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 | Wealth | ×2, wenn das Volk mindestens 2 Handelszentren/Häfen oder ein Handelsabkommen mit einem anderen Volk hat |
 | Security | ×3, wenn ein Nachbarvolk Gefahr ≥ 50 hat (sonst ×1; nicht wählbar ohne Nachbarn) |
 | Glory | ×2, wenn die eigene Stärke ≥ 1,5 × der Stärke eines Nachbarn ist |
+
+### 6a. Glaube des Anführers und Staatsreligion (Entwurf, Entscheidung Nutzer: die Staatsreligion folgt dem Anführer)
+
+Jeder Anführer hat einen **Glauben** (`faith`, Religions-Id, 255 = keiner). Die **Staatsreligion** des Volks ist der Glaube seines Anführers (`Requirement Mandat.md` §8, `Requirement Religion.md` §6.4). Alle Zahlen Startwerte.
+
+- **Erbe (Amtsantritt):** Der Glaube des Nachfolgers wird **gewichtet gezogen**: Gewicht der Religion *r* = `(0,7 × Anteil von r in der Hauptstadt + 0,3 × Anteil im Reich) × (1,5 falls r der Glaube des Vorgängers ist)`. Ein Anteil von 30 % der Tochterreligion in der Hauptstadt gibt ihr also etwa 25–30 % Chance, beim nächsten Thronwechsel Staatsreligion zu werden. Neues Volk, Rebellenvolk, Vasall, erster Anführer: Glaube = Mehrheitsreligion der Hauptstadt (ohne Zufall).
+- **Während der Amtszeit** wechselt der Glaube **nur ausnahmsweise**, jährlich geprüft, wenn eine andere Religion **≥ 55 %** der Hauptstadt hat: **Opportunist** 3 % je Jahr (passt sich dem Stärkeren an), **Weak Hand** 2 % je Jahr (beugt sich dem Volk). **Devout, Stubborn, Iron Fist und Tyrant** wechseln **nie** (Devout bleibt seiner Religion treu; die anderen lassen es nicht zu). Alle übrigen Anführer wechseln nicht. Kein neues Attribut (der Pool bleibt bei 25); ob später ein eigenes Attribut „Fickle/Zealot“ kommt, ist offen.
+- **Stirbt die Religion des Anführers:** sein Glaube wird sofort die Mehrheitsreligion der Hauptstadt (keine Zufallsziehung).
+- **Folgen eines Wechsels der Staatsreligion:** der Loyalitätsteil „Glaube“ (Mandat §2) kippt, gedämpft um höchstens 5 Punkte je Jahr; die alte Staatsreligion wird in den Siedlungen zur Abweichung, die neue nicht mehr; die Ziele von Heresy (Religion §6.4/§6.4a, „Mutterreligion“ des Reichs) folgen der neuen Staatsreligion. Chronik: **wichtig mit Dialog** bei Religion 0 oder einem Volk des Spielers („The ruler of <Volk> adopts <Religion>“, bei Nachfolge im Dialog des Herrschaftswechsels, §8), sonst still. Für das Volk des Spielers gilt dieselbe Regel; ein Anführer, der Religion 0 verlässt, ändert nur die Staatsreligion, nicht die Gläubigen (Anbetung/Andacht hängen an den 55 % der Bevölkerung, Religion §2).
+- **Eingriffe des Gottes:** **Dynasty's Heir** sichert zusätzlich, dass der Erbe den **Glauben des Vorgängers** behält (statt Ziehung); **Young Heir** und **Reroll Destiny** ändern den Glauben nicht (Young Heir beschleunigt nur den Thronwechsel, Reroll Destiny betrifft nur das Ziel); **Gift of Trait** kann Devout (Glauben festhalten) oder Opportunist/Weak Hand (Wechselbereitschaft) geben; **Prophet's Light** und **Doubt** verschieben die Anteile in der Hauptstadt und damit die Gewichte der Ziehung. Kein neuer Spieler-Eingriff „Glauben des Anführers ändern“ (Offen: Nutzer).
 
 ## 7. Wirkung auf Zufriedenheit
 

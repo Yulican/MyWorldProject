@@ -107,7 +107,7 @@ Ziel ist der Anführer eines Volks (`Requirement Anführer.md`). Der Gott ist di
 | 22 | Reroll Destiny | Rare | würfelt das **Ziel** neu (Gewichte wie `Requirement Anführer.md` §6, ohne das heutige Ziel); Fortschritt beginnt neu; nur bei noch aktivem Ziel |
 | 23 | Young Heir | Rare | der **nächste Nachfolger** tritt mit Alter 20 an (statt 20 bis 40): längste Amtszeit; gilt für einen Nachfolger, dann verbraucht; **unzulässiges Ziel**, solange das Flag bei diesem Volk schon gesetzt ist (Abschnitt 7.8) |
 | 24 | Honed Mind | Epic | ein **zufälliges** vorhandenes Attribut des Anführers wird verstärkt: die Abweichung seiner Wirkungen vom Grundwert ×1,5 (Zufriedenheit weiter im ±8-Deckel); nur für diesen Anführer (Abschnitt 7.8) |
-| 25 | Dynasty's Heir | Epic | der **nächste Nachfolger** erbt sicher ein Attribut des Vorgängers (statt 50 %; Zufall unter dessen Attributen); gilt für einen Nachfolger, dann verbraucht; **unzulässiges Ziel**, solange das Flag bei diesem Volk schon gesetzt ist (Abschnitt 7.8) |
+| 25 | Dynasty's Heir | Epic | der **nächste Nachfolger** erbt sicher ein Attribut des Vorgängers (statt 50 %; Zufall unter dessen Attributen); gilt für einen Nachfolger, dann verbraucht; **unzulässiges Ziel**, solange das Flag bei diesem Volk schon gesetzt ist (Abschnitt 7.8); *Nachtrag Religion: der Erbe behält auch den Glauben des Vorgängers, Anführer §6a* |
 
 ### 6.4 Stufenzuordnung (vorläufig)
 
