@@ -155,9 +155,9 @@ Die Zielwirkung zählt zu den Deckeln aus Abschnitt 3 (Zufriedenheit ±8, 2×-Sc
 | Security | ×3, wenn ein Nachbarvolk Gefahr ≥ 50 hat (sonst ×1; nicht wählbar ohne Nachbarn) |
 | Glory | ×2, wenn die eigene Stärke ≥ 1,5 × der Stärke eines Nachbarn ist |
 
-### 6a. Glaube des Anführers und Staatsreligion (Entwurf, Entscheidung Nutzer: die Staatsreligion folgt dem Anführer)
+### 6a. Glaube des Anführers und Staatsreligion (simuliert, freigegeben zur Umsetzung (Schritt 1), Satz „ab“; Entscheidung Nutzer: die Staatsreligion folgt dem Anführer)
 
-Jeder Anführer hat einen **Glauben** (`faith`, Religions-Id, 255 = keiner). Die **Staatsreligion** des Volks ist der Glaube seines Anführers (`Requirement Mandat.md` §8, `Requirement Religion.md` §6.4). Alle Zahlen Startwerte.
+Jeder Anführer hat einen **Glauben** (`faith`, Religions-Id, 255 = keiner). Die **Staatsreligion** des Volks ist der Glaube seines Anführers (`Requirement Mandat.md` §8, `Requirement Religion.md` §6.4). Zahlen: Satz „ab“ (`Requirement Religion.md` §16). **Verworfen:** jede Zwangsbekehrung (weder durch den Anführer noch bei Eroberung; nur die milde Bekehrung des Heiligen Krieges, Religion §6b).
 
 - **Erbe (Amtsantritt):** Der Glaube des Nachfolgers wird **gewichtet gezogen**: Gewicht der Religion *r* = `(0,7 × Anteil von r in der Hauptstadt + 0,3 × Anteil im Reich) × (1,5 falls r der Glaube des Vorgängers ist)`. Ein Anteil von 30 % der Tochterreligion in der Hauptstadt gibt ihr also etwa 25–30 % Chance, beim nächsten Thronwechsel Staatsreligion zu werden. Neues Volk, Rebellenvolk, Vasall, erster Anführer: Glaube = Mehrheitsreligion der Hauptstadt (ohne Zufall).
 - **Während der Amtszeit** wechselt der Glaube **nur ausnahmsweise**, jährlich geprüft, wenn eine andere Religion **≥ 55 %** der Hauptstadt hat: **Opportunist** 3 % je Jahr (passt sich dem Stärkeren an), **Weak Hand** 2 % je Jahr (beugt sich dem Volk). **Devout, Stubborn, Iron Fist und Tyrant** wechseln **nie** (Devout bleibt seiner Religion treu; die anderen lassen es nicht zu). Alle übrigen Anführer wechseln nicht. Kein neues Attribut (der Pool bleibt bei 25); ob später ein eigenes Attribut „Fickle/Zealot“ kommt, ist offen.
