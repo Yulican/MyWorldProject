@@ -2,6 +2,7 @@ import { DIRECTION_COUNT } from '../hex';
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { Culture } from './culture';
 import { FAITH } from './faithHooks';
+import { satisfactionTarget } from './satisfaction';
 import { PAIRS } from './diplomacy';
 import { GODS, PLAYER_GOD } from './gacha';
 import { ATTR_SLOTS, EVENTS, Ev, L, LEVERS, LEVER_KIND, combineLevers } from './leaders';
@@ -125,6 +126,9 @@ export const RELIGION = {
   holyForeign: 0,
   /** Heresy: 0 = the founding people's settlements (the requirement), 1 = every settlement where the daughter faith holds a majority, whoever owns it. */
   heresyMode: 0,
+  /** Mode 1 relative: 1 = the affected settlements' satisfaction is pulled to heresyMargin (x trait factor), fading over heresyYears; 0 = the flat heresyStart. */
+  heresyRelative: 0,
+  heresyMargin: -5,
   /** Scale on the trade and build levers of the traits (load, tripRange, dealAmount, lossTrade, tollAsk, buildCost, buildTime). */
   tradeScale: 1,
   /** Conquest of a holy war: faith lost by other faiths in the district, pull bonus of the conqueror's faith for conquestYears. */
@@ -934,7 +938,12 @@ function computeHeresy(st: ReligionState): void {
         const o = sim.world.owner[c];
         if (o === 0) continue;
         if (factors[o] < 0) factors[o] = heresyFactor(st, o);
-        const v = Math.max(RELIGION.heresyCap, RELIGION.heresyStart * factors[o] * (1 - age / RELIGION.heresyYears));
+        const fade = 1 - age / RELIGION.heresyYears;
+        let v: number;
+        if (RELIGION.heresyRelative) {
+          const base = satisfactionTarget(sim, c, sim.civs[o] ?? null);
+          v = Math.min(0, RELIGION.heresyMargin * factors[o] - base) * fade;
+        } else v = Math.max(RELIGION.heresyCap, RELIGION.heresyStart * factors[o] * fade);
         if (v < st.cellHer[c]) {
           st.cellHer[c] = v;
           st.cellHerR[c] = r;
