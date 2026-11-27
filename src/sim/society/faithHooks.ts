@@ -32,6 +32,11 @@ export const FAITH: {
   heresyCell: Float32Array | null;
   /** Mandate prototype (mandate.ts): the old strength-check rebellion is off; vassal of each people (-1 none). */
   mandate: boolean;
+  /** Mandate loyalty per cell (-1 none) for the schism's choice of place; scale on the satisfaction connection part while Mandate is on. */
+  loyalty: Float32Array | null;
+  /** State faith (leader's religion) per people, -1 none (mandate.ts). */
+  stateRel: Int16Array | null;
+  connScale: number;
   vassal: Int16Array | null;
   /** Per-cell satisfaction part "Unrest" (unrest.ts). */
   unrest: Float32Array | null;
@@ -39,4 +44,4 @@ export const FAITH: {
   rebelEnd: ((sim: Simulation, s: number, type: number) => void) | null;
   /** Cells (mask) of war `s` changed hands to `att`. */
   conquered: ((sim: Simulation, s: number, mask: Uint8Array, att: number) => void) | null;
-} = { on: false, lev: null, creed: null, heresy: null, trust: null, rel: new Uint8Array(0), added: null, step: null, holyRatio: null, warStarted: null, holy: null, joinSide: null, heresyCell: null, mandate: false, vassal: null, unrest: null, conquered: null, rebelEnd: null };
+} = { on: false, lev: null, creed: null, heresy: null, trust: null, rel: new Uint8Array(0), added: null, step: null, holyRatio: null, warStarted: null, holy: null, joinSide: null, heresyCell: null, mandate: false, loyalty: null, stateRel: null, connScale: 1, vassal: null, unrest: null, conquered: null, rebelEnd: null };

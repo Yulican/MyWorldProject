@@ -2,7 +2,7 @@ import { DIRECTION_COUNT } from '../hex';
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { mostPopulousCell, changeCiv, foundCivilization, type Simulation, TICKS_PER_YEAR } from './simulation';
 import { FAITH } from './faithHooks';
-import { Ev, EVENTS, L, LEVERS } from './leaders';
+import { ATTR_SLOTS, Ev, EVENTS, L, LEVERS } from './leaders';
 import { MAXR, CIVS, heresyFactor, religionOf } from './religion';
 import { startRebellionCells } from './rebellion';
 import { endPact, formAlliance } from './alliance';
@@ -74,6 +74,20 @@ export const MANDATE = {
   reintegrateLegit: 5,
   reintegrateTrust: 70,
   reintegrateShare: 0.4,
+  /** Vassal truce: years after its creation without independence. */
+  vassalTruce: 0,
+  /** Leader faith (Anführer 6a, 0 = the state faith is the largest share): heir draw (capital share weight), predecessor bonus, conversion shares/chances, forced conversion after forceYears (0 = off) at forceShare, loyalty faith part moves at most faithStep a year (0 = off). */
+  leaderFaith: 0,
+  capWeight: 0.7,
+  predecessor: 1.5,
+  convertShare: 0.55,
+  opportunist: 0.03,
+  weakHand: 0.02,
+  forceYears: 0,
+  forceShare: 0.6,
+  faithStep: 0,
+  /** Scale on the satisfaction connection part while Mandate is on (reach is the new road term). */
+  connScale: 1,
 };
 
 type Stats = {
@@ -101,6 +115,11 @@ type Stats = {
   tribute: number;
   agitations: number;
   failedStart: number;
+  stateSucc: number;
+  stateConv: number;
+  stateForced: number;
+  stateDeath: number;
+  stateToDaughter: number;
 };
 
 export type MandateState = {
@@ -120,6 +139,8 @@ export type MandateState = {
   vassalOf: Int16Array;
   vassalSince: Int32Array;
   vassalPrev: Float32Array;
+  succFlag: Uint8Array;
+  forceCnt: Uint8Array;
   /** Blocs (16 places): people, start year, countdown length, active. */
   blocCiv: Int16Array;
   blocStart: Int16Array;
@@ -153,6 +174,8 @@ export function installMandate(sim: Simulation): MandateState {
     vassalOf: new Int16Array(CIVS).fill(-1),
     vassalSince: new Int32Array(CIVS),
     vassalPrev: new Float32Array(n),
+    succFlag: new Uint8Array(CIVS),
+    forceCnt: new Uint8Array(CIVS),
     blocCiv: new Int16Array(16),
     blocStart: new Int16Array(16),
     blocLen: new Int16Array(16),
@@ -162,12 +185,15 @@ export function installMandate(sim: Simulation): MandateState {
     stats: {
       blocsFormed: 0, countdowns: 0, independence: 0, autonomy: 0, reconcile: 0, dissolved: 0, countdownYears: 0, blocCells: 0, blocShare: 0,
       large: 0, small: 0, causes: [0, 0, 0, 0], causesStart: [0, 0, 0, 0], faithCountdowns: 0, faithIndependence: 0, vassalsMade: 0, vassalLife: 0,
-      vassalIndepPeace: 0, vassalIndepWar: 0, vassalReintegrated: 0, vassalFreed: 0, tribute: 0, agitations: 0, failedStart: 0,
+      vassalIndepPeace: 0, vassalIndepWar: 0, vassalReintegrated: 0, vassalFreed: 0, tribute: 0, agitations: 0, failedStart: 0, stateSucc: 0, stateConv: 0, stateForced: 0, stateDeath: 0, stateToDaughter: 0,
     },
   };
   ACTIVE = st;
   FAITH.mandate = true;
   FAITH.vassal = st.vassalOf;
+  FAITH.loyalty = st.loyalty;
+  FAITH.stateRel = st.stateRel;
+  FAITH.connScale = MANDATE.connScale;
   return st;
 }
 
@@ -175,6 +201,9 @@ export function removeMandate(): void {
   ACTIVE = null;
   FAITH.mandate = false;
   FAITH.vassal = null;
+  FAITH.loyalty = null;
+  FAITH.stateRel = null;
+  FAITH.connScale = 1;
 }
 
 const year = (sim: Simulation) => Math.floor(sim.tick / TICKS_PER_YEAR);
@@ -201,8 +230,12 @@ function updateLegitimacy(st: MandateState): void {
     const lost = sim.leaders.events[c * EVENTS + Ev.WarLost] - st.seenEv[c * EVENTS + Ev.WarLost];
     for (let k = 0; k < EVENTS; k++) st.seenEv[c * EVENTS + k] = sim.leaders.events[c * EVENTS + k];
     st.legitEvents[c] = st.legitEvents[c] * MANDATE.decay + (won > 0 ? MANDATE.won * won : 0) + (lost > 0 ? MANDATE.lost * lost : 0);
+    st.succFlag[c] = 0;
     if (sim.leaders.counter[c] !== st.seenCounter[c]) {
-      if (st.seenCounter[c] !== 0) st.succ[c] = MANDATE.succession;
+      if (st.seenCounter[c] !== 0) {
+        st.succ[c] = MANDATE.succession;
+        st.succFlag[c] = 1;
+      }
       st.seenCounter[c] = sim.leaders.counter[c];
     }
     st.succ[c] *= 0.9;
@@ -306,6 +339,10 @@ function updateLoyalty(st: MandateState): void {
       if (factors[o] < 0) factors[o] = heresyFactor(rs, o);
       const dev = MANDATE.gradientOwn * st.dev[c] + (1 - MANDATE.gradientOwn) * nearMean(st, c, o, MANDATE.gradientRadius);
       faith = Math.max(MANDATE.faithCap, -MANDATE.faithWeight * dev * factors[o]);
+      if (MANDATE.faithStep > 0 && st.loyalty[c] >= 0) {
+        const prev = st.parts[c * 4 + 2];
+        faith = prev + Math.max(-MANDATE.faithStep, Math.min(MANDATE.faithStep, faith - prev));
+      }
     }
     const legit = st.legit[o];
     let soldiers = 0;
@@ -462,6 +499,10 @@ function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB:
             rs.stats.schismRebels++;
           }
           s.faithIndependence++;
+          if (rs.wonBy[best] === 0 && rs.parent[best] >= 0) {
+            rs.wonBy[best] = 3;
+            rs.stats.dWon[3]++;
+          }
         }
       }
     }
@@ -584,7 +625,7 @@ function vassalsYear(st: MandateState): void {
     const otherFaith = rs !== null && st.stateRel[v] !== st.stateRel[m] ? 1 : 0;
     const stronger = (strength[v] ?? 0) > (strength[m] ?? 0) ? 1 : 0;
     const pInd = MANDATE.indep * (1 + Math.max(0, -legit) / 10 + otherFaith + stronger);
-    if (st.rng() < pInd) {
+    if (y - st.vassalSince[v] >= MANDATE.vassalTruce && st.rng() < pInd) {
       const weak = legit <= -5 || (sim.war.enemy[m] !== 0 && (strength[m] ?? 0) < (strength[v] ?? 0));
       st.vassalOf[v] = -1;
       s.vassalLife += y - st.vassalSince[v];
@@ -615,13 +656,108 @@ function vassalsYear(st: MandateState): void {
   }
 }
 
+/** State faith = the leader's faith (Anführer 6a): heir draw, conversion in office, death of the faith, forced conversion variant. */
+function updateLeaderFaith(st: MandateState): void {
+  const sim = st.sim;
+  const rs = religionOf(sim);
+  if (rs === null) return;
+  const s = st.stats;
+  for (let c = 1; c < CIVS && c < sim.civSlots; c++) {
+    const civ = sim.civs[c];
+    if (!civ) continue;
+    const cap = civ.capital;
+    const capPop = cap >= 0 ? sim.cellPop[cap] : 0;
+    const capShare = (r: number) => (capPop > 0 ? rs.cellBel[cap * MAXR + r] / capPop : 0);
+    let capMajor = -1;
+    let best = 0;
+    for (let r = 0; r < MAXR; r++) {
+      if (!rs.alive[r]) continue;
+      const v = capPop > 0 ? capShare(r) : rs.share[c * MAXR + r];
+      if (v > best) {
+        best = v;
+        capMajor = r;
+      }
+    }
+    const cur = st.stateRel[c];
+    const set = (r: number, cause: number) => {
+      if (r === cur) return;
+      st.stateRel[c] = r;
+      if (cause === 1) s.stateSucc++;
+      else if (cause === 2) s.stateConv++;
+      else if (cause === 4) s.stateForced++;
+      else if (cause === 3) s.stateDeath++;
+      if (cause !== 0 && r >= 0 && rs.parent[r] >= 0) {
+        s.stateToDaughter++;
+        if (rs.wonBy[r] === 0) {
+          rs.wonBy[r] = cause === 3 ? 1 : cause;
+          rs.stats.dWon[cause === 3 ? 1 : cause]++;
+        }
+      }
+    };
+    if (cur < 0) {
+      st.stateRel[c] = capMajor;
+      continue;
+    }
+    if (!rs.alive[cur]) {
+      set(capMajor, 3);
+      continue;
+    }
+    if (st.succFlag[c]) {
+      let total = 0;
+      const w = new Float64Array(MAXR);
+      for (let r = 0; r < MAXR; r++) {
+        if (!rs.alive[r]) continue;
+        w[r] = (MANDATE.capWeight * capShare(r) + (1 - MANDATE.capWeight) * rs.share[c * MAXR + r]) * (r === cur ? MANDATE.predecessor : 1);
+        total += w[r];
+      }
+      if (total > 0) {
+        let pick = st.rng() * total;
+        for (let r = 0; r < MAXR; r++) {
+          pick -= w[r];
+          if (pick <= 0 && w[r] > 0) {
+            set(r, 1);
+            break;
+          }
+        }
+      }
+      continue;
+    }
+    // In office: a rival faith with a majority of the capital.
+    let rival = -1;
+    for (let r = 0; r < MAXR; r++) if (rs.alive[r] && r !== cur && capShare(r) >= MANDATE.convertShare) rival = r;
+    let never = false;
+    let flexible = 0;
+    for (let k = 0; k < ATTR_SLOTS; k++) {
+      const a = sim.leaders.attr[c * ATTR_SLOTS + k];
+      if (a === 24 || a === 4 || a === 22 || a === 21) never = true;
+      else if (a === 10) flexible = Math.max(flexible, MANDATE.opportunist);
+      else if (a === 23) flexible = Math.max(flexible, MANDATE.weakHand);
+    }
+    if (rival >= 0 && !never && flexible > 0 && st.rng() < flexible) {
+      set(rival, 2);
+      st.forceCnt[c] = 0;
+      continue;
+    }
+    if (MANDATE.forceYears > 0) {
+      let hard = -1;
+      for (let r = 0; r < MAXR; r++) if (rs.alive[r] && r !== cur && capShare(r) >= MANDATE.forceShare) hard = r;
+      st.forceCnt[c] = hard >= 0 ? Math.min(255, st.forceCnt[c] + 1) : 0;
+      if (hard >= 0 && st.forceCnt[c] >= MANDATE.forceYears) {
+        set(hard, 4);
+        st.forceCnt[c] = 0;
+      }
+    }
+  }
+}
+
 /** The yearly Mandate step (call after the religion step, at the year's end). */
 export function mandateYear(sim: Simulation): void {
   const st = ACTIVE;
   if (st === null || st.sim !== sim || !MANDATE.enabled) return;
   const y = year(sim);
   updateLegitimacy(st);
-  updateStateReligion(st);
+  if (MANDATE.leaderFaith) updateLeaderFaith(st);
+  else updateStateReligion(st);
   updateLoyalty(st);
   agitate(st);
   const { blocs, wK, realmPop } = components(st);
@@ -752,6 +888,11 @@ export function mandateSnapshot(st: MandateState): Record<string, number> {
     'split: share of realm per event %': end ? (100 * s.blocShare) / end : 0,
     'independence over faith': s.faithIndependence,
     'agitations': s.agitations,
+    'state faith changes: succession': s.stateSucc,
+    'state faith changes: conversion in office': s.stateConv,
+    'state faith changes: forced conversion': s.stateForced,
+    'state faith changes: faith died': s.stateDeath,
+    'state faith changed to a daughter': s.stateToDaughter,
     'VASSALS now': vassals,
     'vassals made': s.vassalsMade,
     'vassal ends: independence peaceful': s.vassalIndepPeace,

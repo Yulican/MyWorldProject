@@ -166,7 +166,7 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
           ? `Travel ${cost.toFixed(1)} to a seat of government`
           : 'No road to a seat of government',
     // A Road Builder's people feel closer to their seat (the leader's share of the connection part).
-    value: connectionValue(cost) + (civ ? sim.leaders.conn[civ.id] : 0),
+    value: connectionValue(cost) * FAITH.connScale + (civ ? sim.leaders.conn[civ.id] : 0),
   });
   const served = comfortServed(sim.economy, cell);
   if (served > 0) terms.push({ label: `Comfort for ${Math.min(served, people)} of ${people}`, value: comfortValue(served, people) });
@@ -210,7 +210,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   let sum = 0;
   for (let k = 0; k < SUPPLY_KINDS; k++) sum += shortageValue(sim.cellSupply[cell * SUPPLY_KINDS + k], people);
   sum += crowdingValue(people / Math.max(1, sim.cellCapacity[cell]));
-  sum += connectionValue(sim.seatCost[cell]);
+  sum += connectionValue(sim.seatCost[cell]) * FAITH.connScale;
   sum += comfortValue(comfortServed(sim.economy, cell), people);
   sum += luxuryValue(sim.economy.luxuryCovered[cell]);
   sum += taxValue(sim.government.cellRate[cell]) + goodsTaxValue(sim.government.cellGoodsRate[cell]);

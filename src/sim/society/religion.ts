@@ -3,6 +3,7 @@ import { createRng, deriveSeed, type Rng } from '../rng';
 import { Culture } from './culture';
 import { FAITH } from './faithHooks';
 import { satisfactionTarget } from './satisfaction';
+import { hexDistance } from '../hex';
 import { PAIRS } from './diplomacy';
 import { GODS, PLAYER_GOD } from './gacha';
 import { ATTR_SLOTS, EVENTS, Ev, L, LEVERS, LEVER_KIND, combineLevers } from './leaders';
@@ -142,6 +143,21 @@ export const RELIGION = {
   /** A people losing this share of its people in a year counts a Disaster event (proxy for fires, droughts, famine). */
   disaster: 1,
   disasterDrop: 0.03,
+  /** New schism rule (6.1): 1 = the daughter starts in ONE settlement (>= seedMin mother believers, not a capital) with seedShare of the mother's believers in it and its neighbors. */
+  schismMode: 0,
+  seedShare: 0.5,
+  seedMin: 40,
+  tensionDrop: 30,
+  maxYoung: 2,
+  youngYears: 30,
+  daughterGrace: 15,
+  daughterNoWorld: 40,
+  mergeBan: 30,
+  /** Contagion rule 6.1a (contagion 1 + this = 1): inflow only from sources (share >= contSrc) within contRadius hexes, shares below contVanish vanish. */
+  contagionMode: 0,
+  contRadius: 8,
+  contSrc: 0.1,
+  contVanish: 0.05,
   /** Exploratory: faith contagion between neighboring settlements (0 = off): share kappa x pull of the neighbors' believers above the own, held back by the dominant faith's hold, x inqCure against an Inquisition faith. */
   contagion: 0,
   kappa: 0.1,
@@ -279,6 +295,11 @@ export type ReligionStats = {
   awake300: number;
   merge0: number;
   lifetimes: number[];
+  dDied: number;
+  dMerged: number;
+  dWon: number[];
+  dSeedBelievers: number;
+  sizeAge: Record<number, number[]>;
   conquests: number;
   carryVisits: number;
   disasters: number;
@@ -370,6 +391,8 @@ export type ReligionState = {
   holyWar: Uint8Array;
   holyAge: Int32Array;
   stats: ReligionStats;
+  /** How a daughter won: 0 not yet, 1 succession, 2 conversion, 3 rebellion, 4 forced conversion. */
+  wonBy: Uint8Array;
   /** Years the sim has run (the last religionYear). */
   year: number;
   /** Per-year samples the tool reads. */
@@ -388,7 +411,7 @@ function newStats(): ReligionStats {
     levelUp: 0, levelDown: 0, traitReplace: 0, schismsOf0: 0, tensionAtSchism0: 0, maxTension0: 0,
     heresyStarts: 0, schismSettlements: 0, schismMulti: 0, schismRebels: 0, faithRebellions: 0, faithJoinsRebel: 0, faithJoinsMother: 0,
     wars: 0, holyWars: 0, holyJoins: 0, holyYears: 0, holyEnded: 0, holyLongest: 0, maxWarAge: 0,
-    awake100: 0, awake150: 0, awake300: 0, merge0: 0, lifetimes: [], conquests: 0, carryVisits: 0, disasters: 0, yearsFull: 0, reachedFull: 0, aliveSum: 0, years: 0, followSum: 0,
+    awake100: 0, awake150: 0, awake300: 0, merge0: 0, lifetimes: [], dDied: 0, dMerged: 0, dWon: [0, 0, 0, 0, 0], dSeedBelievers: 0, sizeAge: {}, conquests: 0, carryVisits: 0, disasters: 0, yearsFull: 0, reachedFull: 0, aliveSum: 0, years: 0, followSum: 0,
   };
 }
 
@@ -467,6 +490,7 @@ export function installReligion(sim: Simulation): ReligionState {
     holyWar: new Uint8Array(64),
     holyAge: new Int32Array(64),
     stats: newStats(),
+    wonBy: new Uint8Array(MAXR),
     year: 0,
     history: [],
   };
@@ -805,6 +829,7 @@ function found(st: ReligionState, r: number, civ: number, parent: number, path: 
   st.lostOut[r] = 0;
   st.herYear[r] = -1;
   st.herRebelled[r] = 0;
+  st.wonBy[r] = 0;
   void path;
   if (parent >= 0) return;
   // First trait: the leader's attribute or the strongest culture, level 2.
@@ -1361,6 +1386,7 @@ function die(st: ReligionState, r: number): void {
   setReligion(st, r, 255, -1);
   st.alive[r] = 0;
   st.stats.died++;
+  if (st.parent[r] >= 0 && st.wonBy[r] === 0) st.stats.dDied++;
   st.stats.lifeSum += year(sim) - st.founded[r];
   // A daughter's heresy ends with it.
   for (let c = 1; c < CIVS; c++) if (st.heresyDaughter[c] === r) st.heresyYear[c] = -1;
@@ -1447,6 +1473,18 @@ function schisms(st: ReligionState): void {
       st.stats.blockedFull++;
       continue;
     }
+    if (RELIGION.schismMode === 1) {
+      let young = 0;
+      for (let q = 0; q < MAXR; q++) if (st.alive[q] && st.parent[q] === r && st.parentSerial[q] === st.serial[r] && st.wonBy[q] === 0 && year(sim) - st.founded[q] < RELIGION.youngYears) young++;
+      if (young >= RELIGION.maxYoung) continue;
+      const cell = pickSeedCell(st, r, RELIGION.seedMin);
+      if (cell < 0) continue;
+      splitOff(st, r, slot, sim.world.owner[cell], cell);
+      st.tension[r] = Math.max(0, st.tension[r] - RELIGION.tensionDrop);
+      st.stats.schism++;
+      if (r === 0) st.stats.schismsOf0++;
+      continue;
+    }
     // The people with the weakest tie to the majority: at war with its people, else seceded, else the smallest.
     let majorCiv = peoples[0];
     for (const c of peoples) if (st.cnt[c * MAXR + r] > st.cnt[majorCiv * MAXR + r]) majorCiv = c;
@@ -1468,10 +1506,10 @@ function schisms(st: ReligionState): void {
   }
 }
 
-function splitOff(st: ReligionState, r: number, slot: number, civ: number): void {
+function splitOff(st: ReligionState, r: number, slot: number, civ: number, seedCell = -1): void {
   const sim = st.sim;
   const y = year(sim);
-  setReligion(st, r, slot, civ);
+  if (seedCell < 0) setReligion(st, r, slot, civ);
   found(st, slot, civ, r, 2);
   // The mother's traits, one swapped: the weakest falls, one from the people's events (level 1).
   for (let k = 0; k < SLOTS; k++) {
@@ -1506,6 +1544,64 @@ function splitOff(st: ReligionState, r: number, slot: number, civ: number): void
   if (settlements >= 2) st.stats.schismMulti++;
   st.stats.heresyStarts++;
   if (r === 0) st.stats.tensionAtSchism0 += st.tension[0];
+  if (seedCell >= 0) seedHeresy(st, r, slot, seedCell);
+}
+
+/** The settlement the daughter starts in (6.1): weighted by size, distance to the capital, foreign contact and low loyalty; -1 if none. */
+function pickSeedCell(st: ReligionState, r: number, min: number): number {
+  const sim = st.sim;
+  const w = sim.world;
+  const cells: number[] = [];
+  const weights: number[] = [];
+  let total = 0;
+  const settled: number[] = [];
+  for (let c = 0; c < w.cellCount; c++) if (sim.cellPop[c] > 0) settled.push(c);
+  for (const c of settled) {
+    const bel = st.cellBel[c * MAXR + r];
+    const o = w.owner[c];
+    if (bel < min || o === 0 || sim.civs[o]?.capital === c) continue;
+    const dist = hexDistance(w, c, sim.civs[o]!.capital);
+    let foreign = 0;
+    for (const x of settled) if (w.owner[x] !== o && w.owner[x] !== 0 && hexDistance(w, c, x) <= 8) {
+      foreign = 1;
+      break;
+    }
+    const loy = FAITH.loyalty !== null ? FAITH.loyalty[c] : -1;
+    const low = (loy >= 0 && loy < 50) || (sim.civs[o]?.parentName ?? null) !== null ? 1 : 0;
+    const wt = Math.min(3, bel / 40) * (1 + Math.min(2, dist / 6) + foreign + low);
+    cells.push(c);
+    weights.push(wt);
+    total += wt;
+  }
+  if (cells.length === 0) return -1;
+  let pick = st.rng() * total;
+  for (let i = 0; i < cells.length; i++) {
+    pick -= weights[i];
+    if (pick <= 0) return cells[i];
+  }
+  return cells[cells.length - 1];
+}
+
+/** Seed (6.1): seedShare of the mother's believers in the cell and its 6 neighbors take the daughter (lowest faith first). */
+function seedHeresy(st: ReligionState, r: number, slot: number, cell: number): void {
+  const sim = st.sim;
+  const w = sim.world;
+  const pop = sim.pop;
+  const rel = FAITH.rel;
+  const inSeed = new Set<number>([cell]);
+  for (let d = 0; d < DIRECTION_COUNT; d++) {
+    const x = w.neighbors[cell * DIRECTION_COUNT + d];
+    if (x >= 0) inSeed.add(x);
+  }
+  const list: number[] = [];
+  for (let i = 0; i < pop.end; i++) if (pop.alive[i] && rel[i] === r && pop.faith[i] >= BELIEVER_FAITH && inSeed.has(pop.cell[i])) list.push(i);
+  list.sort((a, b) => pop.faith[a] - pop.faith[b]);
+  const n = Math.floor(RELIGION.seedShare * list.length);
+  for (let k = 0; k < n; k++) {
+    rel[list[k]] = slot;
+    pop.faith[list[k]] = RELIGION.foundFaith;
+  }
+  st.stats.dSeedBelievers += n;
 }
 
 function merges(st: ReligionState): void {
@@ -1517,6 +1613,7 @@ function merges(st: ReligionState): void {
       if (!st.alive[b]) continue;
       let both = false;
       for (let c = 1; c < CIVS && !both; c++) both = st.share[c * MAXR + a] >= RELIGION.mergeShare && st.share[c * MAXR + b] >= RELIGION.mergeShare;
+      if (RELIGION.schismMode === 1 && ((st.parent[b] >= 0 && st.parentSerial[b] === st.serial[a] && year(sim) - st.founded[b] < RELIGION.mergeBan) || (st.parent[a] >= 0 && st.parentSerial[a] === st.serial[b] && year(sim) - st.founded[a] < RELIGION.mergeBan))) continue;
       const k = a * MAXR + b;
       st.mergeYears[k] = both ? Math.min(255, st.mergeYears[k] + 1) : 0;
       if (!both || st.mergeYears[k] < RELIGION.mergeYears) continue;
@@ -1548,6 +1645,7 @@ function merges(st: ReligionState): void {
       setReligion(st, lose, keep, -1);
       st.alive[lose] = 0;
       st.stats.merged++;
+      if (st.parent[lose] >= 0 && st.wonBy[lose] === 0) st.stats.dMerged++;
       st.stats.lifeSum += year(sim) - st.founded[lose];
       if (keep === 0 || lose === 0) st.stats.merge0++;
       st.mergeYears[a * MAXR + b] = 0;
@@ -1566,10 +1664,119 @@ function deaths(st: ReligionState): void {
   const y = year(sim);
   const world = sim.pop.count;
   for (let r = 1; r < MAXR; r++) {
-    if (!st.alive[r] || y - st.founded[r] < RELIGION.grace) continue;
-    if (st.total[r] < RELIGION.deathMin || st.total[r] < RELIGION.deathShare * world) st.below[r]++;
+    const daughter = RELIGION.schismMode === 1 && st.parent[r] >= 0 && st.wonBy[r] === 0;
+    if (!st.alive[r] || y - st.founded[r] < (daughter ? RELIGION.daughterGrace : RELIGION.grace)) continue;
+    const young = daughter && y - st.founded[r] < RELIGION.daughterNoWorld;
+    if (st.total[r] < RELIGION.deathMin || (!young && st.total[r] < RELIGION.deathShare * world)) st.below[r]++;
     else st.below[r] = 0;
     if (st.below[r] >= RELIGION.deathYears) die(st, r);
+  }
+}
+
+let nbrCache: Int32Array[] = [];
+let nbrFor = -1;
+
+/** Cells within `radius` hexes of `c` (settled or not), cached per world. */
+function within(sim: Simulation, c: number, radius: number): Int32Array {
+  if (nbrFor !== sim.world.seed * 1000 + radius || nbrCache.length !== sim.world.cellCount) {
+    nbrCache = new Array(sim.world.cellCount);
+    nbrFor = sim.world.seed * 1000 + radius;
+  }
+  let out = nbrCache[c];
+  if (out) return out;
+  const w = sim.world;
+  const seen = new Set<number>([c]);
+  let frontier = [c];
+  for (let r = 0; r < radius; r++) {
+    const next: number[] = [];
+    for (const a of frontier) for (let d = 0; d < DIRECTION_COUNT; d++) {
+      const x = w.neighbors[a * DIRECTION_COUNT + d];
+      if (x >= 0 && !seen.has(x)) {
+        seen.add(x);
+        next.push(x);
+      }
+    }
+    frontier = next;
+  }
+  seen.delete(c);
+  out = Int32Array.from(seen);
+  nbrCache[c] = out;
+  return out;
+}
+
+/** Contagion 6.1a: inflow only (daughters), from sources within contRadius hexes; shares below contVanish vanish; Inquisition suppresses. */
+function contagion2(st: ReligionState): void {
+  const sim = st.sim;
+  const w = sim.world;
+  const cells = w.cellCount;
+  const planR = new Int8Array(cells).fill(-1);
+  const planP = new Float32Array(cells);
+  const pop = sim.pop;
+  const rel = FAITH.rel;
+  const back = new Float32Array(cells * MAXR);
+  for (let c = 0; c < cells; c++) {
+    const people = sim.cellPop[c];
+    if (people === 0) continue;
+    let dom = -1;
+    let domN = 0;
+    for (let r = 0; r < MAXR; r++) if (st.alive[r] && st.cellBel[c * MAXR + r] > domN) {
+      domN = st.cellBel[c * MAXR + r];
+      dom = r;
+    }
+    const near = within(sim, c, RELIGION.contRadius);
+    let bestR = -1;
+    let bestD = 0;
+    for (let r = 1; r < MAXR; r++) {
+      if (!st.alive[r] || st.parent[r] < 0) continue;
+      const own = st.cellBel[c * MAXR + r] / people;
+      // Vanishing and suppression: a share under contVanish disappears; the state faith's suppress lowers it.
+      if (own > 0 && own < RELIGION.contVanish) back[c * MAXR + r] = 1;
+      const o = w.owner[c];
+      const sf = o > 0 && FAITH.stateRel !== null ? FAITH.stateRel[o] : -1;
+      if (own > 0 && sf >= 0 && sf !== r && st.rSup[sf] > 0) back[c * MAXR + r] = Math.max(back[c * MAXR + r], st.rSup[sf] / Math.max(own, 1e-6));
+      if (dom === r) continue;
+      let sum = 0;
+      let k = 0;
+      for (let i = 0; i < near.length; i++) {
+        const x = near[i];
+        if (sim.cellPop[x] === 0) continue;
+        const d = st.cellBel[x * MAXR + r] / sim.cellPop[x];
+        if (d >= RELIGION.contSrc) {
+          sum += d;
+          k++;
+        }
+      }
+      if (k === 0) continue;
+      let d = (RELIGION.kappa * st.rPull[r] * Math.max(0, sum / k - own) * Math.min(1, k / 2));
+      if (dom >= 0) {
+        d /= st.rHold[dom];
+        if (hasTrait(st, dom, 13) >= 0) d *= 0.5;
+      }
+      if (d > bestD) {
+        bestD = d;
+        bestR = r;
+      }
+    }
+    if (bestR >= 0) {
+      planR[c] = bestR;
+      planP[c] = Math.min(1, (bestD * people) / Math.max(1, people - st.cellBel[c * MAXR + bestR]));
+    }
+  }
+  for (let i = 0; i < pop.end; i++) {
+    if (!pop.alive[i]) continue;
+    const c = pop.cell[i];
+    const r0 = rel[i];
+    if (r0 > 0 && r0 !== 255 && back[c * MAXR + r0] > 0 && st.rng() < back[c * MAXR + r0]) {
+      rel[i] = 255;
+      pop.faith[i] = 0;
+      st.lostOut[r0]++;
+      continue;
+    }
+    const r = planR[c];
+    if (r < 0 || r0 === r || st.rng() >= planP[c]) continue;
+    if (r0 !== 255) st.lostOut[r0]++;
+    rel[i] = r;
+    pop.faith[i] = RELIGION.convertFaith;
   }
 }
 
@@ -1654,7 +1861,8 @@ export function religionYear(sim: Simulation): void {
   merges(st);
   countAll(st);
   if (RELIGION.contagion) {
-    contagion(st);
+    if (RELIGION.contagionMode === 1) contagion2(st);
+    else contagion(st);
     countAll(st);
   }
   followHysteresis(st);
@@ -1703,6 +1911,11 @@ export function religionYear(sim: Simulation): void {
   s.aliveSum += alive;
   if (alive >= MAXR) s.yearsFull++;
   if (alive >= MAXR && s.reachedFull === 0) s.reachedFull = 1;
+  for (let r = 1; r < MAXR; r++) {
+    if (!st.alive[r] || st.parent[r] < 0) continue;
+    const age = y - st.founded[r];
+    if (age === 1 || age === 5 || age === 10 || age === 20 || age === 30 || age === 40) (s.sizeAge[age] ??= []).push(st.total[r]);
+  }
   if (y % 10 === 0) st.history.push({ year: y, alive, believers0: st.total[0] });
 }
 
