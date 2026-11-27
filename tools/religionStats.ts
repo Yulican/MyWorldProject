@@ -16,6 +16,33 @@ import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
 import { FAITH_MUTE, FAITH_MUTE_TRAIT, FAITH_SCALE_TRAIT, MAXR, RELIGION, TRAITS, TRAIT_COUNT, installReligion, onUprising, religionOf, religionYear, removeReligion, type ReligionState } from '../src/sim/society/religion';
 import { FAITH } from '../src/sim/society/faithHooks';
+import { EndType } from '../src/sim/society/war';
+
+// Outcomes of rebel wars per world, faith rebellions (F) apart from normal ones (N).
+type Rw = { n: number; mother: number; indep: number; years: number; retaken: number; kept: number; peoples: number; civs: { id: number; obj: object }[] };
+const newRw = (): Rw => ({ n: 0, mother: 0, indep: 0, years: 0, retaken: 0, kept: 0, peoples: 0, civs: [] });
+const rw = { F: newRw(), N: newRw() };
+FAITH.rebelEnd = (sim: Simulation, s: number, type: number) => {
+  const w = sim.war;
+  const mother = w.wAtt[s];
+  const st = religionOf(sim);
+  const r = st && st.faithFlag[mother] ? rw.F : rw.N;
+  const won = type === EndType.Crushed || type === EndType.GaveUp;
+  let cells = 0;
+  const groups: number[] = [];
+  for (let p = 1; p <= sim.diplomacy.maxId; p++) if (w.side[s * PAIRS + p] === 1 && w.rebelMother[p] === mother) groups.push(p);
+  for (let c = 0; c < sim.world.cellCount; c++) if (sim.cellPop[c] > 0 && groups.includes(sim.world.owner[c])) cells++;
+  r.n++;
+  r.years += (sim.tick - w.wStart[s]) / TICKS_PER_YEAR;
+  if (won) {
+    r.mother++;
+    r.retaken += cells;
+  } else {
+    r.indep++;
+    r.kept += cells;
+    for (const p of groups) if (sim.civs[p]) r.civs.push({ id: p, obj: sim.civs[p]! });
+  }
+};
 
 type Row = Record<string, number>;
 type Result = { variant: string; worlds: number; rows: Record<string, Row[]>; };
@@ -139,7 +166,15 @@ function measure(sim: Simulation, st: ReligionState | null, year: number, overYe
     }
   }
   const ended = w.ended.reduce((a: number, b: number) => a + b, 0);
+  const live = { F: 0, N: 0 };
+  for (let k = 0; k < 24; k++) if (sim.war.wLive[k] && sim.war.wRebel[k]) live[st && st.faithFlag[sim.war.wAtt[k]] ? 'F' : 'N']++;
   const row: Row = {
+    ...Object.fromEntries((['F', 'N'] as const).flatMap((k) => [
+      [`rebel wars ${k}: ended`, rw[k].n], [`rebel wars ${k}: mother won`, rw[k].mother], [`rebel wars ${k}: rebels independent`, rw[k].indep],
+      [`rebel wars ${k}: running`, live[k]], [`rebel wars ${k}: mean length (years)`, rw[k].n ? rw[k].years / rw[k].n : 0],
+      [`rebel wars ${k}: settlements retaken`, rw[k].retaken], [`rebel wars ${k}: settlements independent`, rw[k].kept],
+      [`rebel wars ${k}: independent peoples alive now`, rw[k].civs.filter((c) => sim.civs[c.id] === c.obj).length], [`rebel wars ${k}: independent peoples founded`, rw[k].civs.length],
+    ])),
     people: sim.pop.count,
     peoples: living.length,
     settlements,
@@ -314,6 +349,8 @@ for (const variant of variants) {
     current = sim;
     rebellions = 0;
     rebelCells = 0;
+    rw.F = newRw();
+    rw.N = newRw();
     const st = on ? installReligion(sim) : null;
     let overYear = 0;
     const line: number[] = [];

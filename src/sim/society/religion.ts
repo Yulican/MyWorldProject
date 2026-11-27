@@ -329,6 +329,8 @@ export type ReligionState = {
   heresyMother: Int16Array;
   heresyAbs: Float32Array;
   heresyOn: Uint8Array;
+  /** 1 when the last rebellion declared by this realm was over faith (tools). */
+  faithFlag: Uint8Array;
   herYear: Int32Array;
   herMother: Int16Array;
   herRebelled: Uint8Array;
@@ -429,6 +431,7 @@ export function installReligion(sim: Simulation): ReligionState {
     heresyMother: new Int16Array(CIVS).fill(-1),
     heresyAbs: new Float32Array(CIVS),
     heresyOn: new Uint8Array(CIVS),
+    faithFlag: new Uint8Array(CIVS),
     herYear: new Int32Array(MAXR).fill(-1),
     herMother: new Int16Array(MAXR).fill(-1),
     herRebelled: new Uint8Array(MAXR),
@@ -1139,6 +1142,7 @@ export function onUprising(sim: Simulation, cells: readonly number[], parent: nu
   if (st === null || parent >= CIVS) return false;
   let heresy = 0;
   for (const c of cells) if (labelOf(c) === 'Heresy') heresy++;
+  st.faithFlag[parent] = 0;
   if (heresy * 2 < cells.length) return false;
   let daughter = -1;
   if (RELIGION.heresyMode === 1) {
@@ -1153,6 +1157,7 @@ export function onUprising(sim: Simulation, cells: readonly number[], parent: nu
     }
   } else if (st.heresyYear[parent] >= 0) daughter = st.heresyDaughter[parent];
   if (daughter < 0) return false;
+  st.faithFlag[parent] = 1;
   st.stats.faithRebellions++;
   st.rebelFaith[parent] = daughter + 1;
   st.rebelMother[parent] = RELIGION.heresyMode === 1 ? st.herMother[daughter] : st.heresyMother[parent];

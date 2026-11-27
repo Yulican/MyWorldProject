@@ -2531,6 +2531,7 @@ function strengthOf(sim: Simulation, p: number): number {
  * between the mother and the groups drops, truce.
  */
 function endRebelWar(sim: Simulation, s: number, type: number): void {
+  if (FAITH.rebelEnd !== null) FAITH.rebelEnd(sim, s, type);
   const w = sim.war;
   const mother = w.wAtt[s];
   const st = w.stats;
