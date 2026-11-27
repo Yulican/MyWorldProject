@@ -9,6 +9,8 @@ import { SAVE_HEADER_BYTES, SAVE_VERSION, adler32, continueSave, deserializeWorl
 import { TICKS_PER_YEAR, createSimulation, stepSimulation, stepSimulationPart, type Simulation } from './society/simulation';
 import { generateWorld } from './world/generate';
 import { Ab, SHIFT_WETTER, castAbility } from './society/gacha';
+import { makeVassal } from './society/mandate';
+import { livingCivilizations } from './society/simulation';
 
 function run(sim: Simulation, years: number): void {
   for (let t = 0; t < years * TICKS_PER_YEAR && !sim.gameOver; t++) stepSimulation(sim);
@@ -98,6 +100,31 @@ test('dynamic biomes: pinned hexes, changed biomes, overgrazing years and regrow
   assert.deepEqual(copy.biomes.trend, sim.biomes.trend);
   assert.deepEqual(copy.biomes.grazeYears, sim.biomes.grazeYears);
   assertContinues(sim, 12, 2);
+});
+
+test('religions and the Mandate continue identically: a heresy spreading, a vassal paying tribute, countdowns', () => {
+  const sim = load(agedSave());
+  const st = sim.religion;
+  assert.ok(st.alive.reduce((a, b) => a + b, 0) >= 2, 'religions in 300 years');
+  const civs = livingCivilizations(sim).sort((a, b) => b.population - a.population);
+  sim.gacha.charges[Ab.SunderTheFaith] = 1;
+  assert.ok(castAbility(sim, Ab.SunderTheFaith, civs[0].capital));
+  makeVassal(sim, civs[civs.length - 1].id, civs[0].id);
+  const copy = load(serializeWorld(sim));
+  assert.deepEqual(copy.pop.religion, sim.pop.religion);
+  assert.deepEqual(copy.religion.traitId, sim.religion.traitId);
+  assert.deepEqual(copy.mandate.loyalty, sim.mandate.loyalty);
+  assert.deepEqual(copy.mandate.vassalOf, sim.mandate.vassalOf);
+  assert.deepEqual(copy.leaders.faith, sim.leaders.faith);
+  assertContinues(sim, 12, 4);
+});
+
+test('a save of the format before religions and the Mandate (version 2) is refused', () => {
+  const bytes = serializeWorld(createSimulation(generateWorld({ seed: 7 })));
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(4, 2, true);
+  const r = deserializeWorld(bytes);
+  assert.ok(!r.ok && r.error.code === 'version' && r.error.version === 2);
+  assert.equal(SAVE_VERSION, 3);
 });
 
 test('a save of the format before dynamic biomes (version 1) is refused', () => {

@@ -18,6 +18,7 @@ import {
   stepSimulation,
   stepSimulationPart,
   TickPart,
+  type ChronicleEntry,
   type Simulation,
 } from './simulation';
 import { EXPAND_MIN_CONNECTION } from './economy';
@@ -76,7 +77,8 @@ for (const seed of [3, 4, 5]) {
       cellPop[cell]++;
       assert.ok(!isWaterBiome(world.biome[cell]), 'nobody lives on water');
       assert.ok(sim.civs[pop.civ[i]], 'everyone belongs to a living civilization');
-      if (pop.faith[i] >= BELIEVER_FAITH) believers++;
+      // The player's believers: those of religion 0.
+      if (pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) believers++;
     }
     assert.equal(alive, pop.count);
     assert.deepEqual(cellPop, sim.cellPop);
@@ -266,23 +268,30 @@ function cutOffHexes(sim: Simulation, civId: number, capital: number): number[] 
 }
 
 test('land cut off from its capital becomes its own people', () => {
-  // In this world (with its leaders and dynamic biomes) a settlement is cut off in year 275.
-  const sim = createSimulation(generateWorld({ seed: 6 }));
-  for (let year = 1; year <= 275; year++) {
-    runYears(sim, 1);
-    for (const civ of livingCivilizations(sim)) {
-      assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
+  // The first of these worlds (with leaders, dynamic biomes, religions and the Mandate) in which a settlement is
+  // cut off within 330 years; until then no people holds land cut off from its capital beyond the grace years.
+  let split: ChronicleEntry | undefined;
+  let sim!: Simulation;
+  for (const seed of [11, 4, 16, 6, 3, 12]) {
+    sim = createSimulation(generateWorld({ seed }));
+    for (let year = 1; year <= 330 && !split; year++) {
+      runYears(sim, 1);
+      for (const civ of livingCivilizations(sim)) {
+        assert.deepEqual(cutOffHexes(sim, civ.id, civ.capital), [], `${civ.name} in year ${year}`);
+      }
+      split = sim.chronicle.find((e) => e.text.includes('cut off from'));
     }
+    if (split) break;
   }
-  const split = sim.chronicle.find((e) => e.text.includes('cut off from'));
   assert.ok(split, 'a cut-off people was founded');
-  const civ = livingCivilizations(sim).find((c) => split.text.includes(c.name) && c.origin === 'secession');
-  assert.ok(civ && !civ.worshipsPlayer);
+  const civ = livingCivilizations(sim).find((c) => split!.text.includes(c.name) && c.origin === 'secession');
+  // It keeps its faith (Requirement Religion 3: no cut by a third any more), so it may still worship the player.
+  assert.ok(civ);
 });
 
 test('splinters may go beyond the soft cap, new tribes may not', () => {
-  // A world whose splinters pass the cap within 650 years (seed 77 stays at 9 peoples since allies on both sides join wars).
-  const sim = createSimulation(generateWorld({ seed: 1 }));
+  // A world whose splinters pass the cap within 650 years (seed 3: 10 peoples before year 490 with religions and the Mandate).
+  const sim = createSimulation(generateWorld({ seed: 3 }));
   let most = 0;
   for (let year = 1; year <= 650 && most <= MAX_CIVS; year++) {
     runYears(sim, 1);
@@ -343,7 +352,7 @@ test('a people of 100 lacking a luxury good settles a free deposit of it nearby'
   assert.ok(sim.world.deposit[cell] !== 0);
 });
 
-test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace, alliances and new leaders are important', () => {
+test('only founding, new peoples, uprisings, secessions, vanished peoples, game end, first contact, closed borders, wars, peace, alliances, new leaders, new faiths, merges, the Mandate\'s countdowns and vassals are important', () => {
   const important = [
     / They pray to you\.$/,
     /^A new people, /,
@@ -364,13 +373,24 @@ test('only founding, new peoples, uprisings, secessions, vanished peoples, game 
     /^The rebellion against the .* ended\.$/,
     / formed an alliance\.$/,
     / now leads the /,
+    // Religion (Requirement Religion 9) and the Mandate (Mandat 9).
+    /^A new faith arises among the /,
+    / merged into the /,
+    / becomes the faith of the /,
+    / won its freedom\.$/,
+    /^Unrest threatens to split the /,
+    / and became their vassal\.$/,
+    / are no longer vassals of the /,
+    / rose against their rulers, /,
   ];
+  // Important only for the player's faith or peoples: a heresy, a heresy that fades, a ruler adopting a faith.
+  const either = [/^A heresy arises in /, / heresy fades\.$/, /^The ruler of the .* adopts the /];
   const seen = { important: 0, silent: 0 };
   for (const seed of [5, 16, 102]) {
     const sim = createSimulation(generateWorld({ seed }));
     runYears(sim, 200);
     for (const e of sim.chronicle) {
-      assert.equal(e.important, important.some((p) => p.test(e.text)), e.text);
+      if (!either.some((p) => p.test(e.text))) assert.equal(e.important, important.some((p) => p.test(e.text)), e.text);
       seen[e.important ? 'important' : 'silent']++;
     }
   }

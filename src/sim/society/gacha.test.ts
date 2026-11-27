@@ -151,7 +151,7 @@ test('pulls are deterministic per seed and do not shift the world', () => {
   assert.equal(a.believers, c.believers);
 });
 
-test('rarity: tiers by weight 50/30/15/5, uniform within a tier, every ability in the pool', () => {
+test('rarity: tiers by weight 50/30/15/5, uniform within a tier, every ability in the pool (31: Faiths and Decree of Grace appended)', () => {
   const rng = createRng(1234);
   const n = 60000;
   const byTier = [0, 0, 0, 0];
@@ -163,7 +163,7 @@ test('rarity: tiers by weight 50/30/15/5, uniform within a tier, every ability i
   }
   const weights = [0.5, 0.3, 0.15, 0.05];
   for (let t = 0; t < 4; t++) assert.ok(Math.abs(byTier[t] / n - weights[t]) < 0.01, `tier ${t}: ${byTier[t] / n}`);
-  const count = [7, 10, 6, 2];
+  const count = [7, 12, 9, 3];
   for (let a = 0; a < ABILITY_COUNT; a++) {
     const t = ABILITIES[a].tier;
     const expected = (weights[t] / count[t]) * n;
@@ -171,8 +171,10 @@ test('rarity: tiers by weight 50/30/15/5, uniform within a tier, every ability i
   }
   assert.deepEqual(count, [0, 1, 2, 3].map((t) => ABILITIES.filter((a) => a.tier === t).length));
   assert.equal(ABILITIES.filter((a) => a.category === 0).length, 9);
-  assert.equal(ABILITIES.filter((a) => a.category === 1).length, 8);
+  assert.equal(ABILITIES.filter((a) => a.category === 1).length, 9);
   assert.equal(ABILITIES.filter((a) => a.category === 2).length, 8);
+  assert.equal(ABILITIES.filter((a) => a.category === 3).length, 5);
+  ABILITIES.forEach((a, i) => assert.equal(a.id, i));
   assert.equal(ABILITIES[Ab.GreatRiver].tier, Tier.Legendary);
 });
 
@@ -197,7 +199,9 @@ test('a cast while a tick runs in parts takes effect at the next tick start', ()
   assert.notEqual(sim.part, TickPart.Start);
   cast(sim, Ab.FruitfulWaters, civ);
   assert.equal(sim.gacha.charges[Ab.FruitfulWaters], 0);
-  assert.equal(sim.leaders.lev[civ * LEVERS + L.birth], sim.leaders.own[civ * LEVERS + L.birth]);
+  // The leader's lever with the faith's layer on top (Requirement Religion 4.4), the god's not yet.
+  const birth = sim.leaders.own[civ * LEVERS + L.birth] * sim.religion.lev[civ * LEVERS + L.birth];
+  assert.ok(Math.abs(sim.leaders.lev[civ * LEVERS + L.birth] - birth) < 1e-6);
   while (!stepSimulationPart(sim));
   stepSimulationPart(sim);
   assert.ok(Math.abs(sim.gacha.godLev[civ * LEVERS + L.birth] - 1.1) < 1e-6);
@@ -451,7 +455,10 @@ test('Fruitful Waters, Lean Years, Wanderlust, Golden Harvest: the god layer com
   const sim = aged();
   const civ = startCiv(sim);
   const o = civ * LEVERS;
+  // The leader's own levers with the faith's layer (Requirement Religion 4.4): what the god's multiply.
   const own = Float32Array.from(sim.leaders.own.subarray(o, o + LEVERS));
+  const faithLev = sim.religion.lev.subarray(o, o + LEVERS);
+  for (let k = 0; k < LEVERS; k++) own[k] *= faithLev[k];
   cast(sim, Ab.FruitfulWaters, civ);
   cast(sim, Ab.Wanderlust, civ);
   cast(sim, Ab.GoldenHarvest, civ);
@@ -461,13 +468,13 @@ test('Fruitful Waters, Lean Years, Wanderlust, Golden Harvest: the god layer com
   assert.ok(Math.abs(lev[o + L.travel] - own[L.travel] * 0.8) < 1e-6);
   assert.ok(Math.abs(lev[o + L.harvest] - own[L.harvest] * 1.15) < 1e-6);
   assert.ok(Math.abs(lev[o + L.load] - own[L.load] * 1.15) < 1e-6);
-  assert.ok(Math.abs(lev[o + L.food] - 1.15) < 1e-6);
+  assert.ok(Math.abs(lev[o + L.food] - 1.15 * own[L.food]) < 1e-6);
   cast(sim, Ab.LeanYears, civ);
   assert.ok(Math.abs(lev[o + L.birth] - own[L.birth] * 1.1 * 0.9) < 1e-6);
   const fx = peopleEffects(sim, civ).map((e) => `${e.name} ${e.yearsLeft}`).sort();
   assert.deepEqual(fx, ['Fruitful Waters 30', 'Golden Harvest 20', 'Lean Years 30', 'Wanderlust 15']);
   endEffectsNow(sim);
-  for (const k of [L.birth, L.settleOver, L.travel, L.harvest, L.load]) assert.equal(lev[o + k], sim.leaders.own[o + k]);
+  for (const k of [L.birth, L.settleOver, L.travel, L.harvest, L.load]) assert.ok(Math.abs(lev[o + k] - own[k]) < 1e-6);
   assert.equal(peopleEffects(sim, civ).length, 0);
 });
 
@@ -500,33 +507,40 @@ test('Grateful Hearts and Restless Spirits: the satisfaction part "Divine"', () 
   assert.equal(satisfactionTerms(sim, c, sim.civs[civ]).find((t) => t.label === 'Divine'), undefined);
 });
 
-test("Prophet's Light raises faith in any people at once and by devotion; Doubt lowers it", () => {
+test("Prophet's Light raises the faith in the player's religion at once and by devotion; Doubt lowers every religion's", () => {
   const sim = aged();
   const other = livingCivilizations(sim).find((c) => !c.worshipsPlayer)!;
   assert.ok(other, 'a people that does not worship the player');
   const pop = sim.pop;
-  const faiths = () => {
-    const f: number[] = [];
-    for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.civ[i] === other.id) f.push(pop.faith[i]);
+  const of = (civ: number) => {
+    const f: { faith: number; rel: number }[] = [];
+    for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.civ[i] === civ) f.push({ faith: pop.faith[i], rel: pop.religion[i] });
     return f;
   };
-  const before = faiths();
-  const believers = before.filter((f) => f >= BELIEVER_FAITH).length;
+  // Some of its people hold the player's religion (religion 0), to see the light act on them only.
+  let k = 0;
+  for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.civ[i] === other.id && k++ % 2 === 0) {
+    pop.religion[i] = 0;
+    pop.faith[i] = 0.45;
+  }
+  const before = of(other.id);
+  const believers = before.filter((p) => p.rel === 0 && p.faith >= BELIEVER_FAITH).length;
   cast(sim, Ab.ProphetsLight, other.id);
-  const after = faiths();
-  after.forEach((f, i) => assert.ok(Math.abs(f - Math.min(1, before[i] + 0.15)) < 1e-6));
-  assert.equal(other.faithYear.divineLight, after.filter((f) => f >= BELIEVER_FAITH).length - believers);
-  assert.ok(Math.abs(sim.gacha.godDevotion[other.id] - 0.03) < 1e-7);
-  // Devotion outweighs forgetting: faith keeps rising over the years.
-  const mean = (f: number[]) => f.reduce((a, b) => a + b, 0) / Math.max(1, f.length);
-  const m0 = mean(faiths());
-  for (let t = 0; t < 2 * TICKS_PER_YEAR; t++) stepSimulation(sim);
-  if (sim.civs[other.id]) assert.ok(mean(faiths()) > m0 - 0.02);
-  // Doubt on the player's own people: faith down, devotion down.
+  const after = of(other.id);
+  after.forEach((p, i) => assert.ok(Math.abs(p.faith - (before[i].rel === 0 ? Math.min(1, before[i].faith + 0.15) : before[i].faith)) < 1e-6));
+  assert.equal(other.faithYear.divineLight, after.filter((p) => p.rel === 0 && p.faith >= BELIEVER_FAITH).length - believers);
+  assert.ok(Math.abs(sim.gacha.godLight[other.id] - 0.03) < 1e-7);
+  // Doubt on the player's own people: every religion's faith down (Omen Readers half), a yearly loss for 10 years.
   const own = startCiv(sim);
   const ownBefore = sim.civs[own]!.faithYear.divineDoubt;
+  const ob = of(own);
   cast(sim, Ab.Doubt, own);
-  assert.ok(Math.abs(sim.gacha.godDevotion[own] + 0.03) < 1e-7);
+  const oa = of(own);
+  oa.forEach((p, i) => {
+    if (ob[i].rel === 255) assert.equal(p.faith, ob[i].faith);
+    else assert.ok(p.faith < ob[i].faith || ob[i].faith === 0);
+  });
+  assert.ok(Math.abs(sim.gacha.godDoubt[own] - 0.03) < 1e-7);
   assert.ok(sim.civs[own]!.faithYear.divineDoubt >= ownBefore);
 });
 

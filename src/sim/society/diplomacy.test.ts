@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { dismissFaithLayer } from './religion';
 import { generateWorld } from '../world/generate';
 import {
   CLOSED_TRUST,
@@ -53,6 +54,7 @@ function metWorld(): { sim: Simulation; a: number; b: number } {
     .map((c) => c.id);
   // The base rules of diplomacy: without the shifts of the two peoples' leaders.
   dismissLeaders(sim);
+  dismissFaithLayer(sim);
   return { sim, a, b };
 }
 
@@ -237,16 +239,20 @@ test('diplomacy keeps the history the same for the same seed', () => {
 });
 
 test('the simulation uses the same trust and danger the diplomacy panel explains', () => {
-  const sim = createSimulation(generateWorld({ seed: 25 }));
-  runYears(sim, 160);
+  // The first of these worlds whose peoples know each other at year 160 (with religions, Faith in trust among the terms).
   let pairs = 0;
-  for (const a of livingCivilizations(sim)) {
-    for (const b of livingCivilizations(sim)) {
-      if (a === b || !sim.diplomacy.known[pair(a.id, b.id)]) continue;
-      pairs++;
-      const explained = (terms: { value: number }[]) => Math.max(0, Math.min(100, sumTerms(terms)));
-      assert.ok(Math.abs(trustValue(sim, a.id, b.id) - explained(trustTerms(sim, a.id, b.id))) < 1e-4);
-      assert.ok(Math.abs(dangerValue(sim, a.id, b.id) - explained(dangerTerms(sim, a.id, b.id))) < 1e-4);
+  for (const seed of [25, 16, 4, 7]) {
+    if (pairs > 0) break;
+    const sim = createSimulation(generateWorld({ seed }));
+    runYears(sim, 160);
+    for (const a of livingCivilizations(sim)) {
+      for (const b of livingCivilizations(sim)) {
+        if (a === b || !sim.diplomacy.known[pair(a.id, b.id)]) continue;
+        pairs++;
+        const explained = (terms: { value: number }[]) => Math.max(0, Math.min(100, sumTerms(terms)));
+        assert.ok(Math.abs(trustValue(sim, a.id, b.id) - explained(trustTerms(sim, a.id, b.id))) < 1e-4);
+        assert.ok(Math.abs(dangerValue(sim, a.id, b.id) - explained(dangerTerms(sim, a.id, b.id))) < 1e-4);
+      }
     }
   }
   assert.ok(pairs > 0);

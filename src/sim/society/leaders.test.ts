@@ -7,7 +7,8 @@ import { effectText, leaderOf, leaderTrait } from './leaderInfo';
 import { ATTRS, ATTR_COUNT, GOAL_FX, dismissLeaders, excludes, expansionTarget, goalExcludes, leaderTerms, recompute, updateLeaders } from './leaderRules';
 import { ATTR_SLOTS, EVENTS, Ev, GOALS, Goal, L, LEADER, LEADER_CIVS, LEADER_STEMS, LEVERS, LEVER_KIND, leaderName, lever, warChance, warRatio } from './leaders';
 import { Pact } from './pacts';
-import { satisfactionTarget, satisfactionTerms } from './satisfaction';
+import { CONNECTION_SCALE, satisfactionTarget, satisfactionTerms } from './satisfaction';
+import { dismissFaithLayer } from './religion';
 import { TICKS_PER_YEAR, createSimulation, foundCivilization, livingCivilizations, stepSimulation, type Simulation } from './simulation';
 import { WAR } from './war';
 
@@ -32,6 +33,8 @@ function run(seed: number, years: number, enabled = 1): Simulation {
 /** A world with several peoples and their leaders; `civ` rules since `years` years, aged 20 at takeover (no death), with these attributes and this goal. */
 function ruled(years: number, attrs: number[], goal: number): { sim: Simulation; civ: number; other: number } {
   const sim = run(5, 120);
+  // The leaders' numbers alone (the faith's layer would add its traits' effects).
+  dismissFaithLayer(sim);
   const ids = livingCivilizations(sim).map((c) => c.id);
   assert.ok(ids.length >= 2, 'two peoples');
   const [civ, other] = ids;
@@ -74,10 +77,13 @@ test('leaders are on in the game; a simulation without them (tools) keeps every 
   const sim = run(3, 60, 0);
   assert.equal(sim.leaders.has.reduce((a, b) => a + b, 0), 0);
   for (let c = 0; c < LEADER_CIVS; c++) {
-    for (let k = 0; k < LEVERS; k++) assert.equal(sim.leaders.lev[c * LEVERS + k], LEVER_KIND[k]);
+    // Without leaders only the faith's layer (religion.ts) is left.
+    for (let k = 0; k < LEVERS; k++) assert.equal(sim.leaders.lev[c * LEVERS + k], sim.religion.lev[c * LEVERS + k]);
     assert.equal(sim.leaders.sat[c], 0);
     assert.equal(sim.leaders.conn[c], 0);
   }
+  dismissFaithLayer(sim);
+  for (let c = 0; c < LEADER_CIVS; c++) for (let k = 0; k < LEVERS; k++) assert.equal(sim.leaders.lev[c * LEVERS + k], LEVER_KIND[k]);
   assert.equal(warChance(sim, 1, WAR.chance), WAR.chance);
   assert.equal(warRatio(sim, 1, true, WAR.ratio), WAR.ratio);
   assert.ok(!sim.chronicle.some((e) => / now leads the | leader of the /.test(e.text)));
@@ -389,7 +395,7 @@ test('the caps: satisfaction within ±8 (the connection part included), threshol
   const cell = people.capital;
   const terms = satisfactionTerms(sim, cell, people);
   assert.equal(terms.find((t) => t.label === 'Leader')!.value, 5);
-  assert.equal(terms.find((t) => t.label === 'Capital')!.value, 10 + 3);
+  assert.equal(terms.find((t) => t.label === 'Capital')!.value, 10 * CONNECTION_SCALE + 3);
   assert.ok(Math.abs(Math.max(-100, Math.min(100, sumTerms(terms))) - satisfactionTarget(sim, cell, people)) < 1e-4);
   const withLeader = satisfactionTarget(sim, cell, people);
   dismissLeaders(sim);
@@ -427,11 +433,12 @@ test('the war roll and the threshold: Warmonger 40 %, Glory ×2 and 1.2×, cappe
 });
 
 test('a world of Pacifists declares no war; the same world with its usual leaders does', () => {
-  const usual = run(2, 420);
+  // Seed 7: 8 wars in 420 years with religions and the Mandate.
+  const usual = run(7, 420);
   assert.ok(usual.war.stats.declared > 0, 'wars with the usual leaders');
   let sim!: Simulation;
   withNumbers({ forceAttr: 2 }, () => {
-    sim = run(2, 420);
+    sim = run(7, 420);
   });
   assert.equal(sim.war.stats.declared, 0);
 });

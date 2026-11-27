@@ -1,4 +1,3 @@
-import { FAITH } from './faithHooks';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import { sumTerms, type Term } from '../terms';
@@ -42,6 +41,8 @@ export const CONNECTION_NEAR = 0.5;
 /** ...falling linearly to CONNECTION_WORST at CONNECTION_FAR and beyond (or without a road connection). */
 export const CONNECTION_WORST = -20;
 export const CONNECTION_FAR = 4;
+/** While the Mandate runs, the connection part counts only this much (its reach part carries the rest; Requirement Mandat 2). */
+export const CONNECTION_SCALE = 0.5;
 /** Comfort when every inhabitant is served by a comfort building. */
 const COMFORT_MAX = 15;
 /** Per luxury good whose yearly need is covered, up to LUXURY_MAX. */
@@ -166,7 +167,7 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
           ? `Travel ${cost.toFixed(1)} to a seat of government`
           : 'No road to a seat of government',
     // A Road Builder's people feel closer to their seat (the leader's share of the connection part).
-    value: connectionValue(cost) * FAITH.connScale + (civ ? sim.leaders.conn[civ.id] : 0),
+    value: connectionValue(cost) * CONNECTION_SCALE + (civ ? sim.leaders.conn[civ.id] : 0),
   });
   const served = comfortServed(sim.economy, cell);
   if (served > 0) terms.push({ label: `Comfort for ${Math.min(served, people)} of ${people}`, value: comfortValue(served, people) });
@@ -191,10 +192,8 @@ export function satisfactionTerms(sim: Simulation, cell: number, civ: Civilizati
     if (sim.leaders.sat[civ.id] !== 0) terms.push({ label: 'Leader', value: sim.leaders.sat[civ.id] });
     // The god's Grateful Hearts / Restless Spirits (Requirement Gacha 7.6), capped on their own.
     if (sim.gacha.divine[civ.id] !== 0) terms.push({ label: 'Divine', value: sim.gacha.divine[civ.id] });
-    if (FAITH.creed !== null && FAITH.creed[civ.id] !== 0) terms.push({ label: 'Creed', value: FAITH.creed[civ.id] });
-    if (FAITH.heresy !== null && FAITH.heresy[civ.id] !== 0) terms.push({ label: 'Heresy', value: FAITH.heresy[civ.id] });
-    if (FAITH.heresyCell !== null && FAITH.heresyCell[cell] !== 0) terms.push({ label: 'Heresy', value: FAITH.heresyCell[cell] });
-    if (FAITH.unrest !== null && FAITH.unrest[cell] !== 0) terms.push({ label: 'Unrest', value: FAITH.unrest[cell] });
+    // The traits of the people's religions by share (Requirement Religion 4.4), capped on their own.
+    if (sim.religion.creed[civ.id] !== 0) terms.push({ label: 'Creed', value: sim.religion.creed[civ.id] });
   }
   return terms;
 }
@@ -210,7 +209,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   let sum = 0;
   for (let k = 0; k < SUPPLY_KINDS; k++) sum += shortageValue(sim.cellSupply[cell * SUPPLY_KINDS + k], people);
   sum += crowdingValue(people / Math.max(1, sim.cellCapacity[cell]));
-  sum += connectionValue(sim.seatCost[cell]) * FAITH.connScale;
+  sum += connectionValue(sim.seatCost[cell]) * CONNECTION_SCALE;
   sum += comfortValue(comfortServed(sim.economy, cell), people);
   sum += luxuryValue(sim.economy.luxuryCovered[cell]);
   sum += taxValue(sim.government.cellRate[cell]) + goodsTaxValue(sim.government.cellGoodsRate[cell]);
@@ -218,7 +217,7 @@ export function satisfactionTarget(sim: Simulation, cell: number, civ: Civilizat
   if (civ) {
     for (const mood of civ.moods) sum += moodNow(mood, sim.tick);
     sum += sim.leaders.sat[civ.id] + sim.leaders.conn[civ.id] + sim.gacha.divine[civ.id];
-    if (FAITH.creed !== null) sum += FAITH.creed[civ.id] + FAITH.heresy![civ.id] + (FAITH.heresyCell !== null ? FAITH.heresyCell[cell] : 0) + (FAITH.unrest !== null ? FAITH.unrest[cell] : 0);
+    sum += sim.religion.creed[civ.id];
   }
   return clampSatisfaction(sum);
 }
@@ -344,7 +343,7 @@ export type HexSatisfaction = {
   terms: Term[];
   /** Years in a row below zero. */
   unhappyYears: number;
-  /** Dissatisfied in the sense of a rebellion (below 0, not the capital): it rebels with the realm's other such settlements once they are stronger than the mother (war phase 5). */
+  /** Restless in the sense of the Mandate (loyalty below the threshold, mandate.ts): it may rebel with its bloc ("may rebel"). */
   restless: boolean;
   luxury: { name: string; stock: number; covered: boolean }[];
 };
@@ -364,7 +363,7 @@ export function hexSatisfaction(sim: Simulation, cell: number): HexSatisfaction 
     target: clampSatisfaction(sumTerms(terms)),
     terms,
     unhappyYears: Math.floor(sim.unhappyQuarters[cell] / 4),
-    restless: sim.satisfaction[cell] < 0 && sim.civs[owner]?.capital !== cell,
+    restless: sim.mandate.restless[cell] === 1,
     luxury,
   };
 }

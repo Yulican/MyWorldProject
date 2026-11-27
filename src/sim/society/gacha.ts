@@ -11,6 +11,8 @@ import { ATTRS, canRerollGoal, giveGodTrait, godTraitChoices, honeTrait, rerollG
 import { L, LEADER, LEADER_CIVS, LEVERS, combineLevers, leaderName, setIdentity } from './leaders';
 import { updateTradeBuildings } from './trade';
 import { BELIEVER_FAITH, TickPart, killInhabitant, type Simulation } from './simulation';
+import { MAXR, NO_RELIGION, blessDoctrine, blessable, canSpark, canSunder, covenant, faithDisaster, loseDoctrine, religionAlive, sparkFaith, sunderFaith, traitCount as faithTraits } from './religion';
+import { decreeOfGrace, hasUnrest } from './mandate';
 
 // Gacha and the god's abilities ("Design Documents/Requirement Gacha.md"). The player's state (Faith, pulls,
 // charges, the random numbers "gacha") and the god layer: timed effects in one list (section 7.1), the fires
@@ -69,10 +71,13 @@ export const LAND_CHANGES = 512;
 
 export const Tier = { Common: 0, Rare: 1, Epic: 2, Legendary: 3 } as const;
 export const TIER_NAMES = ['Common', 'Rare', 'Epic', 'Legendary'] as const;
-export const Category = { Land: 0, People: 1, Leader: 2 } as const;
-export const CATEGORY_NAMES = ['Land', 'Peoples', 'Leaders'] as const;
-/** What a charge is cast on: a hex (its center), a people, a people's leader. */
-export const TargetKind = { Hex: 0, People: 1, Leader: 2 } as const;
+export const Category = { Land: 0, People: 1, Leader: 2, Faith: 3 } as const;
+export const CATEGORY_NAMES = ['Land', 'Peoples', 'Leaders', 'Faiths'] as const;
+/**
+ * What a charge is cast on: a hex (its center), a people, a people's leader, a religion (id 0..15). Covenant of One
+ * takes two religions: the target and `option` (castAbility; option -1 while only the first is chosen).
+ */
+export const TargetKind = { Hex: 0, People: 1, Leader: 2, Religion: 3 } as const;
 
 /** Ability ids (Requirement section 6, number - 1). Stored as charges per id: append only. */
 export const Ab = {
@@ -101,8 +106,14 @@ export const Ab = {
   YoungHeir: 22,
   HonedMind: 23,
   DynastysHeir: 24,
+  BlessedDoctrine: 25,
+  LostDoctrine: 26,
+  SunderTheFaith: 27,
+  SparkOfANewFaith: 28,
+  CovenantOfOne: 29,
+  DecreeOfGrace: 30,
 } as const;
-export const ABILITY_COUNT = 25;
+export const ABILITY_COUNT = 31;
 
 export type Ability = {
   id: number;
@@ -134,8 +145,8 @@ export const ABILITIES: readonly Ability[] = [
   { id: 11, name: 'Grateful Hearts', tier: Tier.Common, category: Category.People, target: TargetKind.People, radius: 0, years: 30, about: 'Satisfaction +3 for 30 years.' },
   { id: 12, name: 'Restless Spirits', tier: Tier.Common, category: Category.People, target: TargetKind.People, radius: 0, years: 30, about: 'Satisfaction −3 for 30 years.' },
   { id: 13, name: 'Wanderlust', tier: Tier.Common, category: Category.People, target: TargetKind.People, radius: 0, years: 15, about: 'Settlers set out earlier (overload factor −0.05) and travel farther (travel cost ×0.8) for 15 years.' },
-  { id: 14, name: "Prophet's Light", tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 10, about: 'Faith in you +0.15 for everyone at once, and devotion +0.03 a year for 10 years.' },
-  { id: 15, name: 'Doubt', tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 10, about: 'Faith in all gods −0.15 for everyone at once, and −0.03 a year for 10 years.' },
+  { id: 14, name: "Prophet's Light", tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 10, about: 'Faith in your religion +0.15 for its followers in the people at once, and +0.03 a year for 10 years.' },
+  { id: 15, name: 'Doubt', tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 10, about: 'Faith in every religion −0.15 for everyone at once, and −0.03 a year for 10 years.' },
   { id: 16, name: 'Golden Harvest', tier: Tier.Epic, category: Category.People, target: TargetKind.People, radius: 0, years: 20, about: 'Food harvest, yield of mines and deposits and merchant load +15 % for 20 years.' },
   { id: 17, name: 'Gift of Trait', tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The leader gains a random trait, beyond the 3.' },
   { id: 18, name: 'Mark of Weakness', tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The leader gains a random weakening trait: Craven, Weak Hand, Tyrant, Tax Hawk, Xenophobe or Stubborn.' },
@@ -144,7 +155,13 @@ export const ABILITIES: readonly Ability[] = [
   { id: 21, name: 'Reroll Destiny', tier: Tier.Rare, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The leader follows a new goal; its progress starts over.' },
   { id: 22, name: 'Young Heir', tier: Tier.Rare, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: 'The next successor takes office at 20.' },
   { id: 23, name: 'Honed Mind', tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: "One of the leader's traits at random acts 1.5 times as strongly." },
-  { id: 24, name: "Dynasty's Heir", tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: "The next successor surely inherits one of the leader's traits." },
+  { id: 24, name: "Dynasty's Heir", tier: Tier.Epic, category: Category.Leader, target: TargetKind.Leader, radius: 0, years: 0, about: "The next successor surely inherits one of the leader's traits and keeps the leader's faith." },
+  { id: 25, name: 'Blessed Doctrine', tier: Tier.Epic, category: Category.Faith, target: TargetKind.Religion, radius: 0, years: 0, about: 'A religion gains a random trait at level 2, beyond its natural slots.' },
+  { id: 26, name: 'Lost Doctrine', tier: Tier.Rare, category: Category.Faith, target: TargetKind.Religion, radius: 0, years: 0, about: 'A religion loses a random trait (never its only one).' },
+  { id: 27, name: 'Sunder the Faith', tier: Tier.Epic, category: Category.Faith, target: TargetKind.Hex, radius: 0, years: 0, about: "A heresy of the settlement's strongest faith begins there at once and spreads (half its believers there take it)." },
+  { id: 28, name: 'Spark of a New Faith', tier: Tier.Epic, category: Category.Faith, target: TargetKind.People, radius: 0, years: 0, about: 'A new religion arises in a people at once; a quarter of its people take it.' },
+  { id: 29, name: 'Covenant of One', tier: Tier.Legendary, category: Category.Faith, target: TargetKind.Religion, radius: 0, years: 0, about: 'Two religions merge at once; the larger stays (yours always stays).' },
+  { id: 30, name: 'Decree of Grace', tier: Tier.Rare, category: Category.People, target: TargetKind.People, radius: 0, years: 20, about: 'Legitimacy +10 for 20 years, and the loyalty of all settlements +6 at once (fading over 20 years).' },
 ];
 
 /** Ability ids per tier, for the draw. */
@@ -226,8 +243,11 @@ export type Gacha = {
   worship: Uint8Array;
   /** The god's lever set, people x LEVERS (neutral 0 / 1 like the leader's), combined into sim.leaders.lev. */
   godLev: Float32Array;
-  /** Devotion the god layer adds per year to every inhabitant's faith in each god: civ * GODS + god. */
-  godDevotion: Float32Array;
+  /** Per people: faith a year the god layer adds to the player's religion (Prophet's Light) and takes from every religion (Doubt). */
+  godLight: Float32Array;
+  godDoubt: Float32Array;
+  /** Per people: legitimacy from the god (Decree of Grace, Requirement Mandat 9). */
+  godLegit: Float32Array;
   /** Satisfaction part "Divine" per people, within +-GACHA.divineCap. */
   divine: Float32Array;
   /** Timed effects (Requirement 7.1): ability (-1 = free entry), target (hex center or people), end tick, hexes touched and the amount each got. */
@@ -276,7 +296,9 @@ export function createGacha(seed: number, cellCount: number): Gacha {
     charges: new Int32Array(ABILITY_COUNT),
     worship: new Uint8Array(LEADER_CIVS * GODS),
     godLev,
-    godDevotion: new Float32Array(LEADER_CIVS * GODS),
+    godLight: new Float32Array(LEADER_CIVS),
+    godDoubt: new Float32Array(LEADER_CIVS),
+    godLegit: new Float32Array(LEADER_CIVS),
     divine: new Float32Array(LEADER_CIVS),
     effAbility: new Int8Array(MAX_EFFECTS).fill(-1),
     effTarget: new Int32Array(MAX_EFFECTS),
@@ -508,6 +530,25 @@ export function canCast(sim: Simulation, ability: number, target: number, option
       return hasLeader(sim, target) && traitCount(sim, target) > 0;
     case Ab.RerollDestiny:
       return hasLeader(sim, target) && canRerollGoal(sim, target);
+    case Ab.BlessedDoctrine:
+      return blessable(sim, target) > 0;
+    case Ab.LostDoctrine:
+      return religionAlive(sim, target) && faithTraits(sim.religion, target) >= 2;
+    case Ab.SunderTheFaith:
+      return canSunder(sim, target);
+    case Ab.SparkOfANewFaith:
+      return canSpark(sim, target);
+    case Ab.CovenantOfOne: {
+      if (!religionAlive(sim, target)) return false;
+      if (option < 0 || option === target) {
+        let n = 0;
+        for (let r = 0; r < MAXR; r++) n += sim.religion.alive[r];
+        return n >= 2;
+      }
+      return religionAlive(sim, option);
+    }
+    case Ab.DecreeOfGrace:
+      return livingPeople(sim, target) && target < LEADER_CIVS && effectRoom(sim, ability, target) && hasUnrest(sim, target);
   }
   return false;
 }
@@ -525,6 +566,9 @@ export function validTargets(sim: Simulation, ability: number, option = 0): numb
   if (!a) return out;
   if (a.target === TargetKind.Hex) {
     for (let c = 0; c < sim.world.cellCount; c++) if (canCast(sim, ability, c, option)) out.push(c);
+  } else if (a.target === TargetKind.Religion) {
+    // Covenant of One's second choice: `option` is the first religion, the targets are the others.
+    for (let r = 0; r < MAXR; r++) if (r !== option && canCast(sim, ability, r, option)) out.push(r);
   } else for (let id = 1; id < sim.civs.length; id++) if (canCast(sim, ability, id, option)) out.push(id);
   return out;
 }
@@ -551,6 +595,12 @@ export function castAbility(sim: Simulation, ability: number, target: number, op
   g.charges[ability]--;
   applyAbility(sim, ability, target, option);
   return true;
+}
+
+/** The religion `ability` acts on at hex `cell` (the player taps a hex): its strongest religion, -1 if none. */
+export function religionAt(sim: Simulation, cell: number): number {
+  const r = cell >= 0 && cell < sim.world.cellCount ? sim.religion.hexRel[cell] : NO_RELIGION;
+  return r !== NO_RELIGION && sim.religion.alive[r] ? r : -1;
 }
 
 /** Casts that waited for this tick's start; one that turned invalid meanwhile gives its charge back. */
@@ -583,13 +633,17 @@ export function advanceGod(sim: Simulation): void {
 // ---------------------------------------------------------------------------
 // Effects
 
-function chronicleCast(sim: Simulation, ability: number, target: number): void {
+function chronicleCast(sim: Simulation, ability: number, target: number, option: number): void {
   const a = ABILITIES[ability];
   let on = '';
   let cell = -1;
   if (a.target === TargetKind.Hex) {
     on = `the ${BIOMES[sim.world.biome[target]].name.toLowerCase()}`;
     cell = target;
+  } else if (a.target === TargetKind.Religion) {
+    const rs = sim.religion;
+    on = ability === Ab.CovenantOfOne && option >= 0 && option !== target ? `the ${rs.name[target]} and the ${rs.name[option]}` : `the ${rs.name[target]}`;
+    cell = sim.civs[rs.founderCiv[target]]?.capital ?? -1;
   } else {
     const civ = sim.civs[target];
     cell = civ?.capital ?? -1;
@@ -602,7 +656,9 @@ function applyAbility(sim: Simulation, ability: number, target: number, option: 
   const g = sim.gacha;
   const w = sim.world;
   // The chronicle names the hex's biome before the change.
-  chronicleCast(sim, ability, target);
+  chronicleCast(sim, ability, target, option);
+  // An intervention on the land is a disaster for the faiths there (Requirement Religion 4.5, Omen Readers).
+  if (ABILITIES[ability].category === Category.Land && ability !== Ab.Drought && ability !== Ab.FertileBlessing && ability !== Ab.WildFire && ability !== Ab.BiomeShift) faithDisaster(sim, target);
   switch (ability) {
     case Ab.FertileBlessing:
     case Ab.Drought:
@@ -670,6 +726,7 @@ function applyAbility(sim: Simulation, ability: number, target: number, option: 
         const to = shiftedBiome(w.biome[c], option);
         if (to < 0) continue;
         setBiome(sim, c, to);
+        faithDisaster(sim, c);
         // Set by the god: stays until the next Biome Shift (Requirement Dynamische Biome 8).
         sim.biomes.pinned[c] = 1;
         sim.biomes.trend[c] = 0;
@@ -697,6 +754,25 @@ function applyAbility(sim: Simulation, ability: number, target: number, option: 
       return;
     case Ab.HonedMind:
       honeTrait(sim, target, g.rng);
+      return;
+    case Ab.BlessedDoctrine:
+      blessDoctrine(sim, target, g.rng);
+      return;
+    case Ab.LostDoctrine:
+      loseDoctrine(sim, target, g.rng);
+      return;
+    case Ab.SunderTheFaith:
+      sunderFaith(sim, target);
+      return;
+    case Ab.SparkOfANewFaith:
+      sparkFaith(sim, target);
+      return;
+    case Ab.CovenantOfOne:
+      if (option >= 0 && option !== target) covenant(sim, target, option, g.rng);
+      return;
+    case Ab.DecreeOfGrace:
+      startEffect(sim, ability, target);
+      decreeOfGrace(sim, target);
       return;
   }
 }
@@ -734,6 +810,7 @@ function applyLand(sim: Simulation, slot: number): void {
   for (let i = 0; i < n; i++) {
     const c = areaOut[i];
     g.effCells[o + i] = c;
+    faithDisaster(sim, c);
     if (ability === Ab.FertileBlessing) {
       const k = c * RESOURCE_COUNT + Resource.Fertility;
       const before = w.resourceCapacity[k];
@@ -820,6 +897,7 @@ function recomputeGod(sim: Simulation, civ: number): void {
   let light = 0;
   let doubt = 0;
   let divine = 0;
+  let legit = 0;
   for (let i = 0; i < MAX_EFFECTS; i++) {
     const a = g.effAbility[i];
     if (a < 0 || g.effTarget[i] !== civ) continue;
@@ -832,14 +910,17 @@ function recomputeGod(sim: Simulation, civ: number): void {
       g.godLev[o + L.travel] *= 0.8;
     } else if (a === Ab.ProphetsLight) light += 0.03;
     else if (a === Ab.Doubt) doubt += 0.03;
+    else if (a === Ab.DecreeOfGrace) legit += 10;
     else if (a === Ab.GoldenHarvest) {
       g.godLev[o + L.harvest] *= 1.15;
       g.godLev[o + L.load] *= 1.15;
       g.godLev[o + L.food] *= 1.15;
     }
   }
-  // Prophet's Light belongs to the casting god (the player's); Doubt acts on every god.
-  for (let god = 0; god < GODS; god++) g.godDevotion[civ * GODS + god] = -doubt + (god === PLAYER_GOD ? light : 0);
+  // Prophet's Light belongs to the casting god (the player's religion); Doubt acts on every religion (religion.ts faithStep).
+  g.godLight[civ] = light;
+  g.godDoubt[civ] = doubt;
+  g.godLegit[civ] = legit;
   g.divine[civ] = clamp(divine, -GACHA.divineCap, GACHA.divineCap);
   const food = sim.leaders.lev[o + L.food];
   combineLevers(sim, civ);
@@ -850,15 +931,22 @@ function recomputeGod(sim: Simulation, civ: number): void {
   }
 }
 
-/** Prophet's Light (+) or Doubt (-): every inhabitant's faith of people `civ` changes once, booked in the faith ledger. */
+/**
+ * Prophet's Light (+): the faith of people `civ`'s inhabitants in the player's religion changes once; Doubt (-):
+ * their faith in every religion (Omen Readers half). Booked in the faith ledger (the player's believers).
+ */
 function faithOnce(sim: Simulation, civ: number, amount: number): void {
   const pop = sim.pop;
   const people = sim.civs[civ];
+  const rs = sim.religion;
   if (!people) return;
   for (let i = 0; i < pop.end; i++) {
     if (!pop.alive[i] || pop.civ[i] !== civ) continue;
+    const r = pop.religion[i];
+    if (r === NO_RELIGION || (amount > 0 && r !== 0)) continue;
     const before = pop.faith[i];
-    pop.faith[i] = clamp(before + amount, 0, 1);
+    pop.faith[i] = clamp(before + (amount < 0 && rs.rOmen[r] > 0 ? amount * 0.5 : amount), 0, 1);
+    if (r !== 0) continue;
     const was = before >= BELIEVER_FAITH;
     const is = pop.faith[i] >= BELIEVER_FAITH;
     if (!was && is) people.faithYear.divineLight++;
@@ -1055,6 +1143,7 @@ function ignite(sim: Simulation, cell: number, id: number): void {
   g.fireSize[id]++;
   g.burning[cell] = 1;
   landChanged(sim, cell);
+  faithDisaster(sim, cell);
 }
 
 /** A week of the fires: inhabitants of burning hexes die, the fire spreads, burnt-out hexes turn to plains. */

@@ -1,4 +1,3 @@
-import { FAITH } from './faithHooks';
 import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { MinHeap } from '../minHeap';
 import { createRng, deriveSeed, type Rng } from '../rng';
@@ -9,7 +8,10 @@ import { BUILDINGS } from './buildings';
 import { BATTLE, BATTLE_LEADER, BO, BI, Defense, fightBattle, givesUp, remainingSoldiers } from './battle';
 import { ALLY, Pact, foeStrength, mayOutweigh } from './pacts';
 import { Ev, L, LEVERS, beatenBy, leaderBeaten, leaderEvent, warChance, warRatio } from './leaders';
-import { checkRebellion, continueRebellion, countRestless } from './rebellion';
+import { continueRebellion } from './rebellion';
+import { beginMandateYear, mandateRealm, rebellionEnded } from './mandate';
+import { vassalOf, vassalPair } from './vassals';
+import { RELIGION, conquered, faithJoinSide, holyRatio, isHolyWar, rebelWarEnded, rebelWarStarted, warEnded, warStarted } from './religion';
 import { breakAlliances, endPact, formAlliance, updateAlliances } from './alliance';
 import { PAIRS, addMood, rebuildPartners } from './diplomacy';
 import { updateCellSupply } from './economy';
@@ -664,7 +666,7 @@ export function runWarYearStep(sim: Simulation, step: number): number {
     // First the alliances and the count of dissatisfied settlements, then one realm's rebellion check per step.
     if (w.rebelNext === 0) {
       updateAlliances(sim);
-      countRestless(sim);
+      beginMandateYear(sim);
       w.rebelNext = 1;
       profileYear(w, t0, 0);
       return 0;
@@ -674,7 +676,7 @@ export function runWarYearStep(sim: Simulation, step: number): number {
     while (civ <= max && w.restless[civ] === 0) civ++;
     if (civ <= max) {
       w.rebelNext = civ + 1;
-      checkRebellion(sim, civ);
+      mandateRealm(sim, civ);
       if (WAR_PROFILE.clock) w.stats.rebelMax = Math.max(w.stats.rebelMax, WAR_PROFILE.clock() - t0);
       profileYear(w, t0, 0);
       return 0;
@@ -783,7 +785,7 @@ export function sideStrength(sim: Simulation, s: number, side: number): number {
 /** Whether the attacker gives up: below BATTLE.giveUp of the other side; the mother of a rebellion never does. */
 function attackerGivesUp(sim: Simulation, s: number, sa: number, sd: number): boolean {
   const w = sim.war;
-  return w.wRebel[s] === 0 && givesUpAt(sim, w.wAtt[s], sa, sd, FAITH.on && FAITH.holy![s] === 1 ? -0.1 : 0);
+  return w.wRebel[s] === 0 && givesUpAt(sim, w.wAtt[s], sa, sd, isHolyWar(sim, s) ? RELIGION.holyGiveUp : 0);
 }
 
 /** A side of strength `own` gives up below the share of the enemy's strength its leader allows (BATTLE.giveUp with the leader's shift). */
@@ -953,7 +955,8 @@ function markCandidates(sim: Simulation, a: number, civs: number): boolean {
   candidate.fill(0);
   // Only a people at peace starts a war (neither a main party nor an ally in one).
   if (!sim.civs[a] || w.enemy[a] !== 0 || w.allyWarsOf[a] > 0 || w.motherBusy[a] > 0) return false;
-  if (FAITH.vassal !== null && FAITH.vassal[a] >= 0) return false;
+  // A vassal never declares a war (Requirement Mandat 7).
+  if (vassalOf(sim, a) >= 0) return false;
   const sa = m.strength[a] ?? 0;
   if (sa <= 0) return false;
   let any = false;
@@ -963,7 +966,7 @@ function markCandidates(sim: Simulation, a: number, civs: number): boolean {
     if (w.pact[a * PAIRS + b] === Pact.Alliance) continue;
     // A Grudge-bearer's revenge: against a people that beat it lately the 2x check is lower and the war roll higher.
     const revenge = beatenBy(sim, a, b);
-    if (!mayOutweigh(sim, a, b, warRatio(sim, a, w.enemy[b] !== 0 || w.motherBusy[b] > 0, FAITH.on ? FAITH.holyRatio!(sim, a, b, WAR.ratio) : WAR.ratio, revenge))) continue;
+    if (!mayOutweigh(sim, a, b, warRatio(sim, a, w.enemy[b] !== 0 || w.motherBusy[b] > 0, holyRatio(sim, a, b, WAR.ratio), revenge))) continue;
     if (revenge) revengeTarget = true;
     candidate[b] = 1;
     any = true;
@@ -1120,14 +1123,14 @@ export function startWar(sim: Simulation, att: number, goal: number, later = fal
   if (w.wars > st.maxWars) st.maxWars = w.wars;
   sever(sim, att, def);
   record(sim, `The ${sim.civs[att]!.name} declared war on the ${sim.civs[def]!.name}.`, goal, true);
-  if (FAITH.on) FAITH.warStarted!(sim, att, def, s);
+  warStarted(sim, att, def, s);
   // A declaration ends the alliances with partners allied to the target; a war ends the pact between its parties.
   if (w.pactCount > 0) {
     breakAlliances(sim, att, def);
     endPact(sim, att, def);
     if (w.pactCount > 0) joinAllies(sim, s);
   }
-  if (FAITH.on && w.wRebel[s] === 0) joinForFaith(sim, s);
+  if (w.wRebel[s] === 0) joinForFaith(sim, s);
   planMarch(sim, s);
   if (w.wAllies[s] > 0) {
     st.allyWars++;
@@ -1238,13 +1241,16 @@ function joinMember(sim: Simulation, s: number, p: number, side: number): void {
   record(sim, `The ${sim.civs[p]!.name} joined the ${sim.civs[main]!.name} in the war against the ${sim.civs[side === 0 ? w.wDef[s] : w.wAtt[s]]!.name}.`, w.wGoal[s]);
 }
 
-/** Religion prototype: peoples that join war `s` for their faith (holy war, rebellion over faith; the layer decides who and on which side). */
+/** Peoples that join war `s` for their faith or as a vassal (religion.ts faithJoinSide: holy war, rebellion over faith; Mandat 7: a vassal joins its mother's wars, the mother her vassal's). */
 function joinForFaith(sim: Simulation, s: number): void {
   const w = sim.war;
   const max = sim.diplomacy.maxId;
   for (let p = 1; p <= max; p++) {
     if (p === w.wAtt[s] || p === w.wDef[s] || !sim.civs[p] || sideOf(w, s, p) >= 0 || w.enemy[p] !== 0 || w.allyWarsOf[p] > 0) continue;
-    const side = FAITH.joinSide!(sim, s, p);
+    let side = -1;
+    if (w.wRebel[s] === 0 && vassalPair(sim, p, w.wAtt[s])) side = 0;
+    else if (w.wRebel[s] === 0 && vassalPair(sim, p, w.wDef[s])) side = 1;
+    else side = faithJoinSide(sim, s, p);
     if (side >= 0) joinMember(sim, s, p, side);
   }
 }
@@ -2454,6 +2460,7 @@ export function startRebelWar(sim: Simulation, mother: number, groups: Int32Arra
     sever(sim, mother, g);
   }
   w.motherBusy[mother]++;
+  rebelWarStarted(sim, mother, s);
   // Only a mother at peace elsewhere has the rebels as her enemy.
   if (w.enemy[mother] === 0) {
     w.enemy[mother] = first;
@@ -2507,7 +2514,7 @@ function joinRebelSides(sim: Simulation, s: number, groups: Int32Array, count: n
     any++;
   }
   void m;
-  if (FAITH.on) joinForFaith(sim, s);
+  joinForFaith(sim, s);
   if (any === 0 || sumR <= sumM) return;
   st.rebHelpWars++;
   for (let p = 1; p <= max; p++) {
@@ -2532,7 +2539,6 @@ function strengthOf(sim: Simulation, p: number): number {
  * between the mother and the groups drops, truce.
  */
 function endRebelWar(sim: Simulation, s: number, type: number): void {
-  if (FAITH.rebelEnd !== null) FAITH.rebelEnd(sim, s, type);
   const w = sim.war;
   const mother = w.wAtt[s];
   const st = w.stats;
@@ -2540,6 +2546,8 @@ function endRebelWar(sim: Simulation, s: number, type: number): void {
   const owner = sim.world.owner;
   const max = sim.diplomacy.maxId;
   const won = type === EndType.Crushed || type === EndType.GaveUp;
+  rebelWarEnded(sim, s, !won);
+  rebellionEnded(sim, mother, won);
   st.rebDurationSum += sim.tick - w.wStart[s];
   if (type === EndType.Crushed) st.rebCrushed++;
   else if (type === EndType.GaveUp) st.rebGaveUp++;
@@ -2645,6 +2653,7 @@ export function endWar(sim: Simulation, s: number, type: number): void {
     endRebelWar(sim, s, type);
     return;
   }
+  warEnded(sim, s, type === EndType.AttackerGaveUp);
   const att = w.wAtt[s];
   const def = w.wDef[s];
   const goal = w.wGoal[s];
@@ -2782,7 +2791,7 @@ function transferDistrict(sim: Simulation, s: number): boolean {
   for (let i = 0; i < pop.end; i++) {
     if (pop.alive[i] && pop.civ[i] === def && mask[pop.cell[i]]) changeCiv(sim, i, att);
   }
-  if (FAITH.on) FAITH.conquered!(sim, s, mask, att);
+  conquered(sim, s, mask, att);
   for (let c = 0; c < n; c++) {
     if (!mask[c]) continue;
     owner[c] = att;

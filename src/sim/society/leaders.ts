@@ -1,7 +1,6 @@
 import { createRng, deriveSeed, type Rng } from '../rng';
 import { GOV_TUNING } from './taxes';
 import type { Simulation } from './simulation';
-import { FAITH } from './faithHooks';
 
 // Leaders ("Design Documents/Requirement Anführer.md"), the leaf part: the numbers, the lever set per
 // people, the state and the event counters. No imports besides types, so war.ts, diplomacy.ts,
@@ -154,8 +153,10 @@ export const L = {
   capitalFirst: 60,
   /** Food harvest of the people's hexes (only the god's Golden Harvest sets it; supply in economy.ts updateCellSupply). */
   food: 61,
+  /** Chance a successor inherits an attribute (additive on LEADER.inherit; Ancestor Veneration, Requirement Religion 4.2). */
+  inherit: 62,
 } as const;
-export const LEVERS = 62;
+export const LEVERS = 63;
 export const LEVER_NAMES = Object.keys(L) as (keyof typeof L)[];
 /** 1 for the multiplicative levers. */
 export const LEVER_KIND = new Uint8Array(LEVERS);
@@ -241,6 +242,15 @@ export type Leaders = {
   honed: Uint8Array;
   heirInherits: Uint8Array;
   youngHeir: Uint8Array;
+  /**
+   * The leader's faith (religion id, 255 = none; the state faith, Requirement Anführer 6a) and what the yearly
+   * religion step does with it after a new leader took office: 0 nothing, 1 draw (succession), 2 keep the
+   * predecessor's (Dynasty's Heir), 3 the capital's majority (a first leader).
+   */
+  faith: Uint8Array;
+  faithDraw: Uint8Array;
+  /** 1 when the current leader inherited an attribute of the predecessor (an heir of the line: Mandat 3, legitimacy). */
+  inheritedLast: Uint8Array;
   /** Goal (Goal), 1 once reached, and the tick it was reached. */
   goal: Uint8Array;
   goalDone: Uint8Array;
@@ -334,6 +344,9 @@ export function createLeaders(seed: number): Leaders {
     honed: new Uint8Array(LEADER_CIVS),
     heirInherits: new Uint8Array(LEADER_CIVS),
     youngHeir: new Uint8Array(LEADER_CIVS),
+    faith: new Uint8Array(LEADER_CIVS).fill(255),
+    faithDraw: new Uint8Array(LEADER_CIVS),
+    inheritedLast: new Uint8Array(LEADER_CIVS),
     goal: new Uint8Array(LEADER_CIVS),
     goalDone: new Uint8Array(LEADER_CIVS),
     goalTick: new Int32Array(LEADER_CIVS),
@@ -411,7 +424,7 @@ export function clearLeader(sim: Simulation, civ: number): void {
 
 /**
  * The lever set the decisions read for `civ`: the leader's own (`own`) with the god's layer
- * (`sim.gacha.godLev`, Requirement Gacha 7.1) on top, additive levers added, multiplicative ones multiplied.
+ * (`sim.gacha.godLev`, Requirement Gacha 7.1) and the faith's (`sim.religion.lev`, Requirement Religion 4.4) on top, additive levers added, multiplicative ones multiplied.
  * Only when one of them changed (a leader's recompute, a god effect's start or end).
  */
 export function combineLevers(sim: Simulation, civ: number): void {
@@ -420,9 +433,9 @@ export function combineLevers(sim: Simulation, civ: number): void {
   const own = sim.leaders.own;
   const god = sim.gacha ? sim.gacha.godLev : null;
   for (let k = 0; k < LEVERS; k++) lev[o + k] = god === null ? own[o + k] : LEVER_KIND[k] ? own[o + k] * god[o + k] : own[o + k] + god[o + k];
-  // The third layer, "Glaube" (religion prototype, faithHooks.ts).
-  const faith = FAITH.lev;
-  if (faith !== null && o + LEVERS <= faith.length) for (let k = 0; k < LEVERS; k++) lev[o + k] = LEVER_KIND[k] ? lev[o + k] * faith[o + k] : lev[o + k] + faith[o + k];
+  // The third layer, "Glaube" (religion.ts: the traits of the people's religions by share).
+  const faith = sim.religion ? sim.religion.lev : null;
+  if (faith !== null) for (let k = 0; k < LEVERS; k++) lev[o + k] = LEVER_KIND[k] ? lev[o + k] * faith[o + k] : lev[o + k] + faith[o + k];
 }
 
 /** An experience of the leader of `civ` (war won, uprising ...); counted only while it has one. */

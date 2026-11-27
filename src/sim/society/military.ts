@@ -55,21 +55,7 @@ export const MIL = {
   threatDanger: 50,
   spareYears: 5,
   traderUnits: 80,
-  /** Exploratory (0 = off, the game): standing local militia of a settlement (share of its people, at most standingAdult of its adults, unpaid, stays local, joins a rebellion of its settlement) and its cost in births. */
-  standing: 0,
-  standingAdult: 0.2,
-  standingCost: 0.01,
-  /** Exploratory: training is this many times faster under threat or in a war; plus this x the war-chance lever; one training building per settlement from this many people (0 = off). */
-  threatTrain: 1,
-  warLeverTrain: 0,
-  everyPop: 0,
 };
-
-/** Standing militia of settlement `c` (a number, no state): what it adds to a rebellion of the settlement. */
-export function standingMilitia(sim: Simulation, c: number): number {
-  if (MIL.standing <= 0) return 0;
-  return Math.max(0, Math.min(Math.floor(MIL.standing * sim.cellPop[c]), Math.floor(MIL.standingAdult * sim.cellAdults[c])));
-}
 
 export const TROOP_TYPES = 3;
 /** Troop types: melee, ranged, shock. */
@@ -263,7 +249,7 @@ export function armingWanted(sim: Simulation, seat: number): boolean {
 }
 
 /** Whether the cell has a building (any state but empty or ruin) making `good`. */
-export function hasBuildingOf(sim: Simulation, cell: number, good: number): boolean {
+function hasBuildingOf(sim: Simulation, cell: number, good: number): boolean {
   const eco = sim.economy;
   for (let q = cell * eco.slots, end = q + eco.slots; q < end; q++) {
     const st = eco.state[q];
@@ -487,9 +473,7 @@ export function updateMilitary(sim: Simulation, owner: Uint8Array): void {
       if (cap === 0 || m.soldiers[base + t] >= cap) continue;
       // Stables need horses at hand.
       if (t === Troop.Shock && eco.luxury[c * STORED_COUNT + TROOP_GOOD[t]] < 1) continue;
-      const busy = MIL.threatTrain !== 1 && (m.threat[civ] === 1 || sim.war.enemy[civ] !== 0 || sim.war.allyWarsOf[civ] > 0);
-      const rate = (MIL.trainShare * (busy ? MIL.threatTrain : 1)) + lv[civ * LEVERS + L.trainShare] + MIL.warLeverTrain * lv[civ * LEVERS + L.warChance];
-      const add = Math.min(cap - m.soldiers[base + t], Math.ceil(rate * cap), room, Math.floor(m.civAfford[civ]));
+      const add = Math.min(cap - m.soldiers[base + t], Math.ceil((MIL.trainShare + lv[civ * LEVERS + L.trainShare]) * cap), room, Math.floor(m.civAfford[civ]));
       if (add <= 0) continue;
       m.civAfford[civ] -= add;
       m.soldiers[base + t] += add;

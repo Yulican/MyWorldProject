@@ -2,6 +2,7 @@ import { PAIRS, addMood } from './diplomacy';
 import { L, LEVERS } from './leaders';
 import { ALLY, Pact } from './pacts';
 import { record, type Simulation } from './simulation';
+import { vassalOf, vassalPair } from './vassals';
 
 if (PAIRS !== 256) throw new Error('pacts.ts assumes 256 people pairs');
 
@@ -38,7 +39,7 @@ export function breakAlliances(sim: Simulation, a: number, t: number): void {
   const w = sim.war;
   const max = sim.diplomacy.maxId;
   for (let p = 1; p <= max; p++) {
-    if (p === a || p === t || w.pact[a * PAIRS + p] !== Pact.Alliance || w.pact[p * PAIRS + t] !== Pact.Alliance) continue;
+    if (p === a || p === t || w.pact[a * PAIRS + p] !== Pact.Alliance || w.pact[p * PAIRS + t] !== Pact.Alliance || vassalPair(sim, a, p)) continue;
     setPact(sim, a, p, Pact.None, 0);
     addMood(sim.diplomacy, p, a, 'Attacked our ally', -ALLY.breakLoss, sim.tick);
     w.stats.alliesBroken++;
@@ -97,6 +98,15 @@ export function updateAlliances(sim: Simulation): void {
       const b = living[j];
       const k = a * PAIRS + b;
       if (!dip.known[k] || w.foe[k] > 0) continue;
+      // A vassal and its mother stay allied whatever their trust; a vassal has no pacts of its own (Requirement Mandat 7).
+      if (vassalPair(sim, a, b)) {
+        if (w.pact[k] !== Pact.Alliance) setPact(sim, a, b, Pact.Alliance, 0);
+        continue;
+      }
+      if (vassalOf(sim, a) >= 0 || vassalOf(sim, b) >= 0) {
+        if (w.pact[k] !== Pact.None) setPact(sim, a, b, Pact.None, 0);
+        continue;
+      }
       const trust = Math.min(dip.trust[k], dip.trust[b * PAIRS + a]);
       const cur = w.pact[k];
       // The two leaders' wishes: the trust asked for moves by the mean of their shifts (Oathkeeper, goal Security).

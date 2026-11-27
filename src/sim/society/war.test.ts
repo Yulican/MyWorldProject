@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { dismissFaithLayer } from './religion';
 import { DIRECTION_COUNT, hexDistance } from '../hex';
 import { isWaterBiome } from '../world/biomes';
 import { Deposit } from '../world/deposits';
@@ -82,18 +83,33 @@ const borders = (sim: Simulation, cell: number, civ: number) => {
 type Fixture = { sim: Simulation; att: number; def: number; seats: number[] };
 
 /**
- * A grown world (seed 17, year 200, no war yet) whose first people gets
- * `districts` new seats far from its capital; the districts of these seats
- * break away as a new people (`def`, its capital the first seat) next to the
- * old one (`att`). Soldiers: 10 melee in every settlement of att, 8 in every
- * settlement of def; strengths set to match.
+ * A grown world (year 200, no war yet) whose first people gets `districts` new seats far from its capital; the
+ * districts of these seats break away as a new people (`def`, its capital the first seat) next to the old one
+ * (`att`). Soldiers: 10 melee in every settlement of att, 8 in every settlement of def; strengths set to match.
+ * The world is the first of FIXTURE_SEEDS where this works (att twice as strong, the two border each other);
+ * with religions and the Mandate the histories differ from seed to seed, so the seed is searched, not fixed.
  */
+const FIXTURE_SEEDS = [7, 17, 5, 9, 12, 3, 14, 16, 19, 21];
+const fixtureSeed = new Map<number, number>();
 function fixture(districts: number): Fixture {
-  const sim = createSimulation(generateWorld({ seed: 17 }));
+  const known = fixtureSeed.get(districts);
+  for (const seed of known !== undefined ? [known] : FIXTURE_SEEDS) {
+    const f = tryFixture(seed, districts);
+    if (f) {
+      fixtureSeed.set(districts, seed);
+      return f;
+    }
+  }
+  throw new Error(`no world for a fixture with ${districts} districts`);
+}
+
+function tryFixture(seed: number, districts: number): Fixture | null {
+  const sim = createSimulation(generateWorld({ seed }));
   runYears(sim, 200);
-  // The base rules of war: without the shifts of the peoples' leaders (war roll, threshold, army shares ...).
+  // The base rules of war: without the shifts of the peoples' leaders (war roll, threshold, army shares ...) or faiths.
   dismissLeaders(sim);
-  assert.equal(sim.war.wars, 0);
+  dismissFaithLayer(sim);
+  if (sim.war.wars !== 0 || !sim.civs[1]) return null;
   const owner = sim.world.owner;
   const att = 1;
   const parent = sim.civs[att]!;
@@ -112,7 +128,7 @@ function fixture(districts: number): Fixture {
         best = c;
       }
     }
-    assert.ok(best >= 0 && bestD >= 2, 'room for a seat');
+    if (!(best >= 0 && bestD >= 2)) return null;
     placeSeat(sim, best);
     seats.push(best);
   }
@@ -132,8 +148,8 @@ function fixture(districts: number): Fixture {
   for (const c of settledOf(sim, def)) m.soldiers[c * TROOP_TYPES + Troop.Melee] = 8;
   m.strength[att] = 10 * settledOf(sim, att).length;
   m.strength[def] = 8 * settledOf(sim, def).length;
-  assert.ok(m.strength[att] >= 2 * m.strength[def], 'twice as strong');
-  assert.ok(settledOf(sim, def).some((c) => borders(sim, c, att)), 'the new people borders the old one');
+  if (m.strength[att] < 2 * m.strength[def]) return null;
+  if (!settledOf(sim, def).some((c) => borders(sim, c, att))) return null;
   return { sim, att, def, seats };
 }
 

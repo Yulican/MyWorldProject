@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { dismissFaithLayer } from './religion';
 import { generateWorld } from '../world/generate';
 import { BUILDINGS, GOV_SLOT, Good, SLOTS, STORED_COUNT, SlotState } from './buildings';
 import { PAIRS, SIGHT_RANGE, dangerValue } from './diplomacy';
@@ -39,6 +40,7 @@ function setup(minPop = 60): { sim: Simulation; a: number; b: number; seat: numb
   runYears(sim, 150);
   // The base rules of the military: without the shifts of a leader (pay, soldier shares, strength).
   dismissLeaders(sim);
+  dismissFaithLayer(sim);
   const { economy, government: gov, military: m } = sim;
   const n = sim.world.cellCount;
   m.soldiers.fill(0);

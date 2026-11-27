@@ -15,8 +15,10 @@ export type Population = {
   cell: Int32Array;
   /** Civilization id, see civilizations.ts. */
   civ: Uint8Array;
-  /** Faith in the player 0..1. */
+  /** Faith 0..1 in the inhabitant's religion (a believer from 0.5). */
   faith: Float32Array;
+  /** Religion (religion.ts, 0 = the player's; 255 = none). */
+  religion: Uint8Array;
   freeSlots: Int32Array;
   freeCount: number;
 };
@@ -31,6 +33,7 @@ export function createPopulation(capacity: number): Population {
     cell: new Int32Array(capacity),
     civ: new Uint8Array(capacity),
     faith: new Float32Array(capacity),
+    religion: new Uint8Array(capacity).fill(255),
     freeSlots: new Int32Array(capacity),
     freeCount: 0,
   };
@@ -55,6 +58,7 @@ function grow(pop: Population): void {
   pop.cell = copyInto(new Int32Array(capacity), pop.cell);
   pop.civ = copyInto(new Uint8Array(capacity), pop.civ);
   pop.faith = copyInto(new Float32Array(capacity), pop.faith);
+  pop.religion = copyInto(new Uint8Array(capacity).fill(255), pop.religion);
   pop.freeSlots = copyInto(new Int32Array(capacity), pop.freeSlots);
   pop.capacity = capacity;
 }

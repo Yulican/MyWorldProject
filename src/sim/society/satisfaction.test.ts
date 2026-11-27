@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { dismissFaithLayer } from './religion';
 import { sumTerms } from '../terms';
 import { Deposit } from '../world/deposits';
 import { generateWorld } from '../world/generate';
@@ -7,6 +8,7 @@ import { BUILDINGS, FIRST_LUXURY, Good, STORED_COUNT, SLOTS, SlotState } from '.
 import { runEconomy, updateCellSupply } from './economy';
 import {
   CONNECTION_BEST,
+  CONNECTION_SCALE,
   CONNECTION_FAR,
   CONNECTION_NEAR,
   CONNECTION_WORST,
@@ -33,7 +35,7 @@ import {
 import { dismissLeaders } from './leaderRules';
 import { TROOP_TYPES, Troop } from './military';
 import { SUPPLY_KINDS } from './supply';
-import { REBEL_CHECK, measureRebellion } from './rebellion';
+import { MANDATE } from './mandate';
 
 const typeOf = (name: string) => BUILDINGS.findIndex((b) => b.name === name);
 
@@ -85,7 +87,8 @@ test('connection: best near a seat of government, worst far away or without a ro
   const sim = createSimulation(generateWorld({ seed: 5 }));
   const capital = livingCivilizations(sim)[0].capital;
   assert.equal(sim.seatCost[capital], 0);
-  assert.ok(satisfactionTerms(sim, capital, sim.civs[1]).some((t) => t.label === 'Capital' && t.value === CONNECTION_BEST));
+  // While the Mandate runs the connection part counts x0.5 (its reach part carries the rest, Requirement Mandat 2).
+  assert.ok(satisfactionTerms(sim, capital, sim.civs[1]).some((t) => t.label === 'Capital' && t.value === CONNECTION_BEST * CONNECTION_SCALE));
 });
 
 test('missing food, water or space and crowding lower the target', () => {
@@ -184,13 +187,23 @@ function makeRestless(sim: Simulation, civId: number, cells: number[]): void {
   addMood(sim.civs[civId]!, 'Test hardship', -200, sim.tick);
 }
 
-/** Runs to the end of the war's yearly part (week 47), where the rebellions are checked. */
-function runToRebellionCheck(sim: Simulation): void {
-  do stepSimulation(sim);
-  while (sim.tick % TICKS_PER_YEAR !== 48);
+/** Runs year by year until a rebel people of `parent` exists (the Mandate: loyalty falls, a countdown, independence), at most `years`. */
+function runToRebellion(sim: Simulation, parent: string, years: number, everyYear: () => void): void {
+  // Independence for sure at the countdown's end (no autonomy), to see the rebellion.
+  const saved = MANDATE.wAutonomy;
+  MANDATE.wAutonomy = 0;
+  try {
+    for (let y = 0; y < years; y++) {
+      everyYear();
+      for (let t = 0; t < TICKS_PER_YEAR; t++) stepSimulation(sim);
+      if (livingCivilizations(sim).some((c) => c.origin === 'revolution' && c.parentName === parent)) return;
+    }
+  } finally {
+    MANDATE.wAutonomy = saved;
+  }
 }
 
-test('dissatisfied settlements stronger than their mother rise up as new peoples, one per road-joined group, and go to war (war phase 5)', () => {
+test('unhappy settlements lose their loyalty and, at the end of the Mandate\'s countdown, rise up as new peoples, one per road-joined group, and go to war (war phase 5)', () => {
   const sim = createSimulation(generateWorld({ seed: 2 }));
   runYears(sim, 200);
   const owner = cellOwners(sim);
@@ -198,12 +211,11 @@ test('dissatisfied settlements stronger than their mother rise up as new peoples
   const cells = [...owner.keys()].filter((c) => owner[c] === parent.id && c !== parent.capital);
   assert.ok(cells.length >= 3, `${cells.length} settlements`);
   const faith = new Map<number, number>();
-  for (let i = 0; i < sim.pop.end; i++) if (sim.pop.alive[i] && sim.pop.civ[i] === parent.id) faith.set(i, sim.pop.faith[i]);
+  for (let i = 0; i < sim.pop.end; i++) if (sim.pop.alive[i] && sim.pop.civ[i] === parent.id) faith.set(i, sim.pop.religion[i]);
   const capitalPeople = sim.cellCivPop[parent.capital * sim.civSlots + parent.id];
   const believersBefore = parent.faithYear.brokeAway;
-  makeRestless(sim, parent.id, cells);
-  // No years of unhappiness needed: the first yearly check after they are below 0 decides.
-  runToRebellionCheck(sim);
+  // The loyalty falls (at most 6 a year) while the hardship lasts, a bloc forms, its countdown runs 5-10 years.
+  runToRebellion(sim, parent.name, 30, () => makeRestless(sim, parent.id, cells.filter((c) => sim.world.owner[c] === parent.id)));
 
   const rebels = livingCivilizations(sim).filter((c) => c.origin === 'revolution' && c.parentName === parent.name);
   assert.ok(rebels.length >= 1, 'the settlements rose up');
@@ -215,8 +227,8 @@ test('dissatisfied settlements stronger than their mother rise up as new peoples
   assert.ok(capitalPeople > 0);
   for (let i = 0; i < sim.pop.end; i++) {
     if (!sim.pop.alive[i] || sim.pop.civ[i] !== civ.id || !faith.has(i)) continue;
-    // Faith only changed by the yearly drift, never cut.
-    assert.ok(Math.abs(sim.pop.faith[i] - faith.get(i)!) < 0.1);
+    // Everyone keeps their religion (rebels found no religion of their own, Requirement Religion 3), or lost it by the yearly drift.
+    assert.ok(sim.pop.religion[i] === faith.get(i) || sim.pop.religion[i] === 255 || faith.get(i) === 255);
   }
   assert.ok(parent.faithYear.brokeAway >= believersBefore);
   // "A new people" from the declaration; the revolution is only won (or lost) at the war's end.
@@ -225,7 +237,7 @@ test('dissatisfied settlements stronger than their mother rise up as new peoples
   assert.ok(!moods(civ).includes(`Won its revolution ${MOOD_REVOLUTION_WON}`));
   assert.ok(!moods(parent).includes(`Lost a revolution ${MOOD_REVOLUTION_LOST}`));
   const entry = sim.chronicle.find((e) => e.text.endsWith(`became the ${civ.name}.`))!;
-  assert.ok(entry.text.startsWith('Rebellion: '), entry.text);
+  assert.ok(/^Rebellion( over faith)?: /.test(entry.text), entry.text);
   assert.ok(entry.text.includes(`rose up against the ${parent.name}`), entry.text);
   assert.equal(entry.cell, civ.capital);
   // The rebellion is a war of the mother against all rebel groups.
@@ -235,11 +247,12 @@ test('dissatisfied settlements stronger than their mother rise up as new peoples
   for (const r of rebels) assert.equal(sim.war.side[s * 256 + r.id], 1);
 });
 
-test('a lone dissatisfied settlement weaker than its mother does not rise up but loses people', () => {
+test('a lone unhappy settlement does not rise up (a bloc needs 2 settlements or 15 % of the realm) but loses people', () => {
   const sim = createSimulation(generateWorld({ seed: 5 }));
   runYears(sim, 150);
   // The base rule: without a leader's shift of the rebellion threshold (Weak Hand, Tyrant, Iron Fist).
   dismissLeaders(sim);
+  dismissFaithLayer(sim);
   const owner = cellOwners(sim);
   // A small settlement: its militia (2.5 % of its people) is weaker than the mother.
   const civ = sim.civs[owner[sim.world.startCell]]!;
@@ -256,7 +269,6 @@ test('a lone dissatisfied settlement weaker than its mother does not rise up but
   for (let q = 0; q < 16; q++) {
     sim.satisfaction[lone] = -100;
     sim.moodSet[lone] = 1;
-    assert.equal(measureRebellion(sim, civ.id), false, `rebels ${REBEL_CHECK.rebels}, mother ${REBEL_CHECK.mother}`);
     runQuarter(sim);
   }
   assert.ok(livingCivilizations(sim).every((c) => c.origin !== 'revolution'));

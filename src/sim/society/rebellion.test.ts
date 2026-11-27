@@ -9,10 +9,12 @@ import { Pact } from './pacts';
 import { MIL, TROOP_TYPES, Troop, updateMilitary } from './military';
 import { MOOD_NEW_PEOPLE, MOOD_REVOLUTION_LOST, MOOD_REVOLUTION_WON, addMood, cellOwners, hasSeat } from './satisfaction';
 import { TICKS_PER_YEAR, createSimulation, livingCivilizations, splitCutOffLand, stepSimulation, type Simulation } from './simulation';
-import { REBEL_CHECK, checkRebellion, continueRebellion, countRestless, inRebellion, isDissatisfied, measureRebellion, militiaOf, startRebellion } from './rebellion';
+import { REBEL_CHECK, continueRebellion, inRebellion, measureCells, militiaOf, prepareRebellionCells, startRebellion } from './rebellion';
+import { MANDATE } from './mandate';
 import { ArmyState, EndType, MAX_ARMIES, MAX_GOALS, WAR, advanceWar, disbandArmy, endWar, finishGathering, rallyPoint, runWarYear, startWar } from './war';
 
-// War phase 5 ("Design Documents/Requirement Krieg.md", section 8): uprisings as war.
+// War phase 5 ("Design Documents/Requirement Krieg.md", section 8): uprisings as war, declared at the end of a
+// Mandate countdown ("Requirement Mandat.md"; mandate.test.ts has loyalty, blocs and countdowns).
 
 const SEAT = BUILDINGS.findIndex((b) => b.good === Good.Seat);
 const MOTHER = 1;
@@ -27,7 +29,7 @@ function week(sim: Simulation): void {
   advanceWar(sim);
 }
 
-/** Seed 13 at year 200 (with dynamic biomes): no war yet; people 1 has its settlements in several road-joined groups around its capital. */
+/** Seed 13 at year 200 (with dynamic biomes, religions and the Mandate; seed 11 would do too): no war yet; people 1 has its settlements in several road-joined groups around its capital. */
 function grown(): Simulation {
   const sim = createSimulation(generateWorld({ seed: 13 }));
   runYears(sim, 200);
@@ -96,25 +98,7 @@ function disbandRebels(sim: Simulation, s: number): void {
   for (let a = 0; a < MAX_ARMIES; a++) if (w.live[a] && w.aWar[a] === s && w.side[s * PAIRS + w.aCiv[a]] === 1) disbandArmy(sim, a);
 }
 
-test('dissatisfied means satisfaction below 0 now: no years, no size, never the capital', () => {
-  const sim = grown();
-  const cap = sim.civs[MOTHER]!.capital;
-  const c = settledOf(sim, MOTHER).find((x) => x !== cap)!;
-  sim.unhappyQuarters[c] = 0;
-  sim.satisfaction[c] = -0.5;
-  assert.ok(isDissatisfied(sim, c, MOTHER));
-  sim.satisfaction[c] = 0;
-  assert.ok(!isDissatisfied(sim, c, MOTHER));
-  sim.satisfaction[cap] = -90;
-  assert.ok(!isDissatisfied(sim, cap, MOTHER));
-  // The yearly count: one settlement of the mother.
-  for (const x of settledOf(sim, MOTHER)) if (x !== cap) sim.satisfaction[x] = 10;
-  sim.satisfaction[c] = -1;
-  countRestless(sim);
-  assert.equal(sim.war.restless[MOTHER], 1);
-});
-
-test('the rebels rise when their soldiers plus 2.5 % militia outweigh the mother without those soldiers but with her pacts and alliances', () => {
+test('a countdown\'s end declares the rebellion in the war\'s year steps; the rebels\' strength is their soldiers plus 2.5 % militia, the mother\'s without them but with her pacts', () => {
   const sim = grown();
   const m = sim.military;
   const cap = sim.civs[MOTHER]!.capital;
@@ -136,29 +120,23 @@ test('the rebels rise when their soldiers plus 2.5 % militia outweigh the mother
   assert.equal(WAR.militia, 0.025);
   assert.ok(militia > 0);
   assert.equal(soldiers, 6 * MIL.factor + 4);
-  // The mother: her strength without the rebels' soldiers.
+  // The mother: her strength without the rebels' soldiers (it weighs the Mandate's outcome, Mandat 5.3).
   m.strength[MOTHER] = soldiers + soldiers + militia - 1;
-  assert.equal(measureRebellion(sim, MOTHER), true);
+  measureCells(sim, MOTHER, rebels);
   assert.equal(REBEL_CHECK.rebels, soldiers + militia);
   assert.equal(REBEL_CHECK.mother, soldiers + militia - 1);
-  // Equal is not enough.
-  m.strength[MOTHER] = soldiers + soldiers + militia;
-  assert.equal(measureRebellion(sim, MOTHER), false);
   // A pact partner counts for the mother.
-  m.strength[MOTHER] = soldiers + soldiers + militia - 1;
   const partner = 2;
   m.strength[partner] = 3;
   sim.war.pact[MOTHER * PAIRS + partner] = Pact.Pact;
   sim.war.pact[partner * PAIRS + MOTHER] = Pact.Pact;
   sim.war.pactCount++;
-  assert.equal(measureRebellion(sim, MOTHER), false);
+  measureCells(sim, MOTHER, rebels);
   assert.equal(REBEL_CHECK.mother, soldiers + militia + 2);
-  assert.equal(checkRebellion(sim, MOTHER), false);
-  // Without the pact: the rebellion begins.
-  sim.war.pact[MOTHER * PAIRS + partner] = Pact.None;
-  sim.war.pact[partner * PAIRS + MOTHER] = Pact.None;
-  sim.war.pactCount--;
-  assert.equal(checkRebellion(sim, MOTHER), true);
+  // No strength check any more: the countdown's end declares the rebellion whatever the strengths.
+  assert.equal(prepareRebellionCells(sim, MOTHER, rebels), true);
+  // A second one of the same realm cannot begin while this one is declared.
+  assert.equal(prepareRebellionCells(sim, MOTHER, rebels), false);
   // The declaration goes on in the next steps of the war's year: a people per group, the change of sides, the war.
   const groups = sim.war.rebelPicked;
   assert.ok(groups >= 1);
@@ -400,15 +378,10 @@ test('a people in a running rebellion (either side) sees no other rebellion', ()
   assert.ok(s2 >= 0);
   const rebel = sim.world.owner[groups[0][0]];
   assert.ok(inRebellion(sim, MOTHER) && inRebellion(sim, rebel));
-  // Everyone dissatisfied now, on both sides, and far stronger than anyone.
+  // Everyone dissatisfied now, on both sides: a countdown's end can't declare another rebellion of either.
   for (let c = 0; c < sim.world.cellCount; c++) sim.satisfaction[c] = -50;
-  sim.military.strength[MOTHER] = 0;
-  sim.military.strength[rebel] = 0;
-  countRestless(sim);
-  assert.equal(sim.war.restless[MOTHER], 0);
-  assert.equal(sim.war.restless[rebel], 0);
-  assert.equal(checkRebellion(sim, MOTHER), false);
-  assert.equal(checkRebellion(sim, rebel), false);
+  assert.equal(prepareRebellionCells(sim, MOTHER, settledOf(sim, MOTHER)), false);
+  assert.equal(prepareRebellionCells(sim, rebel, settledOf(sim, rebel)), false);
   assert.equal(startRebellion(sim, MOTHER, true), -1);
   // A mother in a rebellion declares no other war (she may be attacked: see the two-front test).
   assert.equal(sim.war.motherBusy[MOTHER], 1);
@@ -469,9 +442,12 @@ test('helpers stay out when the rebel side would still not be the stronger', () 
   assert.equal(sim.war.side[s * PAIRS + helper], -1);
 });
 
-test('rebellions come from the yearly check in the war’s year, one realm per step, and run the same for the same seed', () => {
+test('rebellions come from the Mandate in the war’s year (a countdown, then independence), one realm per step, and run the same for the same seed', () => {
   const run = () => {
     const sim = grown();
+    // Independence for sure at the countdown's end (no autonomy), to see the rebellion.
+    const saved = MANDATE.wAutonomy;
+    MANDATE.wAutonomy = 0;
     const cap = sim.civs[MOTHER]!.capital;
     const own = settledOf(sim, MOTHER).filter((c) => c !== cap);
     for (const c of own) {
@@ -479,7 +455,11 @@ test('rebellions come from the yearly check in the war’s year, one realm per s
       sim.moodSet[c] = 1;
     }
     addMood(sim.civs[MOTHER]!, 'Test hardship', -200, sim.tick);
-    runYears(sim, 30);
+    try {
+      runYears(sim, 30);
+    } finally {
+      MANDATE.wAutonomy = saved;
+    }
     const w = sim.war;
     return {
       chronicle: sim.chronicle.map((e) => `${e.tick} ${e.text}`).join('\n'),
@@ -492,7 +472,8 @@ test('rebellions come from the yearly check in the war’s year, one realm per s
   const a = run();
   const b = run();
   assert.ok(a.declared >= 1, 'a rebellion was declared');
-  assert.ok(a.chronicle.includes('Rebellion: '));
+  assert.ok(a.chronicle.includes('Unrest threatens to split the '));
+  assert.ok(/Rebellion( over faith)?: /.test(a.chronicle));
   assert.equal(a.chronicle, b.chronicle);
   assert.deepEqual(a.owner, b.owner);
   assert.equal(a.stats, b.stats);

@@ -38,7 +38,23 @@ export {
   type WarState,
 } from './society/war';
 export { ALLY, Pact } from './society/pacts';
-export { REBEL_CHECK, inRebellion, isDissatisfied, measureRebellion, startRebellion } from './society/rebellion';
+export { REBEL_CHECK, inRebellion, startRebellion } from './society/rebellion';
+export { MAXR, NO_RELIGION, RELIGION, THEMES, TRAITS, TRAIT_COUNT, Trait, stateFaith, type Religions } from './society/religion';
+export { BLOCS, MANDATE, type Mandate } from './society/mandate';
+export { vassalOf, vassalPair } from './society/vassals';
+export {
+  civFaith,
+  civMandate,
+  hexFaith,
+  hexLoyalty,
+  religionsOf,
+  type CivFaithInfo,
+  type CivMandate,
+  type FaithTraitInfo,
+  type HexFaith,
+  type HexLoyalty,
+  type ReligionInfo,
+} from './society/religionInfo';
 export { civPacts, formAlliance, pactBetween, type PactInfo } from './society/alliance';
 export { governmentOf, type District, type GovBuilding } from './society/government';
 export { leaderOf, leaderTrait, type LeaderGoal, type LeaderInfo, type LeaderProgress, type LeaderTrait } from './society/leaderInfo';
@@ -85,6 +101,7 @@ export {
   leaderEffects,
   nextPullPrice,
   peopleEffects,
+  religionAt,
   pullGacha,
   pullPrice,
   shiftedBiome,

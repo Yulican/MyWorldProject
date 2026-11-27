@@ -1,7 +1,7 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
-import { MIL, TROOP_BUILDING, armingWanted, districtPay, districtRoom, hasBuildingOf, pickMilitaryBuilding, prepareArming } from './military';
+import { armingWanted, districtPay, pickMilitaryBuilding, prepareArming } from './military';
 import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -26,6 +26,8 @@ export { GOV_TUNING };
 const TRADER_LOAD = 40;
 /** Weeks per hex a government trader travels (roads and rivers aside). */
 const WEEKS_PER_HEX = 1;
+/** Share of a vassal's seats' taxes that goes to its mother as tribute (Requirement Mandat 7). */
+export const TRIBUTE = 0.15;
 /** Years of upkeep a government building keeps in stock at its site; a project starts with one year less left after its cost. */
 const UPKEEP_RESERVE_YEARS = 3;
 /** Years a government building goes without upkeep before it falls to ruin. */
@@ -408,6 +410,12 @@ function levyTaxes(sim: Simulation, owner: Uint8Array, year: GovernmentYear, rec
     gov.goodsRate[s] = goodsRate;
   }
   // Taxes: money into the seat's treasury, goods from the settlements' surplus into its stock.
+  if (taxMoney.length !== n) {
+    taxMoney = new Float64Array(n);
+    taxGoods = new Float64Array(n * MATERIAL_COUNT);
+  }
+  taxMoney.fill(0);
+  taxGoods.fill(0);
   for (let c = 0; c < n; c++) {
     const s = gov.district[c];
     gov.cellRate[c] = s >= 0 ? gov.rate[s] : 0;
@@ -424,7 +432,59 @@ function levyTaxes(sim: Simulation, owner: Uint8Array, year: GovernmentYear, rec
         economy.stock[c * MATERIAL_COUNT + m] -= take;
         gov.stock[s * MATERIAL_COUNT + m] += take;
         gov.collectedGoods += take;
+        taxGoods[s * MATERIAL_COUNT + m] += take;
       }
+    }
+    taxMoney[s] += tax;
+  }
+  payTribute(sim, owner, isSeat);
+}
+
+/** This year's taxes per seat (money, and goods per material), for the tribute. */
+let taxMoney = new Float64Array(0);
+let taxGoods = new Float64Array(0);
+
+/**
+ * Tribute (Requirement Mandat 7): a vassal's seats give TRIBUTE of this year's taxes (money and goods) to the
+ * capital of its mother, halved while its treasuries hold less than a year's taxes; the money only beyond what
+ * a seat keeps for its soldiers' pay.
+ */
+function payTribute(sim: Simulation, owner: Uint8Array, isSeat: Uint8Array): void {
+  const gov = sim.government;
+  const md = sim.mandate;
+  const n = sim.world.cellCount;
+  md.tributePaid.fill(0);
+  md.tributeGot.fill(0);
+  let any = false;
+  for (let v = 1; v < md.vassalOf.length && !any; v++) if (md.vassalOf[v] >= 0 && sim.civs[v]) any = true;
+  if (any) {
+    // A year's taxes against the treasuries, per vassal.
+    const income = new Float64Array(256);
+    const cash = new Float64Array(256);
+    for (let s = 0; s < n; s++) if (isSeat[s]) {
+      income[owner[s]] += taxMoney[s];
+      cash[owner[s]] += gov.treasury[s];
+    }
+    for (let s = 0; s < n; s++) {
+      if (!isSeat[s]) continue;
+      const v = owner[s];
+      const mother = md.vassalOf[v];
+      const cap = mother > 0 ? sim.civs[mother]?.capital ?? -1 : -1;
+      if (mother < 0 || !sim.civs[v] || cap < 0 || cap === s) continue;
+      const share = TRIBUTE * (cash[v] < income[v] ? 0.5 : 1);
+      const money = Math.max(0, Math.min(share * taxMoney[s], gov.treasury[s] - gov.reserve[s]));
+      gov.treasury[s] -= money;
+      gov.treasury[cap] += money;
+      let value = money;
+      for (let m = 0; m < MATERIAL_COUNT; m++) {
+        const units = Math.min(share * taxGoods[s * MATERIAL_COUNT + m], gov.stock[s * MATERIAL_COUNT + m]);
+        gov.stock[s * MATERIAL_COUNT + m] -= units;
+        gov.stock[cap * MATERIAL_COUNT + m] += units;
+        value += units * PRICE[m];
+      }
+      md.tributePaid[v] += value;
+      md.tributeGot[mother] += value;
+      md.stats.tribute += value;
     }
   }
 }
@@ -641,8 +701,7 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
       }
     }
     // 3. Military (below loyalty, above growth): one building of each type per settlement.
-    const everyone = !seatOnly && MIL.everyPop > 0 && people >= MIL.everyPop && districtRoom(sim, seat) >= MIL.capacity && !TROOP_BUILDING.some((g) => hasBuildingOf(sim, c, g));
-    if ((arm || everyone) && bestScore < MILITARY_SCORE) {
+    if (arm && bestScore < MILITARY_SCORE) {
       const t = pickMilitaryBuilding(sim, c);
       if (t >= 0) {
         [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, MILITARY_SCORE];

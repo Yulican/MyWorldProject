@@ -238,6 +238,8 @@ export function resetLeaderCiv(sim: Simulation, civ: number): void {
   s.tradeCount[civ] = 0;
   s.declared[civ] = 0;
   s.uprisings[civ] = 0;
+  s.faith[civ] = 255;
+  s.faithDraw[civ] = 0;
   for (let b = 0; b < LEADER_CIVS; b++) {
     s.beaten[civ * LEADER_CIVS + b] = 0;
     s.beaten[b * LEADER_CIVS + civ] = 0;
@@ -424,6 +426,10 @@ function startLeader(sim: Simulation, civ: number, inherit: boolean, died: strin
   s.honed[civ] = 0;
   const surelyInherits = s.heirInherits[civ] === 1;
   s.heirInherits[civ] = 0;
+  // The faith (Requirement Anführer 6a): a first leader takes the capital's majority, a successor's is drawn
+  // (Dynasty's Heir: the predecessor's) by the yearly religion step (religion.ts updateLeaderFaith).
+  s.faithDraw[civ] = !inherit ? 3 : surelyInherits ? 2 : 1;
+  s.inheritedLast[civ] = 0;
   s.start[civ] = sim.tick;
   s.attr.fill(0, civ * ATTR_SLOTS, civ * ATTR_SLOTS + ATTR_SLOTS);
   s.goal[civ] = 0;
@@ -445,10 +451,13 @@ function startLeader(sim: Simulation, civ: number, inherit: boolean, died: strin
   if (preds > 0) {
     st.inheritChances++;
     // Dynasty's Heir: surely one of the predecessor's attributes (else 50 %).
-    if (surelyInherits || s.rng() < LEADER.inherit) {
+    if (surelyInherits || s.rng() < LEADER.inherit + s.lev[civ * LEVERS + L.inherit]) {
       first = pred[randInt(sim, preds)];
       if (REMOVED[first]) first = 0;
-      else st.inherited++;
+      else {
+        st.inherited++;
+        s.inheritedLast[civ] = 1;
+      }
     }
   }
   if (LEADER.forceAttr > 0) first = LEADER.forceAttr;

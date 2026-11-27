@@ -1,576 +1,528 @@
-import { DIRECTION_COUNT } from '../hex';
 import { createRng, deriveSeed, type Rng } from '../rng';
-import { mostPopulousCell, changeCiv, foundCivilization, type Simulation, TICKS_PER_YEAR } from './simulation';
-import { FAITH } from './faithHooks';
-import { ATTR_SLOTS, Ev, EVENTS, L, LEVERS } from './leaders';
-import { MAXR, CIVS, heresyFactor, religionOf } from './religion';
-import { startRebellionCells } from './rebellion';
+import type { World } from '../world/world';
 import { endPact, formAlliance } from './alliance';
-import { PAIRS } from './diplomacy';
-import { startWar } from './war';
-import { connectionValue } from './satisfaction';
+import { PAIRS, addMood } from './diplomacy';
+import { EVENTS, Ev, L, LEADER_CIVS, LEVERS } from './leaders';
+import { MAXR, heresyFactor, markFaithRebellion, stateFaith, within } from './religion';
+import { REBEL_CHECK, inRebellion, measureCells, prepareRebellionCells } from './rebellion';
+import { changeCiv, foundCivilization, mostPopulousCell, record, type Simulation } from './simulation';
+import { startRebelWar } from './war';
 
-// Mandate prototype (Requirement Mandat.md): loyalty per settlement, legitimacy per people, blocs with a countdown,
-// outcomes independence / vassal / reconciliation, vassals with tribute. Replaces the strength-check rebellion
-// (FAITH.mandate). Run yearly by tools/mandateStats.ts after the religion step. All numbers start values; own RNG "mandate".
+// The Mandate ("Design Documents/Requirement Mandat.md", frozen set "ab"): loyalty per settlement (reach, satisfaction,
+// faith/Heresy with the neighbors' gradient, the realm's legitimacy, garrison, grace, reconciliation), legitimacy per
+// people, restless blocs with a countdown of 5-10 years, outcomes independence (the rebel war, rebellion.ts / war.ts),
+// autonomy (a vassal: tribute in government.ts, permanent alliance, diplomacy through the mother in diplomacy.ts) or
+// reconciliation; vassals' ends. Replaces the strength check of the rebellion (Krieg 8).
+//
+// It runs in the war's year (war.ts runWarYearStep, one step each): first all loyalties (beginMandateYear), then one
+// realm per step with restless settlements, a countdown or as a vassal (mandateRealm). State is flat arrays in
+// `sim.mandate` (saved); random numbers only from its own sequence "mandate".
 
 export const MANDATE = {
-  enabled: 0,
   base: 50,
-  /** Reach: +reachNear at travel cost <= 1, linear to reachFar at cost >= 8. */
+  /** Reach: +reachNear at travel cost <= 1 to a seat, linear to reachFar from cost 8. */
   reachNear: 15,
   reachFar: -25,
+  /** Satisfaction part: weight, bounds. */
   satWeight: 0.5,
   satMin: -30,
   satMax: 15,
-  faithWeight: 30,
-  faithCap: -35,
+  /** Faith part (Heresy): -faithWeight x deviation (own x gradientOwn + the realm's settlements within gradientRadius), at most faithCap, moving at most faithStep a year. */
+  faithWeight: 45,
+  faithCap: -50,
+  faithStep: 5,
   gradientOwn: 0.7,
   gradientRadius: 3,
+  /** Garrison: per 1 % soldiers of the hex's people, at most. */
   garrisonPer1: 0.5,
   garrisonCap: 6,
-  /** Restless below threshold / lever rebel; calm again at threshold + hysteresis. Inertia: fall at most, rise at most. */
-  threshold: 25,
+  /** Restless below threshold / lever rebel, calm again at threshold + hysteresis; the loyalty falls at most `fall`, rises at most `rise` a year. */
+  threshold: 45,
   hysteresis: 10,
   fall: 6,
-  rise: 4,
-  ratio: 1,
+  rise: 2,
+  /** A bloc's countdown starts when its weight > ratio x the core's, ends in reconciliation at <= ratioEnd x that; bloc size; hexes that link restless settlements; blocs per realm. */
+  ratio: 0.5,
   ratioEnd: 0.8,
   blockMinSettlements: 2,
   blockMinShare: 0.15,
   link: 2,
+  blocsPerRealm: 8,
+  /** Countdown: countdownMin + a roll of 0..countdownRoll years. */
   countdownMin: 5,
   countdownRoll: 5,
-  /** Agitation: chance per restless neighbor and year, only if loyalty below `agitateBelow`, loyalty drop. */
+  /** Agitation: chance per restless neighbor (within 2 hexes) and year for a settlement below agitateBelow, its loyalty drop. */
   agitate: 0.2,
   agitateBelow: 45,
   agitateDrop: 8,
-  /** Outcome weights. */
+  /** Outcome weights: faith, legitimacy divisor, mother busy elsewhere, autonomy scale, mother at least 2x stronger. */
   wFaith: 2,
   wLegit: 10,
   wBusy: 0.5,
-  wAutonomy: 1,
-  /** Legitimacy: tenure, succession, age, wars, god. */
+  wAutonomy: 0.5,
+  wStrong: 0.5,
+  /** Legitimacy: tenure (+1 per tenureYears, at most), succession (an heir of the line: dynasty), old age, goal reached, wars, rebellions, the god. */
   tenureYears: 3,
   tenureMax: 6,
   succession: -8,
+  dynasty: -4,
+  successionFade: 0.9,
   oldAge: 60,
   oldPer: 0.2,
   oldMax: 4,
+  goal: 4,
   won: 6,
   lost: -10,
+  crushed: 4,
   independence: -8,
   autonomy: -3,
   reconcile: 2,
   decay: 0.93,
   worship: 3,
+  legitMax: 20,
+  /** Reconciliation: loyalty bonus, fading over reconcileYears. */
   reconcileBonus: 10,
-  /** Vassals: tribute, independence roll, re-integration (after reintegrateYears, chance, needs). */
+  reconcileYears: 10,
+  /** Decree of Grace: loyalty of all settlements once, fading over graceYears (the legitimacy is the god layer's, gacha.ts). */
+  grace: 6,
+  graceYears: 20,
+  /** Vassals: tribute share of the seats' taxes (halved when poor), groups per autonomy, independence roll and truce, peaceful when the mother's legitimacy <= weakLegit; re-integration after years, chance, needs. */
   tribute: 0.15,
   vassalMax: 3,
-  indep: 0.03,
+  indep: 0.015,
+  vassalTruce: 20,
+  weakLegit: -5,
+  leaveTrust: -10,
   reintegrate: 0.015,
-  reintegrateYears: 30,
+  reintegrateYears: 20,
   reintegrateLegit: 5,
-  reintegrateTrust: 70,
-  reintegrateShare: 0.4,
-  /** Vassal truce: years after its creation without independence. */
-  vassalTruce: 0,
-  /** A daughter faith with a majority in a settlement makes it restless; connected ones (2+) always count as a bloc (1 = on). */
-  heresyBloc: 0,
-  /** Leader faith (Anführer 6a, 0 = the state faith is the largest share): heir draw (capital share weight), predecessor bonus, conversion shares/chances, forced conversion after forceYears (0 = off) at forceShare, loyalty faith part moves at most faithStep a year (0 = off). */
-  leaderFaith: 0,
-  capWeight: 0.7,
-  predecessor: 1.5,
-  convertShare: 0.55,
-  opportunist: 0.03,
-  weakHand: 0.02,
-  forceYears: 0,
-  forceShare: 0.6,
-  faithStep: 0,
-  /** Scale on the satisfaction connection part while Mandate is on (reach is the new road term). */
-  connScale: 1,
+  reintegrateTrust: 60,
+  reintegrateShare: 0.7,
+  vassalTrust: 70,
 };
+// The satisfaction part "connection" counts x0.5 while the Mandate runs: satisfaction.ts CONNECTION_SCALE.
 
-type Stats = {
-  blocsFormed: number;
+const CIVS = LEADER_CIVS;
+const TICKS_PER_YEAR = 52;
+/** Countdown places. */
+export const BLOCS = 16;
+
+export type MandateStats = {
   countdowns: number;
+  faithCountdowns: number;
   independence: number;
+  faithIndependence: number;
   autonomy: number;
   reconcile: number;
   dissolved: number;
+  failedStart: number;
   countdownYears: number;
-  blocCells: number;
-  blocShare: number;
-  large: number;
-  small: number;
-  causes: number[];
-  causesStart: number[];
-  faithCountdowns: number;
-  faithIndependence: number;
+  agitations: number;
   vassalsMade: number;
-  vassalLife: number;
   vassalIndepPeace: number;
   vassalIndepWar: number;
   vassalReintegrated: number;
   vassalFreed: number;
+  vassalLife: number;
   tribute: number;
-  agitations: number;
-  failedStart: number;
-  stateSucc: number;
-  stateConv: number;
-  stateForced: number;
-  stateDeath: number;
-  stateToDaughter: number;
-  faithEnd: number[];
 };
 
-export type MandateState = {
-  sim: Simulation;
+export type Mandate = {
   rng: Rng;
+  /** Per hex: loyalty 0..100 of a settlement (-1 none / not yet), restless (1, hysteresis), its countdown (-1 none). */
   loyalty: Float32Array;
   restless: Uint8Array;
   blocId: Int8Array;
+  /** Per hex: the parts reach, satisfaction, faith, legitimacy of the last year (the faith part moves at most faithStep a year), the deviation from the state faith. */
+  parts: Float32Array;
+  dev: Float32Array;
+  /** Per hex: reconciliation and grace bonus (fading). */
   rec: Float32Array;
+  grace: Float32Array;
+  /** Per people: legitimacy, its event part (x decay a year) and succession part, the leader counters and goal seen last. */
   legit: Float32Array;
   legitEvents: Float32Array;
   succ: Float32Array;
   seenEv: Int32Array;
   seenCounter: Int32Array;
-  civObj: (object | null)[];
-  stateRel: Int16Array;
+  seenGoal: Int32Array;
+  /** Per people: restless settlements at the year's check. */
+  restlessCount: Uint16Array;
+  /** Per people: mother of a vassal (-1 none), year it became one, tribute paid and received this year (money value). */
   vassalOf: Int16Array;
   vassalSince: Int32Array;
-  vassalPrev: Float32Array;
-  succFlag: Uint8Array;
-  forced: Uint8Array;
-  warInfo: Map<number, { size: number; rel: number; serial: number }>;
-  faithWars: { size: number; rebelsWon: boolean; rel: number; serial: number }[];
-  forceCnt: Uint8Array;
-  /** Blocs (16 places): people, start year, countdown length, active. */
+  tributePaid: Float32Array;
+  tributeGot: Float32Array;
+  /** Countdowns: people, start year, length rolled, 1 while running, 1 when faith is the worst part. */
   blocCiv: Int16Array;
   blocStart: Int16Array;
   blocLen: Int16Array;
   blocActive: Uint8Array;
-  parts: Float32Array;
-  dev: Float32Array;
-  stats: Stats;
+  blocFaith: Uint8Array;
+  /** Increases whenever loyalties or countdowns change (the map). */
+  version: number;
+  stats: MandateStats;
 };
 
-let ACTIVE: MandateState | null = null;
-export const mandateOf = (sim: Simulation): MandateState | null => (ACTIVE !== null && ACTIVE.sim === sim ? ACTIVE : null);
-export const CAUSES = ['reach', 'satisfaction', 'faith', 'legitimacy'] as const;
-
-export function installMandate(sim: Simulation): MandateState {
-  const n = sim.world.cellCount;
-  const st: MandateState = {
-    sim,
-    rng: createRng(deriveSeed(sim.world.seed, 'mandate')),
+export function createMandate(world: World): Mandate {
+  const n = world.cellCount;
+  return {
+    rng: createRng(deriveSeed(world.seed, 'mandate')),
     loyalty: new Float32Array(n).fill(-1),
     restless: new Uint8Array(n),
     blocId: new Int8Array(n).fill(-1),
+    parts: new Float32Array(n * 4),
+    dev: new Float32Array(n),
     rec: new Float32Array(n),
+    grace: new Float32Array(n),
     legit: new Float32Array(CIVS),
     legitEvents: new Float32Array(CIVS),
     succ: new Float32Array(CIVS),
     seenEv: new Int32Array(CIVS * EVENTS),
     seenCounter: new Int32Array(CIVS),
-    civObj: new Array(CIVS).fill(null),
-    stateRel: new Int16Array(CIVS).fill(-1),
+    seenGoal: new Int32Array(CIVS),
+    restlessCount: new Uint16Array(CIVS),
     vassalOf: new Int16Array(CIVS).fill(-1),
     vassalSince: new Int32Array(CIVS),
-    vassalPrev: new Float32Array(n),
-    succFlag: new Uint8Array(CIVS),
-    forced: new Uint8Array(n),
-    warInfo: new Map(),
-    faithWars: [],
-    forceCnt: new Uint8Array(CIVS),
-    blocCiv: new Int16Array(16),
-    blocStart: new Int16Array(16),
-    blocLen: new Int16Array(16),
-    blocActive: new Uint8Array(16),
-    parts: new Float32Array(n * 4),
-    dev: new Float32Array(n),
+    tributePaid: new Float32Array(CIVS),
+    tributeGot: new Float32Array(CIVS),
+    blocCiv: new Int16Array(BLOCS),
+    blocStart: new Int16Array(BLOCS),
+    blocLen: new Int16Array(BLOCS),
+    blocActive: new Uint8Array(BLOCS),
+    blocFaith: new Uint8Array(BLOCS),
+    version: 0,
     stats: {
-      blocsFormed: 0, countdowns: 0, independence: 0, autonomy: 0, reconcile: 0, dissolved: 0, countdownYears: 0, blocCells: 0, blocShare: 0,
-      large: 0, small: 0, causes: [0, 0, 0, 0], causesStart: [0, 0, 0, 0], faithCountdowns: 0, faithIndependence: 0, vassalsMade: 0, vassalLife: 0,
-      vassalIndepPeace: 0, vassalIndepWar: 0, vassalReintegrated: 0, vassalFreed: 0, tribute: 0, agitations: 0, failedStart: 0, stateSucc: 0, stateConv: 0, stateForced: 0, stateDeath: 0, stateToDaughter: 0, faithEnd: [0, 0, 0, 0],
+      countdowns: 0, faithCountdowns: 0, independence: 0, faithIndependence: 0, autonomy: 0, reconcile: 0, dissolved: 0, failedStart: 0, countdownYears: 0,
+      agitations: 0, vassalsMade: 0, vassalIndepPeace: 0, vassalIndepWar: 0, vassalReintegrated: 0, vassalFreed: 0, vassalLife: 0, tribute: 0,
     },
   };
-  ACTIVE = st;
-  FAITH.mandate = true;
-  FAITH.vassal = st.vassalOf;
-  FAITH.loyalty = st.loyalty;
-  FAITH.stateRel = st.stateRel;
-  FAITH.connScale = MANDATE.connScale;
-  return st;
-}
-
-export function removeMandate(): void {
-  ACTIVE = null;
-  FAITH.mandate = false;
-  FAITH.vassal = null;
-  FAITH.loyalty = null;
-  FAITH.stateRel = null;
-  FAITH.connScale = 1;
 }
 
 const year = (sim: Simulation) => Math.floor(sim.tick / TICKS_PER_YEAR);
-const stamp = new Int32Array(0);
-let stampArr = stamp;
-let stampNow = 0;
 
-/** Legitimacy of every people (3). */
-function updateLegitimacy(st: MandateState): void {
-  const sim = st.sim;
+export { vassalOf, vassalPair } from './vassals';
+
+/** A people founded under id `civ` (also a reused one): no legitimacy events, not a vassal; vassals of an old people with that id are free. */
+export function resetMandateCiv(sim: Simulation, civ: number): void {
+  const m = sim.mandate;
+  if (civ <= 0 || civ >= CIVS) return;
+  m.legit[civ] = 0;
+  m.legitEvents[civ] = 0;
+  m.succ[civ] = 0;
+  for (let k = 0; k < EVENTS; k++) m.seenEv[civ * EVENTS + k] = sim.leaders.events[civ * EVENTS + k];
+  m.seenCounter[civ] = sim.leaders.counter[civ];
+  m.seenGoal[civ] = sim.leaders.goalTick[civ];
+  m.restlessCount[civ] = 0;
+  m.vassalOf[civ] = -1;
+  m.vassalSince[civ] = 0;
+  m.tributePaid[civ] = 0;
+  m.tributeGot[civ] = 0;
+  for (let v = 1; v < CIVS; v++) if (m.vassalOf[v] === civ) m.vassalOf[v] = -1;
+  for (let k = 0; k < BLOCS; k++) if (m.blocActive[k] && m.blocCiv[k] === civ) m.blocActive[k] = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Legitimacy and loyalty
+
+/** Legitimacy of every people (3): tenure, succession, age, goal, wars, the god. */
+function updateLegitimacy(sim: Simulation): void {
+  const m = sim.mandate;
+  const s = sim.leaders;
   for (let c = 1; c < CIVS && c < sim.civSlots; c++) {
-    const civ = sim.civs[c] ?? null;
-    if (civ !== st.civObj[c]) {
-      st.civObj[c] = civ;
-      st.legitEvents[c] = 0;
-      st.succ[c] = 0;
-      st.vassalOf[c] = -1;
-      st.stateRel[c] = -1;
-      for (let k = 0; k < EVENTS; k++) st.seenEv[c * EVENTS + k] = civ ? sim.leaders.events[c * EVENTS + k] : 0;
-      st.seenCounter[c] = civ ? sim.leaders.counter[c] : 0;
-    }
+    const civ = sim.civs[c];
     if (!civ) continue;
-    const won = sim.leaders.events[c * EVENTS + Ev.WarWon] - st.seenEv[c * EVENTS + Ev.WarWon];
-    const lost = sim.leaders.events[c * EVENTS + Ev.WarLost] - st.seenEv[c * EVENTS + Ev.WarLost];
-    for (let k = 0; k < EVENTS; k++) st.seenEv[c * EVENTS + k] = sim.leaders.events[c * EVENTS + k];
-    st.legitEvents[c] = st.legitEvents[c] * MANDATE.decay + (won > 0 ? MANDATE.won * won : 0) + (lost > 0 ? MANDATE.lost * lost : 0);
-    st.succFlag[c] = 0;
-    if (sim.leaders.counter[c] !== st.seenCounter[c]) {
-      if (st.seenCounter[c] !== 0) {
-        st.succ[c] = MANDATE.succession;
-        st.succFlag[c] = 1;
-      }
-      st.seenCounter[c] = sim.leaders.counter[c];
+    const won = s.events[c * EVENTS + Ev.WarWon] - m.seenEv[c * EVENTS + Ev.WarWon];
+    const lost = s.events[c * EVENTS + Ev.WarLost] - m.seenEv[c * EVENTS + Ev.WarLost];
+    for (let k = 0; k < EVENTS; k++) m.seenEv[c * EVENTS + k] = s.events[c * EVENTS + k];
+    let ev = m.legitEvents[c] * MANDATE.decay + (won > 0 ? MANDATE.won * won : 0) + (lost > 0 ? MANDATE.lost * lost : 0);
+    // The leader reached the goal (+4, fading like the events).
+    if (s.has[c] && s.goalDone[c] && s.goalTick[c] !== m.seenGoal[c]) ev += MANDATE.goal;
+    m.seenGoal[c] = s.goalTick[c];
+    m.legitEvents[c] = ev;
+    if (s.counter[c] !== m.seenCounter[c]) {
+      // A new leader (not a people's first): an heir who inherited from the predecessor costs less.
+      if (m.seenCounter[c] !== 0) m.succ[c] = s.inheritedLast[c] ? MANDATE.dynasty : MANDATE.succession;
+      m.seenCounter[c] = s.counter[c];
     }
-    st.succ[c] *= 0.9;
-    let v = st.legitEvents[c] + st.succ[c];
-    if (sim.leaders.has[c]) {
-      const years = (sim.tick - sim.leaders.start[c]) / TICKS_PER_YEAR;
+    m.succ[c] *= MANDATE.successionFade;
+    let v = ev + m.succ[c];
+    if (s.has[c]) {
+      const years = (sim.tick - s.start[c]) / TICKS_PER_YEAR;
       v += Math.min(MANDATE.tenureMax, Math.floor(years / MANDATE.tenureYears));
-      const age = sim.leaders.age0[c] + years;
+      const age = s.age0[c] + years;
       if (age > MANDATE.oldAge) v -= Math.min(MANDATE.oldMax, MANDATE.oldPer * (age - MANDATE.oldAge));
     }
     if (civ.worshipsPlayer) v += MANDATE.worship;
-    st.legit[c] = Math.max(-20, Math.min(20, v));
+    v += sim.gacha.godLegit[c];
+    m.legit[c] = Math.max(-MANDATE.legitMax, Math.min(MANDATE.legitMax, v));
   }
 }
 
-/** State religion of every people: the largest share, with a 5 point hysteresis. */
-function updateStateReligion(st: MandateState): void {
-  const rs = religionOf(st.sim);
-  if (rs === null) return;
-  for (let c = 1; c < CIVS; c++) {
-    let best = -1;
-    let bestS = 0;
-    for (let r = 0; r < MAXR; r++) if (rs.alive[r] && rs.share[c * MAXR + r] > bestS) {
-      bestS = rs.share[c * MAXR + r];
-      best = r;
-    }
-    const cur = st.stateRel[c];
-    if (cur >= 0 && rs.alive[cur] && best !== cur && rs.share[c * MAXR + cur] + 0.05 >= bestS) continue;
-    st.stateRel[c] = best;
-  }
-}
-
-/** Mean deviation of the realm's settlements within `radius` hexes of `c` (not c itself). */
-function nearMean(st: MandateState, c: number, owner: number, radius: number): number {
-  const sim = st.sim;
+/** Mean deviation of the realm's settlements within `radius` hexes of `c` (not c itself); `c`'s own without any. */
+function nearMean(sim: Simulation, c: number, owner: number, radius: number): number {
+  const m = sim.mandate;
   const w = sim.world;
-  if (stampArr.length !== w.cellCount) stampArr = new Int32Array(w.cellCount);
-  stampNow++;
-  let frontier = [c];
-  stampArr[c] = stampNow;
+  const near = within(w, c, radius);
   let sum = 0;
   let k = 0;
-  for (let r = 0; r < radius; r++) {
-    const next: number[] = [];
-    for (const a of frontier) {
-      for (let d = 0; d < DIRECTION_COUNT; d++) {
-        const x = w.neighbors[a * DIRECTION_COUNT + d];
-        if (x < 0 || stampArr[x] === stampNow) continue;
-        stampArr[x] = stampNow;
-        next.push(x);
-        if (w.owner[x] === owner && sim.cellPop[x] > 0) {
-          sum += st.dev[x];
-          k++;
-        }
-      }
+  for (let i = 0; i < near.length; i++) {
+    const x = near[i];
+    if (w.owner[x] === owner && sim.cellPop[x] > 0) {
+      sum += m.dev[x];
+      k++;
     }
-    frontier = next;
   }
-  return k > 0 ? sum / k : st.dev[c];
+  return k > 0 ? sum / k : m.dev[c];
 }
 
-/** Loyalty of every settlement (2): target from the parts, inertia, restless with hysteresis. */
-function updateLoyalty(st: MandateState): void {
-  const sim = st.sim;
+/** The reach part of a settlement at travel cost `cost` to its nearest seat. */
+export function reachValue(cost: number): number {
+  if (cost <= 1) return MANDATE.reachNear;
+  if (cost >= 8) return MANDATE.reachFar;
+  return MANDATE.reachNear + ((MANDATE.reachFar - MANDATE.reachNear) * (cost - 1)) / 7;
+}
+
+/** The garrison part of settlement `c`. */
+function garrisonValue(sim: Simulation, c: number): number {
+  let soldiers = 0;
+  for (let t = 0; t < 3; t++) soldiers += sim.military.soldiers[c * 3 + t];
+  return Math.min(MANDATE.garrisonCap, MANDATE.garrisonPer1 * ((100 * soldiers) / Math.max(1, sim.cellPop[c])));
+}
+
+/** The loyalty threshold below which a settlement of `civ` is restless. */
+export function restlessBelow(sim: Simulation, civ: number): number {
+  return MANDATE.threshold / sim.leaders.lev[civ * LEVERS + L.rebel];
+}
+
+const factorTmp = new Float64Array(CIVS);
+
+/** Loyalty of every settlement (2): the target from its parts, the inertia, restless with hysteresis. */
+function updateLoyalty(sim: Simulation): void {
+  const m = sim.mandate;
+  const rs = sim.religion;
   const w = sim.world;
   const n = w.cellCount;
-  const rs = religionOf(sim);
-  // Deviation: believers of other religions than the state's over the settlement's people.
+  // Deviation: believers of other religions than the state faith over the settlement's people.
   for (let c = 0; c < n; c++) {
-    st.dev[c] = 0;
+    m.dev[c] = 0;
     const o = w.owner[c];
     const people = sim.cellPop[c];
-    if (people === 0 || o === 0 || rs === null) continue;
-    const sr = st.stateRel[o];
+    if (people === 0 || o === 0) continue;
+    const sr = stateFaith(sim, o);
+    if (sr < 0) continue;
     let other = 0;
     for (let r = 0; r < MAXR; r++) if (r !== sr) other += rs.cellBel[c * MAXR + r];
-    st.dev[c] = other / people;
+    m.dev[c] = other / people;
   }
-  const factors = new Float64Array(CIVS).fill(-1);
+  factorTmp.fill(-1);
+  m.restlessCount.fill(0);
   for (let c = 0; c < n; c++) {
     const o = w.owner[c];
-    const people = sim.cellPop[c];
-    if (people === 0 || o === 0) {
-      st.loyalty[c] = -1;
-      st.restless[c] = 0;
+    if (sim.cellPop[c] === 0 || o === 0 || !sim.civs[o]) {
+      m.loyalty[c] = -1;
+      m.restless[c] = 0;
+      m.rec[c] = 0;
+      m.grace[c] = 0;
       continue;
     }
-    const civ = sim.civs[o];
-    if (!civ) continue;
+    const civ = sim.civs[o]!;
+    if (m.rec[c] > 0) m.rec[c] = Math.max(0, m.rec[c] - MANDATE.reconcileBonus / MANDATE.reconcileYears);
     if (civ.capital === c) {
-      st.loyalty[c] = 100;
-      st.restless[c] = 0;
-      st.parts.fill(0, c * 4, c * 4 + 4);
+      m.loyalty[c] = 100;
+      m.restless[c] = 0;
+      m.parts.fill(0, c * 4, c * 4 + 4);
       continue;
     }
-    const cost = sim.seatCost[c];
-    const reach = cost <= 1 ? MANDATE.reachNear : cost >= 8 ? MANDATE.reachFar : MANDATE.reachNear + ((MANDATE.reachFar - MANDATE.reachNear) * (cost - 1)) / 7;
+    const reach = reachValue(sim.seatCost[c]);
     const sat = Math.max(MANDATE.satMin, Math.min(MANDATE.satMax, MANDATE.satWeight * sim.satisfaction[c]));
-    let faith = 0;
-    if (rs !== null) {
-      if (factors[o] < 0) factors[o] = heresyFactor(rs, o);
-      const dev = MANDATE.gradientOwn * st.dev[c] + (1 - MANDATE.gradientOwn) * nearMean(st, c, o, MANDATE.gradientRadius);
-      faith = Math.max(MANDATE.faithCap, -MANDATE.faithWeight * dev * factors[o]);
-      if (MANDATE.faithStep > 0 && st.loyalty[c] >= 0) {
-        const prev = st.parts[c * 4 + 2];
-        faith = prev + Math.max(-MANDATE.faithStep, Math.min(MANDATE.faithStep, faith - prev));
-      }
+    if (factorTmp[o] < 0) factorTmp[o] = heresyFactor(sim, o);
+    const dev = MANDATE.gradientOwn * m.dev[c] + (1 - MANDATE.gradientOwn) * nearMean(sim, c, o, MANDATE.gradientRadius);
+    let faith = Math.max(MANDATE.faithCap, -MANDATE.faithWeight * dev * factorTmp[o]);
+    if (m.loyalty[c] >= 0) {
+      const prev = m.parts[c * 4 + 2];
+      faith = prev + Math.max(-MANDATE.faithStep, Math.min(MANDATE.faithStep, faith - prev));
     }
-    const legit = st.legit[o];
-    let soldiers = 0;
-    for (let t = 0; t < 3; t++) soldiers += sim.military.soldiers[c * 3 + t];
-    const garrison = Math.min(MANDATE.garrisonCap, MANDATE.garrisonPer1 * ((100 * soldiers) / people));
-    const T = Math.max(0, Math.min(100, MANDATE.base + reach + sat + faith + legit + garrison + st.rec[c]));
-    st.parts[c * 4] = reach;
-    st.parts[c * 4 + 1] = sat;
-    st.parts[c * 4 + 2] = faith;
-    st.parts[c * 4 + 3] = legit;
-    if (st.rec[c] > 0) st.rec[c] = Math.max(0, st.rec[c] - MANDATE.reconcileBonus / 10);
-    const cur = st.loyalty[c];
-    const L0 = cur < 0 ? T : cur + Math.max(-MANDATE.fall, Math.min(MANDATE.rise, T - cur));
-    st.loyalty[c] = L0;
-    const th = MANDATE.threshold / sim.leaders.lev[o * LEVERS + L.rebel];
-    if (st.restless[c]) st.restless[c] = L0 >= th + MANDATE.hysteresis ? 0 : 1;
-    else st.restless[c] = L0 < th ? 1 : 0;
-  }
-  // Heresy bloc rule: a daughter faith in the majority makes the settlement restless.
-  st.forced.fill(0);
-  if (MANDATE.heresyBloc && rs !== null) {
-    for (let c = 0; c < n; c++) {
-      const o = w.owner[c];
-      const people = sim.cellPop[c];
-      if (people === 0 || o === 0 || sim.civs[o]?.capital === c) continue;
-      for (let r = 1; r < MAXR; r++) {
-        if (rs.alive[r] && rs.parent[r] >= 0 && r !== st.stateRel[o] && rs.cellBel[c * MAXR + r] * 2 > people) {
-          st.forced[c] = 1;
-          st.restless[c] = 1;
-          break;
-        }
-      }
-    }
+    const legit = m.legit[o];
+    const T = Math.max(0, Math.min(100, MANDATE.base + reach + sat + faith + legit + garrisonValue(sim, c) + m.rec[c] + m.grace[c]));
+    m.parts[c * 4] = reach;
+    m.parts[c * 4 + 1] = sat;
+    m.parts[c * 4 + 2] = faith;
+    m.parts[c * 4 + 3] = legit;
+    if (m.grace[c] > 0) m.grace[c] = Math.max(0, m.grace[c] - MANDATE.grace / MANDATE.graceYears);
+    const cur = m.loyalty[c];
+    const now = cur < 0 ? T : cur + Math.max(-MANDATE.fall, Math.min(MANDATE.rise, T - cur));
+    m.loyalty[c] = now;
+    const th = restlessBelow(sim, o);
+    m.restless[c] = m.restless[c] ? (now >= th + MANDATE.hysteresis ? 0 : 1) : now < th ? 1 : 0;
+    if (m.restless[c] && m.restlessCount[o] < 65535) m.restlessCount[o]++;
   }
 }
 
-const near = (st: MandateState, c: number, link: number, out: number[]): void => {
-  const w = st.sim.world;
-  out.length = 0;
-  let frontier = [c];
-  const seen = new Set<number>([c]);
-  for (let r = 0; r < link; r++) {
-    const next: number[] = [];
-    for (const a of frontier) {
-      for (let d = 0; d < DIRECTION_COUNT; d++) {
-        const x = w.neighbors[a * DIRECTION_COUNT + d];
-        if (x < 0 || seen.has(x)) continue;
-        seen.add(x);
-        next.push(x);
-        out.push(x);
-      }
-    }
-    frontier = next;
-  }
-};
-
-/** Agitation (5.1): restless settlements pull their neighbors (the same people, within 2 hexes) down by chance. */
-function agitate(st: MandateState): void {
-  const sim = st.sim;
+/** Agitation (5.1): a restless settlement pulls its uneasy neighbors of the same realm (within 2 hexes) down by chance. */
+function agitate(sim: Simulation): void {
+  const m = sim.mandate;
   const w = sim.world;
   const hits: number[] = [];
-  const list: number[] = [];
   for (let c = 0; c < w.cellCount; c++) {
-    if (!st.restless[c]) continue;
-    near(st, c, 2, list);
-    for (const x of list) {
-      if (w.owner[x] === w.owner[c] && sim.cellPop[x] > 0 && st.loyalty[x] >= 0 && st.loyalty[x] < MANDATE.agitateBelow && !st.restless[x] && sim.civs[w.owner[x]]?.capital !== x && st.rng() < MANDATE.agitate) hits.push(x);
+    if (!m.restless[c]) continue;
+    const near = within(w, c, 2);
+    for (let i = 0; i < near.length; i++) {
+      const x = near[i];
+      if (w.owner[x] === w.owner[c] && sim.cellPop[x] > 0 && m.loyalty[x] >= 0 && m.loyalty[x] < MANDATE.agitateBelow && !m.restless[x] && sim.civs[w.owner[x]]?.capital !== x && m.rng() < MANDATE.agitate) hits.push(x);
     }
   }
   for (const x of hits) {
-    st.loyalty[x] = Math.max(0, st.loyalty[x] - MANDATE.agitateDrop);
-    st.stats.agitations++;
+    m.loyalty[x] = Math.max(0, m.loyalty[x] - MANDATE.agitateDrop);
+    m.stats.agitations++;
   }
 }
 
-type Bloc = { civ: number; cells: number[]; pop: number; wB: number };
-
-function components(st: MandateState): { blocs: Bloc[]; wK: Float64Array; realmPop: Float64Array } {
-  const sim = st.sim;
-  const w = sim.world;
-  const n = w.cellCount;
-  const wK = new Float64Array(CIVS);
-  const realmPop = new Float64Array(CIVS);
-  for (let c = 0; c < n; c++) {
-    const o = w.owner[c];
-    if (o === 0 || sim.cellPop[c] === 0 || st.loyalty[c] < 0) continue;
-    realmPop[o] += sim.cellPop[c];
-    if (!st.restless[c]) wK[o] += (sim.cellPop[c] * st.loyalty[c]) / 100;
+/**
+ * The war's year, first step (war.ts): legitimacy, every settlement's loyalty, agitation; marks in
+ * `sim.war.restless` the realms the next steps check (restless settlements, a countdown, a vassal).
+ */
+export function beginMandateYear(sim: Simulation): void {
+  const m = sim.mandate;
+  const w = sim.war;
+  updateLegitimacy(sim);
+  updateLoyalty(sim);
+  agitate(sim);
+  w.restless.fill(0);
+  for (let c = 1; c < CIVS && c < w.restless.length; c++) {
+    if (!sim.civs[c] && m.vassalOf[c] < 0) continue;
+    if (m.restlessCount[c] > 0 || m.vassalOf[c] >= 0) w.restless[c] = 1;
   }
-  const seen = new Uint8Array(n);
+  for (let k = 0; k < BLOCS; k++) if (m.blocActive[k] && m.blocCiv[k] < w.restless.length) w.restless[m.blocCiv[k]] = 1;
+  m.version++;
+}
+
+// ---------------------------------------------------------------------------
+// Blocs and countdowns (4), outcomes (6)
+
+type Bloc = { cells: number[]; pop: number; wB: number };
+
+/** The restless settlements of realm `civ` joined within MANDATE.link hexes, the largest first (at most blocsPerRealm); its core weight and people. */
+function realmBlocs(sim: Simulation, civ: number): { blocs: Bloc[]; wK: number; realmPop: number } {
+  const m = sim.mandate;
+  const w = sim.world;
+  let wK = 0;
+  let realmPop = 0;
+  const restless: number[] = [];
+  for (let c = 0; c < w.cellCount; c++) {
+    if (w.owner[c] !== civ || sim.cellPop[c] === 0 || m.loyalty[c] < 0) continue;
+    realmPop += sim.cellPop[c];
+    if (m.restless[c]) restless.push(c);
+    else wK += (sim.cellPop[c] * m.loyalty[c]) / 100;
+  }
   const blocs: Bloc[] = [];
-  const list: number[] = [];
-  for (let c = 0; c < n; c++) {
-    if (!st.restless[c] || seen[c]) continue;
-    const o = w.owner[c];
+  const seen = new Set<number>();
+  for (const c of restless) {
+    if (seen.has(c)) continue;
     const cells = [c];
-    seen[c] = 1;
+    seen.add(c);
     for (let k = 0; k < cells.length; k++) {
-      near(st, cells[k], MANDATE.link, list);
-      for (const x of list) if (!seen[x] && st.restless[x] && w.owner[x] === o) {
-        seen[x] = 1;
-        cells.push(x);
+      const near = within(w, cells[k], MANDATE.link);
+      for (let i = 0; i < near.length; i++) {
+        const x = near[i];
+        if (!seen.has(x) && m.restless[x] && w.owner[x] === civ && sim.cellPop[x] > 0) {
+          seen.add(x);
+          cells.push(x);
+        }
       }
     }
+    cells.sort((a, b) => a - b);
     let pop = 0;
     let wB = 0;
     for (const x of cells) {
       pop += sim.cellPop[x];
-      wB += (sim.cellPop[x] * (100 - st.loyalty[x])) / 100;
+      wB += (sim.cellPop[x] * (100 - m.loyalty[x])) / 100;
     }
-    blocs.push({ civ: o, cells, pop, wB });
+    blocs.push({ cells, pop, wB });
   }
-  blocs.sort((a, b) => b.pop - a.pop);
+  blocs.sort((a, b) => b.pop - a.pop || a.cells[0] - b.cells[0]);
+  if (blocs.length > MANDATE.blocsPerRealm) blocs.length = MANDATE.blocsPerRealm;
   return { blocs, wK, realmPop };
 }
 
-function mainCause(st: MandateState, cells: number[]): number {
+/** The worst part of the bloc's loyalty: 0 reach, 1 satisfaction, 2 faith, 3 legitimacy. */
+function mainCause(sim: Simulation, cells: readonly number[]): number {
+  const m = sim.mandate;
   const sum = [0, 0, 0, 0];
-  for (const c of cells) for (let k = 0; k < 4; k++) sum[k] += st.parts[c * 4 + k];
+  for (const c of cells) for (let k = 0; k < 4; k++) sum[k] += m.parts[c * 4 + k];
   let best = 0;
   for (let k = 1; k < 4; k++) if (sum[k] < sum[best]) best = k;
   return best;
 }
 
-function endBloc(st: MandateState, id: number, cells: number[], civ: number, wB: number, wK: number): void {
-  const sim = st.sim;
-  const s = st.stats;
-  const w = sim.world;
-  st.blocActive[id] = 0;
-  const y = year(sim);
-  s.countdownYears += y - st.blocStart[id];
-  const th = MANDATE.ratio * wK;
-  let forcedN = 0;
-  for (const c of cells) forcedN += st.forced[c];
-  const heresyBloc = MANDATE.heresyBloc === 1 && forcedN >= 2 && forcedN * 2 >= cells.length;
-  const faithBloc = mainCause(st, cells) === 2 || heresyBloc;
-  if ((wB <= th && !heresyBloc) || cells.length === 0) {
-    reconcile(st, cells, civ);
-    if (faithBloc) s.faithEnd[2]++;
+function reconcile(sim: Simulation, cells: readonly number[], civ: number): void {
+  const m = sim.mandate;
+  for (const c of cells) m.rec[c] = MANDATE.reconcileBonus;
+  m.legitEvents[civ] += MANDATE.reconcile;
+  m.stats.reconcile++;
+  const people = sim.civs[civ];
+  if (people && cells.length > 0) record(sim, `The unrest in the land of the ${people.name} calmed down.`, cells[0], false);
+}
+
+/** The daughter religion holding most of the bloc's settlements against the state faith, -1 if none. */
+function blocDaughter(sim: Simulation, cells: readonly number[], state: number): number {
+  const rs = sim.religion;
+  const count = new Int32Array(MAXR);
+  for (const c of cells) for (let r = 0; r < MAXR; r++) if (r !== state && rs.cellBel[c * MAXR + r] * 2 > sim.cellPop[c]) count[r]++;
+  let best = -1;
+  let bestN = 0;
+  for (let r = 0; r < MAXR; r++) if (count[r] > bestN) {
+    bestN = count[r];
+    best = r;
+  }
+  return best;
+}
+
+/** The countdown `id` of realm `civ` ends: reconciliation if the bloc weighs too little now, else independence or autonomy by the dice (5.3). */
+function endBloc(sim: Simulation, id: number, b: Bloc, civ: number, wK: number): void {
+  const m = sim.mandate;
+  const s = m.stats;
+  m.blocActive[id] = 0;
+  s.countdownYears += year(sim) - m.blocStart[id];
+  const faithBloc = mainCause(sim, b.cells) === 2;
+  if (b.wB <= MANDATE.ratio * wK || b.cells.length === 0) {
+    reconcile(sim, b.cells, civ);
     return;
   }
-  // Faith share of the bloc: settlements with a deviation over 50 %.
   let faithy = 0;
-  for (const c of cells) if (st.dev[c] > 0.5) faithy++;
-  const faithShare = faithy / Math.max(1, cells.length);
-  const legit = st.legit[civ];
-  const isVassal = st.vassalOf[civ] >= 0;
+  for (const c of b.cells) if (m.dev[c] > 0.5) faithy++;
+  const faithShare = faithy / Math.max(1, b.cells.length);
+  const legit = m.legit[civ];
+  const isVassal = m.vassalOf[civ] >= 0;
+  measureCells(sim, civ, b.cells);
+  const strong = REBEL_CHECK.mother >= 2 * REBEL_CHECK.rebels ? MANDATE.wStrong : 0;
   const wU = 1 + MANDATE.wFaith * faithShare + Math.max(0, -legit) / MANDATE.wLegit + (sim.war.enemy[civ] !== 0 ? MANDATE.wBusy : 0);
-  const wA = isVassal ? 0 : MANDATE.wAutonomy * (1 + Math.max(0, legit) / MANDATE.wLegit);
-  const pick = st.rng() * (wU + wA);
-  const realm = Math.max(1, st.sim.civs[civ] ? sim.civs[civ]!.territory : 1);
-  const share = cells.length / realm;
-  void w;
-  if (pick < wU) {
-    // Independence: the existing rebel war.
-    const rs = religionOf(sim);
-    const faithDriven = rs !== null && faithBloc;
-    let faithRel = -1;
-    if (rs !== null) {
-      rs.faithFlag[civ] = faithDriven ? 1 : 0;
-      if (faithDriven) {
-        const count = new Int32Array(MAXR);
-        for (const c of cells) for (let r = 0; r < MAXR; r++) if (r !== st.stateRel[civ] && rs.cellBel[c * MAXR + r] * 2 > sim.cellPop[c]) count[r]++;
-        let best = -1;
-        let bestN = 0;
-        for (let r = 0; r < MAXR; r++) if (count[r] > bestN) {
-          bestN = count[r];
-          best = r;
-        }
-        if (best >= 0) {
-          rs.rebelFaith[civ] = best + 1;
-          rs.rebelMother[civ] = st.stateRel[civ];
-          rs.stats.faithRebellions++;
-          if (!rs.herRebelled[best]) {
-            rs.herRebelled[best] = 1;
-            rs.stats.schismRebels++;
-          }
-          s.faithIndependence++;
-          faithRel = best;
-        }
-      }
-    }
-    const slot = startRebellionCells(sim, civ, cells);
-    if (rs !== null) rs.rebelFaith.fill(0);
-    if (slot < 0) {
+  const wA = isVassal ? 0 : MANDATE.wAutonomy * (1 + Math.max(0, legit) / MANDATE.wLegit + strong);
+  const state = stateFaith(sim, civ);
+  const daughter = faithBloc ? blocDaughter(sim, b.cells, state) : -1;
+  if (m.rng() * (wU + wA) < wU) {
+    // Independence: the rebel war (rebellion.ts, war.ts), over faith when Heresy is the worst part.
+    if (!prepareRebellionCells(sim, civ, b.cells)) {
       s.failedStart++;
-      reconcile(st, cells, civ);
+      reconcile(sim, b.cells, civ);
       return;
     }
     s.independence++;
-    if (faithBloc) s.faithEnd[0]++;
-    if (faithRel >= 0 && rs !== null) st.warInfo.set(slot, { size: cells.length, rel: faithRel, serial: rs.serial[faithRel] });
-    st.legitEvents[civ] += MANDATE.independence;
-    if (share >= 0.2) s.large++;
-    else s.small++;
-    s.blocCells += cells.length;
-    s.blocShare += share;
+    if (daughter >= 0) {
+      markFaithRebellion(sim, civ, daughter, state);
+      s.faithIndependence++;
+    }
+    m.legitEvents[civ] += MANDATE.independence;
     return;
   }
-  // Autonomy: up to vassalMax groups become vassals.
-  makeVassals(st, cells, civ);
+  makeVassals(sim, b.cells, civ, daughter);
   s.autonomy++;
-  if (faithBloc) s.faithEnd[1]++;
-  st.legitEvents[civ] += MANDATE.autonomy;
-  if (share >= 0.2) s.large++;
-  else s.small++;
-  s.blocCells += cells.length;
-  s.blocShare += share;
+  m.legitEvents[civ] += MANDATE.autonomy;
 }
 
-function reconcile(st: MandateState, cells: number[], civ: number): void {
-  for (const c of cells) st.rec[c] = MANDATE.reconcileBonus;
-  st.legitEvents[civ] += MANDATE.reconcile;
-  st.stats.reconcile++;
-}
-
-/** Splits the bloc into groups by adjacency; the largest become vassal peoples (peaceful, allied). */
-function makeVassals(st: MandateState, cells: number[], mother: number): void {
-  const sim = st.sim;
+/** Autonomy: the bloc splits into groups by adjacency; the largest MANDATE.vassalMax become vassal peoples of `mother` (peaceful, allied). */
+function makeVassals(sim: Simulation, cells: readonly number[], mother: number, daughter: number): void {
+  const m = sim.mandate;
   const w = sim.world;
   const inBloc = new Set(cells);
   const seen = new Set<number>();
@@ -580,8 +532,8 @@ function makeVassals(st: MandateState, cells: number[], mother: number): void {
     const g = [c];
     seen.add(c);
     for (let k = 0; k < g.length; k++) {
-      for (let d = 0; d < DIRECTION_COUNT; d++) {
-        const x = w.neighbors[g[k] * DIRECTION_COUNT + d];
+      for (let d = 0; d < 6; d++) {
+        const x = w.neighbors[g[k] * 6 + d];
         if (x >= 0 && inBloc.has(x) && !seen.has(x)) {
           seen.add(x);
           g.push(x);
@@ -590,8 +542,10 @@ function makeVassals(st: MandateState, cells: number[], mother: number): void {
     }
     groups.push(g);
   }
-  groups.sort((a, b) => b.length - a.length);
+  groups.sort((a, b) => b.length - a.length || a[0] - b[0]);
   const parent = sim.civs[mother]!;
+  const y = year(sim);
+  let made = false;
   for (const g of groups.slice(0, MANDATE.vassalMax)) {
     const mask = new Uint8Array(w.cellCount);
     for (const c of g) mask[c] = 1;
@@ -601,387 +555,231 @@ function makeVassals(st: MandateState, cells: number[], mother: number): void {
     if (!civ) continue;
     const pop = sim.pop;
     for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.civ[i] === mother && mask[pop.cell[i]]) changeCiv(sim, i, civ.id);
-    for (const c of g) w.owner[c] = civ.id;
-    st.vassalOf[civ.id] = mother;
-    st.vassalSince[civ.id] = year(sim);
-    st.civObj[civ.id] = civ;
-    st.stats.vassalsMade++;
-    formAlliance(sim, mother, civ.id);
-    for (const c of g) st.loyalty[c] = -1;
+    for (const c of g) {
+      w.owner[c] = civ.id;
+      m.loyalty[c] = -1;
+      m.restless[c] = 0;
+    }
+    makeVassal(sim, civ.id, mother, y);
+    m.stats.vassalsMade++;
+    made = true;
+    record(sim, `The ${civ.name} broke away from the ${parent.name} and became their vassal.`, capital, true);
+  }
+  if (made && daughter >= 0 && !sim.religion.herRebelled[daughter]) {
+    sim.religion.herRebelled[daughter] = 2;
+    sim.religion.stats.schismVassals++;
   }
 }
 
-/** The yearly vassal step: alliance, tribute, end rolls. */
-function vassalsYear(st: MandateState): void {
-  const sim = st.sim;
+/** `v` becomes a vassal of `mother` (Mandat 7): allied, a truce, trust 70 / danger 0 to begin with, known to each other. */
+export function makeVassal(sim: Simulation, v: number, mother: number, since = year(sim)): void {
+  const m = sim.mandate;
+  const dip = sim.diplomacy;
+  m.vassalOf[v] = mother;
+  m.vassalSince[v] = since;
+  formAlliance(sim, mother, v);
+  sim.war.truce[mother * PAIRS + v] = sim.tick + MANDATE.vassalTruce * TICKS_PER_YEAR;
+  sim.war.truce[v * PAIRS + mother] = sim.tick + MANDATE.vassalTruce * TICKS_PER_YEAR;
+  dip.maxId = Math.max(dip.maxId, v, mother);
+  dip.known[v * PAIRS + mother] = 1;
+  dip.known[mother * PAIRS + v] = 1;
+  dip.trust[v * PAIRS + mother] = MANDATE.vassalTrust;
+  dip.trust[mother * PAIRS + v] = MANDATE.vassalTrust;
+  dip.danger[v * PAIRS + mother] = 0;
+  dip.danger[mother * PAIRS + v] = 0;
+}
+
+/** Vassal `v` is free (`peaceful`: Mandat 7.1 with trust -10 and a truce; else silent: the mother is gone). */
+function freeVassal(sim: Simulation, v: number, peaceful: boolean): void {
+  const m = sim.mandate;
+  const mother = m.vassalOf[v];
+  m.vassalOf[v] = -1;
+  m.stats.vassalLife += year(sim) - m.vassalSince[v];
+  if (mother <= 0) return;
+  endPact(sim, mother, v);
+  if (!peaceful || !sim.civs[mother] || !sim.civs[v]) return;
+  addMood(sim.diplomacy, mother, v, 'Left our rule', MANDATE.leaveTrust, sim.tick);
+  addMood(sim.diplomacy, v, mother, 'Our former rulers', MANDATE.leaveTrust, sim.tick);
+  sim.war.truce[mother * PAIRS + v] = sim.tick + MANDATE.vassalTruce * TICKS_PER_YEAR;
+  sim.war.truce[v * PAIRS + mother] = sim.tick + MANDATE.vassalTruce * TICKS_PER_YEAR;
+  record(sim, `The ${sim.civs[v]!.name} are no longer vassals of the ${sim.civs[mother]!.name}.`, sim.civs[v]!.capital, true);
+}
+
+/** The yearly rolls of vassal `v` (Mandat 7): the mother gone, independence after the truce, re-integration. */
+function vassalYear(sim: Simulation, v: number): void {
+  const m = sim.mandate;
+  const mother = m.vassalOf[v];
+  const civ = sim.civs[v];
+  const y = year(sim);
+  if (!civ) {
+    m.vassalOf[v] = -1;
+    m.stats.vassalLife += y - m.vassalSince[v];
+    return;
+  }
+  const mom = sim.civs[mother];
+  if (!mom) {
+    freeVassal(sim, v, false);
+    m.stats.vassalFreed++;
+    return;
+  }
+  formAlliance(sim, mother, v);
+  const legit = m.legit[mother];
+  const strength = sim.military.strength;
+  const otherFaith = stateFaith(sim, v) !== stateFaith(sim, mother) ? 1 : 0;
+  const stronger = (strength[v] ?? 0) > (strength[mother] ?? 0) ? 1 : 0;
+  const pInd = MANDATE.indep * (1 + Math.max(0, -legit) / MANDATE.wLegit + otherFaith + stronger);
+  if (y - m.vassalSince[v] >= MANDATE.vassalTruce && m.rng() < pInd) {
+    const weak = legit <= MANDATE.weakLegit || (sim.war.enemy[mother] !== 0 && (strength[mother] ?? 0) < (strength[v] ?? 0));
+    const w = sim.war;
+    const busy = w.enemy[v] !== 0 || w.allyWarsOf[v] > 0 || w.rebelMother[v] !== 0 || inRebellion(sim, mother) || inRebellion(sim, v) || civ.capital < 0;
+    if (weak || busy) {
+      freeVassal(sim, v, true);
+      m.stats.vassalIndepPeace++;
+    } else {
+      // The vassal rises as a rebel people (the rebel war, its settlements as they are).
+      m.vassalOf[v] = -1;
+      m.stats.vassalLife += y - m.vassalSince[v];
+      endPact(sim, mother, v);
+      w.truce[mother * PAIRS + v] = 0;
+      w.truce[v * PAIRS + mother] = 0;
+      const s = startRebelWar(sim, mother, Int32Array.of(v), Int32Array.of(civ.capital), 1, true);
+      if (s >= 0) record(sim, `The ${civ.name} rose against their rulers, the ${mom.name}.`, civ.capital, true);
+      m.stats.vassalIndepWar++;
+    }
+    m.legitEvents[mother] += MANDATE.independence;
+    return;
+  }
+  if (y - m.vassalSince[v] >= MANDATE.reintegrateYears && m.rng() < MANDATE.reintegrate) {
+    if (legit >= MANDATE.reintegrateLegit && sim.diplomacy.trust[v * PAIRS + mother] >= MANDATE.reintegrateTrust && civ.population <= MANDATE.reintegrateShare * mom.population) reintegrate(sim, v, mother);
+  }
+}
+
+/** Vassal `v` goes back into `mother` (Mandat 7.2): its settlements, people, treasuries and stocks; its leader ends. */
+function reintegrate(sim: Simulation, v: number, mother: number): void {
+  const m = sim.mandate;
+  const w = sim.world;
+  const pop = sim.pop;
+  const name = sim.civs[v]!.name;
+  for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.civ[i] === v) changeCiv(sim, i, mother);
+  for (let c = 0; c < w.cellCount; c++) if (w.owner[c] === v) {
+    w.owner[c] = mother;
+    m.loyalty[c] = -1;
+    m.restless[c] = 0;
+  }
+  m.vassalOf[v] = -1;
+  m.stats.vassalReintegrated++;
+  m.stats.vassalLife += year(sim) - m.vassalSince[v];
+  endPact(sim, mother, v);
+  sim.civs[v] = null;
+  record(sim, `The ${name} rejoined the ${sim.civs[mother]!.name}.`, sim.civs[mother]!.capital, false);
+}
+
+/** The war's year, one realm (war.ts, after beginMandateYear): its blocs and countdowns, then its rolls as a vassal. */
+export function mandateRealm(sim: Simulation, civ: number): void {
+  const m = sim.mandate;
   const w = sim.world;
   const y = year(sim);
-  const s = st.stats;
-  for (let v = 1; v < CIVS && v < sim.civSlots; v++) {
-    const m = st.vassalOf[v];
-    if (m < 0) continue;
-    const civ = sim.civs[v];
-    if (!civ) {
-      st.vassalOf[v] = -1;
-      s.vassalLife += y - st.vassalSince[v];
-      continue;
-    }
-    if (!sim.civs[m]) {
-      st.vassalOf[v] = -1;
-      s.vassalFreed++;
-      s.vassalLife += y - st.vassalSince[v];
-      continue;
-    }
-    formAlliance(sim, m, v);
-    // Tribute: a share of the treasuries' yearly gain, halved when poor.
-    let gain = 0;
-    let total = 0;
-    for (let c = 0; c < w.cellCount; c++) {
-      if (w.owner[c] !== v) continue;
-      const t = sim.government.treasury[c];
-      total += t;
-      gain += Math.max(0, t - st.vassalPrev[c]);
-    }
-    const poor = total < gain;
-    const pay = MANDATE.tribute * gain * (poor ? 0.5 : 1);
-    if (pay > 0 && total > 0 && sim.civs[m]!.capital >= 0) {
-      for (let c = 0; c < w.cellCount; c++) if (w.owner[c] === v) sim.government.treasury[c] -= (sim.government.treasury[c] / total) * Math.min(pay, total);
-      sim.government.treasury[sim.civs[m]!.capital] += Math.min(pay, total);
-      s.tribute += Math.min(pay, total);
-    }
-    for (let c = 0; c < w.cellCount; c++) if (w.owner[c] === v) st.vassalPrev[c] = sim.government.treasury[c];
-    const legit = st.legit[m];
-    const strength = sim.military.strength;
-    const rs = religionOf(sim);
-    const otherFaith = rs !== null && st.stateRel[v] !== st.stateRel[m] ? 1 : 0;
-    const stronger = (strength[v] ?? 0) > (strength[m] ?? 0) ? 1 : 0;
-    const pInd = MANDATE.indep * (1 + Math.max(0, -legit) / 10 + otherFaith + stronger);
-    if (y - st.vassalSince[v] >= MANDATE.vassalTruce && st.rng() < pInd) {
-      const weak = legit <= -5 || (sim.war.enemy[m] !== 0 && (strength[m] ?? 0) < (strength[v] ?? 0));
-      st.vassalOf[v] = -1;
-      s.vassalLife += y - st.vassalSince[v];
-      endPact(sim, m, v);
-      if (weak) s.vassalIndepPeace++;
-      else {
-        s.vassalIndepWar++;
-        if (civ.capital >= 0) startWar(sim, m, civ.capital);
-      }
-      st.legitEvents[m] += MANDATE.independence;
-      continue;
-    }
-    if (y - st.vassalSince[v] >= MANDATE.reintegrateYears && st.rng() < MANDATE.reintegrate) {
-      const popV = civ.population;
-      const popM = sim.civs[m]!.population;
-      if (legit >= MANDATE.reintegrateLegit && sim.diplomacy.trust[v * PAIRS + m] >= MANDATE.reintegrateTrust && popV < MANDATE.reintegrateShare * popM) {
-        const pop = sim.pop;
-        for (let i = 0; i < pop.end; i++) if (pop.alive[i] && pop.civ[i] === v) changeCiv(sim, i, m);
-        for (let c = 0; c < w.cellCount; c++) if (w.owner[c] === v) {
-          w.owner[c] = m;
-          st.loyalty[c] = -1;
-        }
-        st.vassalOf[v] = -1;
-        s.vassalReintegrated++;
-        s.vassalLife += y - st.vassalSince[v];
-      }
-    }
-  }
-}
-
-/** State faith = the leader's faith (Anführer 6a): heir draw, conversion in office, death of the faith, forced conversion variant. */
-function updateLeaderFaith(st: MandateState): void {
-  const sim = st.sim;
-  const rs = religionOf(sim);
-  if (rs === null) return;
-  const s = st.stats;
-  for (let c = 1; c < CIVS && c < sim.civSlots; c++) {
-    const civ = sim.civs[c];
-    if (!civ) continue;
-    const cap = civ.capital;
-    const capPop = cap >= 0 ? sim.cellPop[cap] : 0;
-    const capShare = (r: number) => (capPop > 0 ? rs.cellBel[cap * MAXR + r] / capPop : 0);
-    let capMajor = -1;
-    let best = 0;
-    for (let r = 0; r < MAXR; r++) {
-      if (!rs.alive[r]) continue;
-      const v = capPop > 0 ? capShare(r) : rs.share[c * MAXR + r];
-      if (v > best) {
-        best = v;
-        capMajor = r;
-      }
-    }
-    const cur = st.stateRel[c];
-    const set = (r: number, cause: number) => {
-      if (r === cur) return;
-      st.stateRel[c] = r;
-      if (cause === 1) s.stateSucc++;
-      else if (cause === 2) s.stateConv++;
-      else if (cause === 4) s.stateForced++;
-      else if (cause === 3) s.stateDeath++;
-      if (cause !== 0 && r >= 0 && rs.parent[r] >= 0) {
-        s.stateToDaughter++;
-        if (rs.wonBy[r] === 0) {
-          rs.wonBy[r] = cause === 3 ? 1 : cause;
-          rs.stats.dWon[cause === 3 ? 1 : cause]++;
+  if (sim.civs[civ]) {
+    const { blocs, wK, realmPop } = realmBlocs(sim, civ);
+    const used = new Uint8Array(BLOCS);
+    // The settlements' countdowns from the last check (blocId) find a bloc's countdown again; the new ones afterwards.
+    const next: number[] = [];
+    for (const b of blocs) {
+      const big = b.cells.length >= MANDATE.blockMinSettlements || b.pop >= MANDATE.blockMinShare * realmPop;
+      let id = -1;
+      let best = 0;
+      for (let k = 0; k < BLOCS; k++) {
+        if (!m.blocActive[k] || used[k] || m.blocCiv[k] !== civ) continue;
+        let v = 0;
+        for (const c of b.cells) if (m.blocId[c] === k) v++;
+        if (v > best) {
+          best = v;
+          id = k;
         }
       }
-    };
-    if (cur < 0) {
-      st.stateRel[c] = capMajor;
-      continue;
-    }
-    if (!rs.alive[cur]) {
-      set(capMajor, 3);
-      continue;
-    }
-    if (st.succFlag[c]) {
-      let total = 0;
-      const w = new Float64Array(MAXR);
-      for (let r = 0; r < MAXR; r++) {
-        if (!rs.alive[r]) continue;
-        w[r] = (MANDATE.capWeight * capShare(r) + (1 - MANDATE.capWeight) * rs.share[c * MAXR + r]) * (r === cur ? MANDATE.predecessor : 1);
-        total += w[r];
-      }
-      if (total > 0) {
-        let pick = st.rng() * total;
-        for (let r = 0; r < MAXR; r++) {
-          pick -= w[r];
-          if (pick <= 0 && w[r] > 0) {
-            set(r, 1);
-            break;
-          }
-        }
-      }
-      continue;
-    }
-    // In office: a rival faith with a majority of the capital.
-    let rival = -1;
-    for (let r = 0; r < MAXR; r++) if (rs.alive[r] && r !== cur && capShare(r) >= MANDATE.convertShare) rival = r;
-    let never = false;
-    let flexible = 0;
-    for (let k = 0; k < ATTR_SLOTS; k++) {
-      const a = sim.leaders.attr[c * ATTR_SLOTS + k];
-      if (a === 24 || a === 4 || a === 22 || a === 21) never = true;
-      else if (a === 10) flexible = Math.max(flexible, MANDATE.opportunist);
-      else if (a === 23) flexible = Math.max(flexible, MANDATE.weakHand);
-    }
-    if (rival >= 0 && !never && flexible > 0 && st.rng() < flexible) {
-      set(rival, 2);
-      st.forceCnt[c] = 0;
-      continue;
-    }
-    if (MANDATE.forceYears > 0) {
-      let hard = -1;
-      for (let r = 0; r < MAXR; r++) if (rs.alive[r] && r !== cur && capShare(r) >= MANDATE.forceShare) hard = r;
-      st.forceCnt[c] = hard >= 0 ? Math.min(255, st.forceCnt[c] + 1) : 0;
-      if (hard >= 0 && st.forceCnt[c] >= MANDATE.forceYears) {
-        set(hard, 4);
-        st.forceCnt[c] = 0;
-      }
-    }
-  }
-}
-
-/** The tool's hook at the end of a rebel war: faith wars are kept with their bloc size, a won war makes the heresy "won by rebellion". */
-export function recordFaithWar(sim: Simulation, slot: number, rebelsWon: boolean): void {
-  const st = ACTIVE;
-  if (st === null || st.sim !== sim) return;
-  const info = st.warInfo.get(slot);
-  if (!info) return;
-  st.warInfo.delete(slot);
-  st.faithWars.push({ size: info.size, rebelsWon, rel: info.rel, serial: info.serial });
-  const rs = religionOf(sim);
-  if (rebelsWon && rs !== null && rs.serial[info.rel] === info.serial && rs.wonBy[info.rel] === 0 && rs.parent[info.rel] >= 0) {
-    rs.wonBy[info.rel] = 3;
-    rs.stats.dWon[3]++;
-  }
-}
-
-/** The yearly Mandate step (call after the religion step, at the year's end). */
-export function mandateYear(sim: Simulation): void {
-  const st = ACTIVE;
-  if (st === null || st.sim !== sim || !MANDATE.enabled) return;
-  const y = year(sim);
-  updateLegitimacy(st);
-  if (MANDATE.leaderFaith) updateLeaderFaith(st);
-  else updateStateReligion(st);
-  updateLoyalty(st);
-  agitate(st);
-  const { blocs, wK, realmPop } = components(st);
-  const s = st.stats;
-  const used = new Set<number>();
-  const newId = new Int8Array(sim.world.cellCount).fill(-1);
-  for (const b of blocs) {
-    const big = b.cells.length >= MANDATE.blockMinSettlements || b.pop >= MANDATE.blockMinShare * realmPop[b.civ];
-    // An existing countdown on these settlements (the most overlapped).
-    const votes = new Map<number, number>();
-    for (const c of b.cells) if (st.blocId[c] >= 0) votes.set(st.blocId[c], (votes.get(st.blocId[c]) ?? 0) + 1);
-    let id = -1;
-    let best = 0;
-    for (const [k, v] of votes) if (v > best && !used.has(k) && st.blocActive[k] && st.blocCiv[k] === b.civ) {
-      best = v;
-      id = k;
-    }
-    let forcedN = 0;
-    for (const c of b.cells) forcedN += st.forced[c];
-    const heavy = b.wB > MANDATE.ratio * wK[b.civ] || (MANDATE.heresyBloc === 1 && forcedN >= 2 && forcedN * 2 >= b.cells.length);
-    if (id < 0) {
-      if (!big) continue;
-      if (st.blocId.length > 0) s.blocsFormed++;
-      if (!heavy) continue;
-      for (let k = 0; k < 16 && id < 0; k++) if (!st.blocActive[k]) id = k;
-      if (id < 0) continue;
-      st.blocActive[id] = 1;
-      st.blocCiv[id] = b.civ;
-      st.blocStart[id] = y;
-      st.blocLen[id] = MANDATE.countdownMin + Math.floor(st.rng() * (MANDATE.countdownRoll + 1));
-      s.countdowns++;
-      const cause = mainCause(st, b.cells);
-      s.causesStart[cause]++;
-      if (cause === 2) s.faithCountdowns++;
-      used.add(id);
-      for (const c of b.cells) newId[c] = id;
-      continue;
-    }
-    used.add(id);
-    for (const c of b.cells) newId[c] = id;
-    if (b.wB <= MANDATE.ratioEnd * MANDATE.ratio * wK[b.civ]) {
-      st.blocActive[id] = 0;
-      s.countdownYears += y - st.blocStart[id];
-      if (forcedN < 2) reconcile(st, b.cells, b.civ);
-      else {
-        st.blocActive[id] = 1;
+      const heavy = b.wB > MANDATE.ratio * wK;
+      if (id < 0) {
+        if (!big || !heavy) continue;
+        for (let k = 0; k < BLOCS && id < 0; k++) if (!m.blocActive[k]) id = k;
+        if (id < 0) continue;
+        m.blocActive[id] = 1;
+        m.blocCiv[id] = civ;
+        m.blocStart[id] = y;
+        m.blocLen[id] = MANDATE.countdownMin + Math.floor(m.rng() * (MANDATE.countdownRoll + 1));
+        const faith = mainCause(sim, b.cells) === 2;
+        m.blocFaith[id] = faith ? 1 : 0;
+        m.stats.countdowns++;
+        if (faith) m.stats.faithCountdowns++;
+        used[id] = 1;
+        for (const c of b.cells) next.push(c, id);
+        record(sim, `Unrest threatens to split the ${sim.civs[civ]!.name}.`, b.cells[0], true);
         continue;
       }
-      for (const c of b.cells) newId[c] = -1;
-      continue;
+      used[id] = 1;
+      m.blocFaith[id] = mainCause(sim, b.cells) === 2 ? 1 : 0;
+      if (b.wB <= MANDATE.ratioEnd * MANDATE.ratio * wK) {
+        m.blocActive[id] = 0;
+        m.stats.countdownYears += y - m.blocStart[id];
+        reconcile(sim, b.cells, civ);
+        continue;
+      }
+      if (y - m.blocStart[id] >= m.blocLen[id]) {
+        endBloc(sim, id, b, civ, wK);
+        continue;
+      }
+      for (const c of b.cells) next.push(c, id);
     }
-    if (y - st.blocStart[id] >= st.blocLen[id]) {
-      endBloc(st, id, b.cells, b.civ, b.wB, wK[b.civ]);
-      for (const c of b.cells) newId[c] = -1;
+    // Countdowns whose bloc vanished dissolve.
+    for (let k = 0; k < BLOCS; k++) if (m.blocActive[k] && m.blocCiv[k] === civ && !used[k]) {
+      m.blocActive[k] = 0;
+      m.stats.dissolved++;
+      m.stats.countdownYears += y - m.blocStart[k];
     }
-  }
-  // Countdowns whose block vanished dissolve.
-  for (let k = 0; k < 16; k++) if (st.blocActive[k] && !used.has(k)) {
-    st.blocActive[k] = 0;
-    s.dissolved++;
-    s.countdownYears += y - st.blocStart[k];
-  }
-  st.blocId.set(newId);
-  vassalsYear(st);
-  void connectionValue;
+    for (let c = 0; c < w.cellCount; c++) if (w.owner[c] === civ) m.blocId[c] = -1;
+    for (let i = 0; i < next.length; i += 2) if (w.owner[next[i]] === civ) m.blocId[next[i]] = next[i + 1];
+  } else for (let k = 0; k < BLOCS; k++) if (m.blocActive[k] && m.blocCiv[k] === civ) m.blocActive[k] = 0;
+  // As a vassal (no new rebel war while a rebellion is being declared).
+  if (m.vassalOf[civ] >= 0 && sim.war.rebelStage === 0) vassalYear(sim, civ);
+  m.version++;
 }
 
-function faithWarRows(st: MandateState): Record<string, number> {
-  const rs = religionOf(st.sim);
-  const won = st.faithWars.filter((w) => w.rebelsWon);
-  const lost = st.faithWars.filter((w) => !w.rebelsWon);
-  const mean = (a: { size: number }[]) => (a.length ? a.reduce((x, w) => x + w.size, 0) / a.length : 0);
-  let died = 0;
-  let smoulder = 0;
-  let wonLater = 0;
-  if (rs !== null) {
-    for (const w of lost) {
-      if (!rs.alive[w.rel] || rs.serial[w.rel] !== w.serial) died++;
-      else if (rs.wonBy[w.rel] > 0) wonLater++;
-      else smoulder++;
-    }
-  }
-  return {
-    'faith wars ended: rebels won': won.length,
-    'faith wars ended: mother won (crushed)': lost.length,
-    'faith wars: bloc size, rebels won (mean settlements)': mean(won),
-    'faith wars: bloc size, crushed (mean settlements)': mean(lost),
-    'crushed heresies: died': died,
-    'crushed heresies: smouldering (alive)': smoulder,
-    'crushed heresies: won later': wonLater,
-  };
+/** A rebel war of `mother` ended (war.ts endRebelWar): crushed or the rebels gave up gives legitimacy (3). */
+export function rebellionEnded(sim: Simulation, mother: number, crushed: boolean): void {
+  if (crushed && mother > 0 && mother < CIVS) sim.mandate.legitEvents[mother] += MANDATE.crushed;
 }
 
-/** Numbers for the tool at a checkpoint: loyalty spread, restless share, main causes, double counting of the road distance. */
-export function mandateSnapshot(st: MandateState): Record<string, number> {
-  const sim = st.sim;
+/** Decree of Grace (Mandat 9) on people `civ`: every settlement's loyalty +6 once, fading (the legitimacy +10 is the god layer's). */
+export function decreeOfGrace(sim: Simulation, civ: number): void {
+  const m = sim.mandate;
   const w = sim.world;
-  let n = 0;
-  let sum = 0;
-  let restless = 0;
-  const causes = [0, 0, 0, 0];
-  let both = 0;
-  let conn = 0;
-  let reachSum = 0;
-  let satTermSum = 0;
-  let activeBlocs = 0;
   for (let c = 0; c < w.cellCount; c++) {
-    if (st.loyalty[c] < 0 || sim.cellPop[c] === 0) continue;
-    const o = w.owner[c];
-    if (sim.civs[o]?.capital === c) continue;
-    n++;
-    sum += st.loyalty[c];
-    reachSum += st.parts[c * 4];
-    const cv = connectionValue(sim.seatCost[c]);
-    satTermSum += cv;
-    if (st.restless[c]) {
-      restless++;
-      let best = 0;
-      for (let k = 1; k < 4; k++) if (st.parts[c * 4 + k] < st.parts[c * 4 + best]) best = k;
-      causes[best]++;
-      if (cv <= -5 && st.parts[c * 4] <= -10) both++;
-      if (cv <= -5) conn++;
-    }
+    if (w.owner[c] !== civ || sim.cellPop[c] === 0) continue;
+    m.grace[c] = MANDATE.grace;
+    if (m.loyalty[c] >= 0 && sim.civs[civ]?.capital !== c) m.loyalty[c] = Math.min(100, m.loyalty[c] + MANDATE.grace);
   }
-  for (let k = 0; k < 16; k++) activeBlocs += st.blocActive[k];
-  let vassals = 0;
-  for (let c = 1; c < CIVS; c++) if (st.vassalOf[c] >= 0 && sim.civs[c]) vassals++;
-  const s = st.stats;
-  const end = s.independence + s.autonomy;
+  m.version++;
+}
+
+/** Whether people `civ` has a restless settlement or a countdown (Decree of Grace's target). */
+export function hasUnrest(sim: Simulation, civ: number): boolean {
+  const m = sim.mandate;
+  if (civ <= 0 || civ >= CIVS) return false;
+  for (let k = 0; k < BLOCS; k++) if (m.blocActive[k] && m.blocCiv[k] === civ) return true;
+  const w = sim.world;
+  for (let c = 0; c < w.cellCount; c++) if (m.restless[c] && w.owner[c] === civ) return true;
+  return false;
+}
+
+/** The parts of settlement `c`'s loyalty target now, for the hex panel (garrison and grace as they are). */
+export function loyaltyParts(sim: Simulation, c: number): { reach: number; satisfaction: number; faith: number; legitimacy: number; garrison: number; grace: number; reconciled: number } {
+  const m = sim.mandate;
   return {
-    'MANDATE loyalty mean': n ? sum / n : 0,
-    'loyalty: restless share %': n ? (100 * restless) / n : 0,
-    'restless settlements': restless,
-    'mean reach part': n ? reachSum / n : 0,
-    'mean satisfaction connection term': n ? satTermSum / n : 0,
-    'restless: cause reach %': restless ? (100 * causes[0]) / restless : 0,
-    'restless: cause satisfaction %': restless ? (100 * causes[1]) / restless : 0,
-    'restless: cause faith %': restless ? (100 * causes[2]) / restless : 0,
-    'restless: cause legitimacy %': restless ? (100 * causes[3]) / restless : 0,
-    'restless with road penalty in both parts %': restless ? (100 * both) / restless : 0,
-    'restless with a connection term <= -5 %': restless ? (100 * conn) / restless : 0,
-    'countdowns running': activeBlocs,
-    'blocs formed (size ok)': s.blocsFormed,
-    'countdowns started': s.countdowns,
-    'countdown cause (start): reach': s.causesStart[0],
-    'countdown cause (start): satisfaction': s.causesStart[1],
-    'countdown cause (start): faith': s.causesStart[2],
-    'countdown cause (start): legitimacy': s.causesStart[3],
-    'countdowns over faith': s.faithCountdowns,
-    'outcome: independence': s.independence,
-    'outcome: autonomy (vassal)': s.autonomy,
-    'outcome: reconciliation': s.reconcile,
-    'outcome: bloc dissolved': s.dissolved,
-    'outcome: rebellion failed to start': s.failedStart,
-    'reconciliation % of outcomes': 100 * (s.reconcile + s.dissolved) / Math.max(1, s.reconcile + s.dissolved + end),
-    'countdown length (mean years, ended)': s.countdownYears / Math.max(1, s.independence + s.autonomy + s.reconcile + s.dissolved),
-    'split: >= 20 % of the realm (events)': s.large,
-    'split: < 20 % of the realm (events)': s.small,
-    'split: settlements per event': end ? s.blocCells / end : 0,
-    'split: share of realm per event %': end ? (100 * s.blocShare) / end : 0,
-    'independence over faith': s.faithIndependence,
-    'agitations': s.agitations,
-    'faith blocs ended: independence': s.faithEnd[0],
-    'faith blocs ended: vassal': s.faithEnd[1],
-    'faith blocs ended: reconciliation': s.faithEnd[2],
-    ...faithWarRows(st),
-    'state faith changes: succession': s.stateSucc,
-    'state faith changes: conversion in office': s.stateConv,
-    'state faith changes: forced conversion': s.stateForced,
-    'state faith changes: faith died': s.stateDeath,
-    'state faith changed to a daughter': s.stateToDaughter,
-    'VASSALS now': vassals,
-    'vassals made': s.vassalsMade,
-    'vassal ends: independence peaceful': s.vassalIndepPeace,
-    'vassal ends: independence by war': s.vassalIndepWar,
-    'vassal ends: re-integrated': s.vassalReintegrated,
-    'vassal ends: mother gone': s.vassalFreed,
-    'vassal life (years, ended)': s.vassalLife / Math.max(1, s.vassalIndepPeace + s.vassalIndepWar + s.vassalReintegrated + s.vassalFreed),
-    'tribute paid (money, total)': s.tribute,
+    reach: m.parts[c * 4],
+    satisfaction: m.parts[c * 4 + 1],
+    faith: m.parts[c * 4 + 2],
+    legitimacy: m.parts[c * 4 + 3],
+    garrison: sim.cellPop[c] > 0 ? garrisonValue(sim, c) : 0,
+    grace: m.grace[c],
+    reconciled: m.rec[c],
   };
 }

@@ -1,5 +1,5 @@
 import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
-import { MIL, createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
+import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import {
   advanceGovernment,
   createGovernment,
@@ -28,7 +28,7 @@ import {
   type CivOrigin,
   type Civilization,
 } from './civilizations';
-import { CULTURE_COUNT, Culture, driftCulture, landCulture, terrainAppeal } from './culture';
+import { CULTURE_COUNT, driftCulture, landCulture, terrainAppeal } from './culture';
 import { Ev, createLeaders, leaderEvent, L, LEVERS, type Leaders } from './leaders';
 import { resetLeaderCiv, updateLeaders } from './leaderRules';
 import { BUILDINGS, FIRST_LUXURY, cityTier, GOOD_NAMES, SLOTS, SlotState, countSlots, createEconomy, isLuxury, isStored, type Economy } from './buildings';
@@ -73,9 +73,10 @@ import {
   updateDiplomacy,
   type Diplomacy,
 } from './diplomacy';
-import { FAITH } from './faithHooks';
+import { addedInhabitant, createReligions, faithStep, initReligions, religionYearStep, resetFaithCiv, type Religions } from './religion';
+import { createMandate, resetMandateCiv, type Mandate } from './mandate';
 import { allocateSlot, createPopulation, releaseSlot, type Population } from './population';
-import { GODS, PLAYER_GOD, advanceGod, createGacha, resetGodCiv, setWorship, startGodTick, updateWorship, type Gacha } from './gacha';
+import { PLAYER_GOD, advanceGod, createGacha, resetGodCiv, setWorship, startGodTick, updateWorship, type Gacha } from './gacha';
 import { SUPPLY_KINDS, supplyTerms, type SupplyModifier } from './supply';
 import { advanceBiomes, createBiomes, initBiomes, type Biomes } from './biomes';
 
@@ -102,6 +103,8 @@ const SOLDIER_RETURN_AGE = 30;
 /** The war's yearly part: end checks, new armies, declarations (war.ts). */
 const WAR_WEEK = 47;
 const GOVERNMENT_WEEK = 28;
+/** The religions' year (religion.ts, RELIGION_STEPS parts): at the year's end, after the peoples' year. */
+const RELIGION_WEEK = 0;
 const GOVERNMENT_UPKEEP_WEEK = 29;
 const GOVERNMENT_PROJECTS_WEEK = 30;
 /** Districts whose next seat of government one part of a tick plans (see stepSimulationPart). */
@@ -227,6 +230,10 @@ export type Simulation = {
   gacha: Gacha;
   /** Dynamic biomes: pinned hexes, climax, trend, overgrazing, the random numbers "biome" (see biomes.ts). */
   biomes: Biomes;
+  /** Religions, their traits and believers, the lever layer "Glaube", Creed, Faith in trust, holy wars (see religion.ts). */
+  religion: Religions;
+  /** The Mandate: loyalty, legitimacy, blocs and countdowns, vassals (see mandate.ts). */
+  mandate: Mandate;
   /** `diplomacy.bordersVersion` the cut-off check and the map snapshot last saw. */
   bordersSeen: number;
   /** Owner of every hex as the last cut-off check left it (land also changes hands after it: uprisings, migration). */
@@ -293,6 +300,8 @@ export function createSimulation(world: World): Simulation {
     war: createWar(world.seed, n),
     gacha: createGacha(world.seed, n),
     biomes: createBiomes(world),
+    religion: createReligions(world),
+    mandate: createMandate(world),
     bordersSeen: 0,
     cutOwnerSeen: new Uint8Array(world.cellCount),
     cellAdults: new Int32Array(n),
@@ -318,6 +327,8 @@ export function createSimulation(world: World): Simulation {
   for (let i = 0; i < START_TRIBE_SIZE; i++) {
     addInhabitant(sim, start, tribe.id, 2 + Math.floor(sim.rng() * 36), 0.75 + 0.25 * sim.rng());
   }
+  // Religion 0, the player's (Requirement Religion 3.1).
+  initReligions(sim, tribe.id);
   record(sim, `The ${tribe.name} settle in the ${biomeName(world, start)}. They pray to you.`, start, true);
   updateSatisfaction(sim, cellOwners(sim));
   refreshSnapshot(sim);
@@ -506,6 +517,15 @@ export function stepSimulationPart(sim: Simulation): boolean {
         }
         sim.planStep = 0;
       }
+      else if (weekOfYear === RELIGION_WEEK) {
+        // Counting, traits, schisms, merges, contagion, levers and the leaders' faith: a part each.
+        const next = religionYearStep(sim, sim.planStep);
+        if (next >= 0) {
+          sim.planStep = next;
+          return false;
+        }
+        sim.planStep = 0;
+      }
       else if (weekOfYear === GOVERNMENT_WEEK) updateGovernment(sim, owner, (text, cell, important) => record(sim, text, cell, important));
       else if (weekOfYear === GOVERNMENT_UPKEEP_WEEK) updateGovernmentUpkeep(sim, owner);
       else if (weekOfYear === GOVERNMENT_PROJECTS_WEEK) updateGovernmentProjects(sim, owner);
@@ -571,7 +591,7 @@ export function livingCivilizations(sim: Simulation): Civilization[] {
 // ---------------------------------------------------------------------------
 // Inhabitants
 
-function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, faith: number, parent = -1): void {
+function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, faith: number, parent = -1): number {
   const { pop } = sim;
   const i = allocateSlot(pop);
   pop.alive[i] = 1;
@@ -582,7 +602,8 @@ function addInhabitant(sim: Simulation, cell: number, civ: number, age: number, 
   pop.count++;
   sim.cellPop[cell]++;
   sim.cellCivPop[cell * sim.civSlots + civ]++;
-  if (FAITH.on) FAITH.added!(sim, i, parent, cell);
+  addedInhabitant(sim, i, parent, cell);
+  return i;
 }
 
 /** The military's year (military.ts: updateMilitary): pay, dismissals, training; trained adults leave the population, dismissed soldiers return to it. */
@@ -622,8 +643,10 @@ function returnSoldiers(sim: Simulation, owner: Uint8Array): void {
     military.faith[c] = stay > 0 ? faith * stay : 0;
     const civ = owner[c];
     if (civ === 0 || sim.cellPop[c] === 0) continue;
-    for (let k = 0; k < n; k++) addInhabitant(sim, c, civ, SOLDIER_RETURN_AGE, faith);
-    if (faith >= BELIEVER_FAITH) sim.civs[civ]!.faithYear.discharged += n;
+    for (let k = 0; k < n; k++) {
+      const i = addInhabitant(sim, c, civ, SOLDIER_RETURN_AGE, faith);
+      if (faith >= BELIEVER_FAITH && sim.pop.religion[i] === 0) sim.civs[civ]!.faithYear.discharged++;
+    }
   }
 }
 
@@ -645,7 +668,7 @@ export function drawSoldiers(sim: Simulation): void {
     open--;
     military.faith[c] += pop.faith[i];
     const civ = sim.civs[pop.civ[i]];
-    if (civ && pop.faith[i] >= BELIEVER_FAITH) civ.faithYear.enlisted++;
+    if (civ && pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) civ.faithYear.enlisted++;
     removeInhabitant(sim, i);
   }
   // Rare: fewer adults than counted; the missing soldiers are not there.
@@ -684,7 +707,7 @@ export function dischargeSoldiers(sim: Simulation, cell: number, n: number): voi
 /** Inhabitant `i` dies of something other than age (a god's fire): booked in its people's faith ledger. */
 export function killInhabitant(sim: Simulation, i: number): void {
   const civ = sim.civs[sim.pop.civ[i]];
-  if (civ && sim.pop.faith[i] >= BELIEVER_FAITH) civ.faithYear.died++;
+  if (civ && sim.pop.faith[i] >= BELIEVER_FAITH && sim.pop.religion[i] === 0) civ.faithYear.died++;
   removeInhabitant(sim, i);
 }
 
@@ -737,44 +760,35 @@ function updateInhabitant(sim: Simulation, i: number): void {
   const death = ageMortality(age) + world.danger[cell] * 0.01 + (crowding > 1 ? (crowding - 1) * 0.3 : 0);
   const ledger = civ.faithYear;
   if (rng() < death) {
-    if (pop.faith[i] >= BELIEVER_FAITH) ledger.died++;
+    if (pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) ledger.died++;
     removeInhabitant(sim, i);
     return;
   }
 
-  // Faith follows the neighbors. The player's own people grow more devout,
-  // everyone else slowly forgets the player. Crossing the believer line is
-  // booked under whichever of these pulled hardest.
+  // Faith in the inhabitant's religion (religion.ts faithStep: the hex's faith, devotion, fading, conversion).
+  // The player's believers' ledger books who crossed the believer line of religion 0, and why.
   const before = pop.faith[i];
   const neighborFaith = world.population[cell] > 0 ? world.faith[cell] : before;
-  let faith: number;
-  if (FAITH.on) {
-    // Religion layer (religion.ts): faith in the inhabitant's own religion, spread, conversion.
-    faith = FAITH.step!(sim, i, civId, cell, before);
-    pop.faith[i] = faith;
-  } else {
-  const pull = (neighborFaith - before) * 0.1;
-  // The god's layer (Prophet's Light, Doubt) adds its devotion in every people, worshipping or not.
-  const devotion = (civ.worshipsPlayer ? civ.culture[Culture.Devout] * 0.02 + sim.leaders.lev[civId * LEVERS + L.devotion] : 0) + sim.gacha.godDevotion[civId * GODS + PLAYER_GOD];
-  const fading = civ.worshipsPlayer ? 0 : 0.005;
-  faith = clamp(before + pull + devotion - fading, 0, 1);
+  const relBefore = pop.religion[i];
+  const faith = faithStep(sim, i, civId, cell, before);
   pop.faith[i] = faith;
-  const wasBeliever = before >= BELIEVER_FAITH;
-  if (wasBeliever !== faith >= BELIEVER_FAITH) {
+  const wasBeliever = before >= BELIEVER_FAITH && relBefore === 0;
+  const isBeliever = faith >= BELIEVER_FAITH && pop.religion[i] === 0;
+  if (wasBeliever !== isBeliever) {
+    const changed = relBefore !== pop.religion[i];
     if (wasBeliever) {
-      if (-pull > fading) ledger.lostToNeighbors++;
+      if (changed) ledger.lostToNeighbors++;
       else ledger.forgot++;
-    } else if (pull > devotion) ledger.wonByNeighbors++;
+    } else if (changed) ledger.wonByNeighbors++;
     else ledger.grewDevout++;
-  }
   }
 
   // Full birth rate up to half the hex's capacity, none once it is overfull;
   // satisfied settlements have more children, unhappy ones fewer.
-  const birth = 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1) * birthFactor(sim.satisfaction[cell]) * sim.leaders.lev[civId * LEVERS + L.birth] * (MIL.standing > 0 ? 1 - MIL.standingCost : 1);
+  const birth = 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1) * birthFactor(sim.satisfaction[cell]) * sim.leaders.lev[civId * LEVERS + L.birth];
   if (age >= 16 && age <= 42 && rng() < birth) {
     const childFaith = clamp(faith * 0.9 + neighborFaith * 0.1 + (rng() - 0.5) * 0.1, 0, 1);
-    if (childFaith >= BELIEVER_FAITH) ledger.born++;
+    if (childFaith >= BELIEVER_FAITH && pop.religion[i] === 0) ledger.born++;
     addInhabitant(sim, cell, civId, 0, childFaith, i);
   }
 
@@ -1154,9 +1168,9 @@ function splitCutOffLandOnce(sim: Simulation, owner: Uint8Array): void {
       if (!civ) break; // all civilization ids in use; try again next quarter
       for (let i = 0; i < pop.end; i++) {
         if (!pop.alive[i] || pop.civ[i] !== parent.id || !inGroup[pop.cell[i]]) continue;
-        if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
+        if (pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) parent.faithYear.brokeAway++;
+        // The faith stays as it is (Requirement Religion 3: a new people keeps its religion).
         changeCiv(sim, i, civ.id);
-        if (!FAITH.on) pop.faith[i] *= 0.6;
       }
       for (const c of cells) {
         owner[c] = civ.id;
@@ -1190,7 +1204,7 @@ function moveGroup(sim: Simulation, from: number, to: number, civId: number, cou
     if (pop.alive[i] && pop.cell[i] === from && pop.civ[i] === civId) {
       moveInhabitant(sim, i, to);
       if (joinCiv !== civId) {
-        if (pop.faith[i] >= BELIEVER_FAITH) {
+        if (pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) {
           sim.civs[civId]!.faithYear.emigrated++;
           sim.civs[joinCiv]!.faithYear.immigrated++;
         }
@@ -1234,7 +1248,8 @@ function refreshSnapshot(sim: Simulation): void {
     if (pop.age[i] >= ADULT_AGE) sim.cellAdults[pop.cell[i]]++;
     faithSum[pop.cell[i]] += pop.faith[i];
     civFaithSum[pop.civ[i]] += pop.faith[i];
-    if (pop.faith[i] >= BELIEVER_FAITH && (!FAITH.on || FAITH.rel[i] === 0)) believers[pop.civ[i]]++;
+    // Believers of the player's religion (0): Faith, worship and the game's end count them.
+    if (pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) believers[pop.civ[i]]++;
   }
 
   const civPop = snapCivPop.fill(0);
@@ -1507,6 +1522,8 @@ export function foundCivilization(
   resetWarCiv(sim, id);
   resetLeaderCiv(sim, id);
   resetGodCiv(sim, id);
+  resetFaithCiv(sim, id);
+  resetMandateCiv(sim, id);
   if (parent && origin === 'revolution') {
     leaderEvent(sim, parent.id, Ev.Uprising);
     sim.leaders.uprisings[parent.id]++;

@@ -2,27 +2,18 @@ import { DIRECTION_COUNT } from '../hex';
 import { hasRoad } from '../world/roads';
 import { BIOMES } from '../world/biomes';
 import { hasSeat } from './satisfaction';
-import { MIL, TROOP_TYPES, Troop, standingMilitia } from './military';
+import { MIL, TROOP_TYPES, Troop } from './military';
 import { Pact } from './pacts';
-import { L, LEVERS } from './leaders';
 import { PAIRS } from './diplomacy';
 import { WAR, MAX_GOALS, MAX_WARS, startRebelWar } from './war';
-import { FAITH } from './faithHooks';
 import { BELIEVER_FAITH, UPRISING_HOOK, changeCiv, drawSoldiers, foundCivilization, record, type Simulation } from './simulation';
 
 // War phase 5a + 5b: uprisings as war ("Design Documents/Requirement
-// Krieg.md", section 8; "Requirement Zufriedenheit.md", Abspaltung).
-//
-// Once a year (war.ts: runWarYearStep, one realm per step) every realm with
-// dissatisfied settlements is checked: a settlement is dissatisfied when its
-// satisfaction is below 0 (never the capital, no years, no size). All of a
-// realm's dissatisfied settlements rebel together, without a roll, when their
-// strength (the soldiers there plus a militia of WAR.militia of their people,
-// melee without the strategic factor) is greater than the mother's (her
-// strength without those soldiers, plus her pact and alliance partners').
-// At the declaration they become independent peoples, one per group of
-// rebel settlements joined by roads (at most MAX_GOALS, the largest), allied
-// with each other; war.ts (startRebelWar) runs the war. A people in a
+// Krieg.md", section 8), declared at the end of a Mandate countdown
+// (mandate.ts, "Requirement Mandat.md": loyalty, blocs and countdown replace
+// the strength check). The bloc's settlements become independent peoples, one
+// per road-joined group of rebel settlements (at most MAX_GOALS, the largest),
+// allied with each other; war.ts (startRebelWar) runs the war. A people in a
 // running rebellion (on either side) sees no other rebellion.
 //
 // Cut-off land still splits off directly (simulation.ts: splitCutOffLand).
@@ -40,7 +31,7 @@ const busy = new Uint8Array(PAIRS);
 /** The chosen groups (index into groupStart, largest first; MAX_GOALS, made on first use as war.ts imports this module). */
 let chosen = new Int32Array(0);
 
-/** The last check's numbers (measureRebellion): the rebels' strength (soldiers + militia), their soldiers' strength and militia, the mother's side. */
+/** The last measure's numbers (measureCells, a declaration): the rebels' strength (soldiers + militia), their soldiers' strength and militia, the mother's side. */
 export const REBEL_CHECK = { rebels: 0, soldiers: 0, militia: 0, mother: 0, settlements: 0 };
 
 function ensureScratch(n: number): void {
@@ -67,12 +58,7 @@ function cellStrength(sim: Simulation, c: number): number {
 
 /** Militia a settlement raises at a rebellion: WAR.militia of its people, at most its adults. */
 export function militiaOf(sim: Simulation, c: number): number {
-  return Math.max(0, Math.min(Math.floor(WAR.militia * sim.cellPop[c]) + standingMilitia(sim, c), sim.cellAdults[c]));
-}
-
-/** Whether settlement `c` of people `civ` is dissatisfied in the sense of a rebellion (satisfaction below 0, not the capital). */
-export function isDissatisfied(sim: Simulation, c: number, civ: number): boolean {
-  return civ !== 0 && sim.cellPop[c] > 0 && sim.satisfaction[c] < 0 && sim.civs[civ]?.capital !== c;
+  return Math.max(0, Math.min(Math.floor(WAR.militia * sim.cellPop[c]), sim.cellAdults[c]));
 }
 
 /** Marks in `busy` the peoples on either side of a running rebellion. */
@@ -91,20 +77,7 @@ export function inRebellion(sim: Simulation, civ: number): boolean {
   return busy[civ] === 1;
 }
 
-/** The war's year, first step: each people's dissatisfied settlements (war.restless), none for peoples in a rebellion. */
-export function countRestless(sim: Simulation): void {
-  const w = sim.war;
-  const owner = sim.world.owner;
-  w.restless.fill(0);
-  markBusy(sim);
-  for (let c = 0; c < sim.world.cellCount; c++) {
-    const civ = owner[c];
-    if (busy[civ] || !isDissatisfied(sim, c, civ)) continue;
-    if (w.restless[civ] < 65535) w.restless[civ]++;
-  }
-}
-
-/** Flags the settlements of `mother` that rebel: the dissatisfied ones, or with `all` every one but the capital. Returns their number. */
+/** Flags the settlements of `mother` that rebel: those below satisfaction 0, or with `all` every one but the capital (the benchmark, tests). Returns their number. */
 function markRebels(sim: Simulation, mother: number, all: boolean): number {
   const n = sim.world.cellCount;
   ensureScratch(n);
@@ -112,15 +85,15 @@ function markRebels(sim: Simulation, mother: number, all: boolean): number {
   const capital = sim.civs[mother]?.capital ?? -1;
   let count = 0;
   for (let c = 0; c < n; c++) {
-    const yes = owner[c] === mother && (all ? sim.cellPop[c] > 0 && c !== capital : isDissatisfied(sim, c, mother));
+    const yes = owner[c] === mother && sim.cellPop[c] > 0 && c !== capital && (all || sim.satisfaction[c] < 0);
     flag[c] = yes ? 1 : 0;
     if (yes) count++;
   }
   return count;
 }
 
-/** Fills REBEL_CHECK for the flagged settlements of `mother`; true if the rebels are the stronger. */
-function measureFlagged(sim: Simulation, mother: number, count: number): boolean {
+/** Fills REBEL_CHECK for the flagged settlements of `mother` (the rebels' and the mother's strength). */
+function measureFlagged(sim: Simulation, mother: number, count: number): void {
   const w = sim.war;
   const m = sim.military;
   const n = sim.world.cellCount;
@@ -140,32 +113,42 @@ function measureFlagged(sim: Simulation, mother: number, count: number): boolean
   REBEL_CHECK.militia = militia;
   REBEL_CHECK.mother = motherStr;
   REBEL_CHECK.settlements = count;
-  // The mother's leader sets how much stronger than she the rebels must be (Tyrant, Iron Fist, Weak Hand).
-  return count > 0 && REBEL_CHECK.rebels > motherStr * sim.leaders.lev[mother * LEVERS + L.rebel];
 }
 
-/** The strengths of a rebellion of `mother`'s dissatisfied settlements now (REBEL_CHECK); true if they would rebel. */
-export function measureRebellion(sim: Simulation, mother: number): boolean {
-  return measureFlagged(sim, mother, markRebels(sim, mother, false));
+/** Flags `cells` of `mother` (not her capital, settled, hers); returns their number. */
+function flagCells(sim: Simulation, mother: number, cells: readonly number[]): number {
+  ensureScratch(sim.world.cellCount);
+  flag.fill(0);
+  const capital = sim.civs[mother]?.capital ?? -1;
+  let count = 0;
+  for (const c of cells) if (c !== capital && sim.world.owner[c] === mother && sim.cellPop[c] > 0 && !flag[c]) {
+    flag[c] = 1;
+    count++;
+  }
+  return count;
+}
+
+/** The strengths of a rebellion of `cells` of `mother` now, into REBEL_CHECK (Mandate's outcome weights). */
+export function measureCells(sim: Simulation, mother: number, cells: readonly number[]): void {
+  measureFlagged(sim, mother, flagCells(sim, mother, cells));
 }
 
 /**
- * The yearly check of realm `mother` (war.ts: one step each): its
- * dissatisfied settlements rebel if they are the stronger and the realm is in
- * no rebellion. True if a rebellion began; its declaration goes on in the
- * next steps of the war's year (continueRebellion).
+ * The end of a Mandate countdown (mandate.ts): `cells` of `mother` rise. The declaration begins (the groups and
+ * their capitals); the next steps of the war's year go on with it (continueRebellion, war.ts). False if none
+ * can begin (no settlement, a rebellion being declared, the realm in a rebellion, no free war slot).
  */
-export function checkRebellion(sim: Simulation, mother: number): boolean {
-  if (FAITH.mandate) return false;
+export function prepareRebellionCells(sim: Simulation, mother: number, cells: readonly number[]): boolean {
   if (!sim.civs[mother] || sim.war.rebelStage !== 0 || inRebellion(sim, mother)) return false;
-  const count = markRebels(sim, mother, false);
-  if (!measureFlagged(sim, mother, count)) return false;
+  const count = flagCells(sim, mother, cells);
+  if (count === 0) return false;
+  measureFlagged(sim, mother, count);
   return prepareRebels(sim, mother);
 }
 
 /**
- * Starts a rebellion in realm `mother` at once, without the strength check
- * (the benchmark, tests): its dissatisfied settlements rise, with `all` every
+ * Starts a rebellion in realm `mother` at once (the benchmark, tests): its
+ * settlements below satisfaction 0 rise, with `all` every
  * settlement but the capital. The armies are raised at once. Returns the war
  * slot, -1 if none began (no settlement, no free war slot or people id, the
  * realm in a rebellion already).
@@ -181,25 +164,10 @@ export function startRebellion(sim: Simulation, mother: number, all = false): nu
   return continueRebellion(sim, false);
 }
 
-/**
- * Mandate prototype: a rebellion of the given settlements of `mother` at once (the end of a countdown, mandate.ts):
- * like startRebellion but without the strength check. Returns the war slot, -1 if none began.
- */
+/** A rebellion of `cells` of `mother` at once, its armies raised (tests). Returns the war slot, -1 if none began. */
 export function startRebellionCells(sim: Simulation, mother: number, cells: readonly number[]): number {
   const w = sim.war;
-  if (!sim.civs[mother] || w.rebelStage !== 0 || inRebellion(sim, mother)) return -1;
-  const n = sim.world.cellCount;
-  ensureScratch(n);
-  flag.fill(0, 0, n);
-  const capital = sim.civs[mother]?.capital ?? -1;
-  let count = 0;
-  for (const c of cells) if (c !== capital && sim.world.owner[c] === mother && sim.cellPop[c] > 0) {
-    flag[c] = 1;
-    count++;
-  }
-  if (count === 0) return -1;
-  measureFlagged(sim, mother, count);
-  if (!prepareRebels(sim, mother)) return -1;
+  if (!prepareRebellionCells(sim, mother, cells)) return -1;
   while (w.rebelStage !== 0 && w.rebelStage !== 3) continueRebellion(sim);
   return continueRebellion(sim, false);
 }
@@ -329,7 +297,8 @@ function foundNextRebels(sim: Simulation): boolean {
   }
   const n = w.rebelCells[k];
   const who = n === 1 ? 'a settlement' : `${n} settlements`;
-  record(sim, `Rebellion: ${who} in the ${BIOMES[world.biome[capital]].name.toLowerCase()} rose up against the ${parent.name} and became the ${civ.name}.`, capital, true);
+  const what = sim.religion.rebelFaith[w.rebelOf] > 0 ? 'Rebellion over faith' : 'Rebellion';
+  record(sim, `${what}: ${who} in the ${BIOMES[world.biome[capital]].name.toLowerCase()} rose up against the ${parent.name} and became the ${civ.name}.`, capital, true);
   return true;
 }
 
@@ -377,7 +346,7 @@ function moveRebels(sim: Simulation): void {
     const g = to[pop.cell[i]];
     if (g === 0) continue;
     const civ = w.rebelCivs[g - 1];
-    if (pop.faith[i] >= BELIEVER_FAITH) parent.faithYear.brokeAway++;
+    if (pop.faith[i] >= BELIEVER_FAITH && pop.religion[i] === 0) parent.faithYear.brokeAway++;
     changeCiv(sim, i, civ);
   }
   const st = w.stats;

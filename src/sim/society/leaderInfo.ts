@@ -56,6 +56,9 @@ export type LeaderInfo = {
   /** The satisfaction part "Leader" of the people's settlements now (capped) and what the leader adds to their connection part. */
   satisfaction: number;
   connection: number;
+  /** The leader's faith, the state faith of the people (Requirement Anführer 6a): religion id (-1 none) and name. */
+  faith: number;
+  faithName: string;
 };
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -96,8 +99,8 @@ const LEVER_TEXT: Record<number, [label: string, unit: Unit]> = {
   [L.travel]: ['Travel cost of settlers', 'factor'],
   [L.settleOver]: ['Crowding at which settlers set out', 'factor'],
   [L.threat]: ['Danger from which it arms', 'number'],
-  [L.devotion]: ['Devotion to the god (the player\'s people)', 'number'],
-  [L.rebel]: ['Strength rebels need to rise', 'factor'],
+  [L.devotion]: ['Devotion to the faith its people follows', 'number'],
+  [L.rebel]: ['Loyalty threshold of unrest (45 divided by this)', 'factor'],
   [L.resMul]: ['Weight of special deposits when choosing a war goal', 'factor'],
   [L.warPop]: ['Weight of inhabitants when choosing a war goal', 'factor'],
   [L.oath]: ['Joins every war of an ally', 'flag'],
@@ -128,9 +131,11 @@ const LEVER_TEXT: Record<number, [label: string, unit: Unit]> = {
   [L.connection]: ['Satisfaction from the connection to a seat', 'number'],
   [L.tradeFirst]: ['Settlements build trade buildings first', 'flag'],
   [L.capitalFirst]: ['The government builds up the capital first', 'flag'],
+  [L.inherit]: ['Chance a successor inherits a trait', 'points'],
 };
 
 /** One effect as text; `k` scales the deviation (1 = full, 0.5 = a reached goal). */
+export { LEVER_TEXT };
 export function effectText(effect: Effect, k = 1): string {
   const [lever, value] = effect;
   const entry = LEVER_TEXT[lever];
@@ -212,5 +217,7 @@ export function leaderOf(sim: Simulation, civ: number): LeaderInfo | null {
     },
     satisfaction: s.sat[civ],
     connection: s.conn[civ],
+    faith: s.faith[civ] !== 255 && sim.religion.alive[s.faith[civ]] ? s.faith[civ] : -1,
+    faithName: s.faith[civ] !== 255 && sim.religion.alive[s.faith[civ]] ? sim.religion.name[s.faith[civ]] : '',
   };
 }

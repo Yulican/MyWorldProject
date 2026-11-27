@@ -1,4 +1,4 @@
-import { FAITH } from './faithHooks';
+import { vassalOf, vassalPair } from './vassals';
 import { DIRECTION_COUNT } from '../hex';
 import { MinHeap } from '../minHeap';
 import type { Term } from '../terms';
@@ -302,7 +302,8 @@ export function trustTerms(sim: Simulation, a: number, b: number): Term[] {
   const terms: Term[] = [{ label: 'Base', value: TRUST_BASE + lev[a * LEVERS + L.trustBase] }];
   if (lev[a * LEVERS + L.trust] !== 0) terms.push({ label: 'Leader', value: lev[a * LEVERS + L.trust] });
   if (dip.peace[k] > 0) terms.push({ label: 'Peaceful neighbors', value: dip.peace[k] });
-  if (FAITH.trust !== null && FAITH.trust[k] !== 0) terms.push({ label: 'Faith', value: FAITH.trust[k] });
+  // Faith (Requirement Religion 6a): same, kindred or foreign religions, by share and traits.
+  if (sim.religion.trust[k] !== 0) terms.push({ label: 'Faith', value: sim.religion.trust[k] });
   if (dip.open[pair(b, a)]) terms.push({ label: 'Their borders are open to us', value: AGREEMENT_TRUST });
   if (dip.freeTrade[k]) terms.push({ label: 'Free trade agreement', value: AGREEMENT_TRUST });
   if (dip.migration[k]) terms.push({ label: 'Migration agreement', value: AGREEMENT_TRUST });
@@ -362,6 +363,8 @@ function sumTerms(terms: readonly Term[]): number {
  * agreement deliveries.
  */
 export function tollValue(sim: Simulation, cell: number, owner: number, traveler: number, reduced: boolean): number {
+  // No toll between a vassal and its mother (Requirement Mandat 7).
+  if (vassalPair(sim, owner, traveler)) return 0;
   const trust = sim.diplomacy.trust[pair(owner, traveler)];
   const short = isShort(sim, cell) ? 1 : 0;
   const lev = sim.leaders.lev;
@@ -576,7 +579,8 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
       for (const b of living) {
         if (a >= b) continue;
         const k = pair(a, b);
-        if (!dip.known[k] && dip.distance[k] <= SIGHT_RANGE) {
+        // A vassal meets the world through its mother (mirrorVassals).
+        if (!dip.known[k] && dip.distance[k] <= SIGHT_RANGE && !thirdOfVassal(sim, a, b)) {
           dip.known[k] = 1;
           dip.known[pair(b, a)] = 1;
           record(`The ${name(a)} and the ${name(b)} met.`, capital(b), true);
@@ -598,7 +602,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
 
     for (const a of living) {
       for (const b of living) {
-        if (a === b || !dip.known[pair(a, b)]) continue;
+        if (a === b || !dip.known[pair(a, b)] || thirdOfVassal(sim, a, b) || vassalPair(sim, a, b)) continue;
         // Borders: open to those we trust and don't fear; close when that ends.
         const k = pair(a, b);
         if (!dip.open[k] && trust(a, b) >= OPEN_TRUST + lev[a * LEVERS + L.openTrust] && danger(a, b) <= OPEN_DANGER + lev[a * LEVERS + L.openDanger] && sim.war.foe[k] === 0) {
@@ -615,7 +619,7 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
 
     for (const a of living) {
       for (const b of living) {
-        if (a >= b || !dip.known[pair(a, b)]) continue;
+        if (a >= b || !dip.known[pair(a, b)] || thirdOfVassal(sim, a, b) || vassalPair(sim, a, b)) continue;
         const k = pair(a, b);
         const both = dip.open[k] && dip.open[pair(b, a)];
         if (sim.war.foe[k] > 0) continue;
@@ -756,7 +760,8 @@ export function updateDiplomacy(sim: Simulation, owner: Uint8Array, record: Reco
   for (let ia = firstBuyer; ia < endBuyer; ia++) {
     const a = living[ia];
     for (const b of living) {
-      if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || !mutualTrade(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
+      // A vassal makes no agreements (free trade with its mother; Requirement Mandat 7).
+      if (a === b || !dip.known[pair(a, b)] || sim.war.foe[pair(a, b)] > 0 || vassalOf(sim, a) >= 0 || vassalOf(sim, b) >= 0 || !mutualTrade(a, b, EXCHANGE_AGREEMENT_TRUST)) continue;
       // b delivers to a what a lacks and b has in plenty; a pays with goods b lacks if it can.
       for (let g = 0; g < goods; g++) {
         if (!free(b, a, g)) continue;
@@ -924,6 +929,55 @@ function refreshRelations(sim: Simulation, living: number[]): void {
       dip.danger[k] = dangerValue(sim, a, b);
     }
   }
+  mirrorVassals(sim, living);
+}
+
+/** Whether one of `a`, `b` is a vassal and the other a third people (not its mother). */
+function thirdOfVassal(sim: Simulation, a: number, b: number): boolean {
+  const va = vassalOf(sim, a);
+  const vb = vassalOf(sim, b);
+  return (va >= 0 && va !== b) || (vb >= 0 && vb !== a);
+}
+
+/**
+ * Vassals (Requirement Mandat 7): open borders, free trade and migration with the mother; towards third peoples
+ * their relations follow the mother's (contact, borders both ways, free trade, migration, trust and danger), so
+ * merchants, tolls and settlers treat them like the mother. A vassal negotiates nothing itself.
+ */
+function mirrorVassals(sim: Simulation, living: number[]): void {
+  const dip = sim.diplomacy;
+  for (const v of living) {
+    const m = vassalOf(sim, v);
+    if (m < 0 || !sim.civs[m]) continue;
+    const vm = pair(v, m);
+    const mv = pair(m, v);
+    if (!dip.open[vm] || !dip.open[mv]) dip.bordersVersion++;
+    dip.open[vm] = 1;
+    dip.open[mv] = 1;
+    setSymmetric(dip.freeTrade, v, m, 1);
+    setSymmetric(dip.migration, v, m, 1);
+    for (const x of living) {
+      if (x === v || x === m) continue;
+      const vx = pair(v, x);
+      const xv = pair(x, v);
+      const mx = pair(m, x);
+      const xm = pair(x, m);
+      dip.known[vx] = dip.known[mx];
+      dip.known[xv] = dip.known[xm];
+      if (dip.open[vx] !== dip.open[mx] || dip.open[xv] !== dip.open[xm]) dip.bordersVersion++;
+      dip.open[vx] = dip.open[mx];
+      dip.open[xv] = dip.open[xm];
+      dip.freeTrade[vx] = dip.freeTrade[mx];
+      dip.freeTrade[xv] = dip.freeTrade[xm];
+      dip.migration[vx] = dip.migration[mx];
+      dip.migration[xv] = dip.migration[xm];
+      dip.trust[vx] = dip.trust[mx];
+      dip.trust[xv] = dip.trust[xm];
+      dip.danger[vx] = dip.danger[mx];
+      dip.danger[xv] = dip.danger[xm];
+    }
+  }
+  rebuildPartners(dip);
 }
 
 /**
@@ -934,7 +988,7 @@ function refreshRelations(sim: Simulation, living: number[]): void {
 export function trustValue(sim: Simulation, a: number, b: number): number {
   const dip = sim.diplomacy;
   const k = pair(a, b);
-  let sum = TRUST_BASE + sim.leaders.lev[a * LEVERS + L.trustBase] + sim.leaders.lev[a * LEVERS + L.trust] + dip.peace[k] + (FAITH.trust !== null ? FAITH.trust[k] : 0);
+  let sum = TRUST_BASE + sim.leaders.lev[a * LEVERS + L.trustBase] + sim.leaders.lev[a * LEVERS + L.trust] + dip.peace[k] + sim.religion.trust[k];
   if (dip.open[pair(b, a)]) sum += AGREEMENT_TRUST;
   if (dip.freeTrade[k]) sum += AGREEMENT_TRUST;
   if (dip.migration[k]) sum += AGREEMENT_TRUST;
@@ -989,8 +1043,10 @@ export function relationsOf(sim: Simulation, a: number): Relation[] {
   const dip = sim.diplomacy;
   const goodName = (g: number) => TRADE_GOOD_NAMES[g];
   const out: Relation[] = [];
+  // A vassal's relations are its mother's: its panel shows only the mother (Requirement Mandat 7).
+  const mother = vassalOf(sim, a);
   for (let b = 1; b < sim.civs.length; b++) {
-    if (b === a || !sim.civs[b] || !dip.known[pair(a, b)]) continue;
+    if (b === a || !sim.civs[b] || !dip.known[pair(a, b)] || (mother >= 0 && b !== mother)) continue;
     const units = (l: TradeLeg) => `${Math.round(l.amount)} ${goodName(l.good).toLowerCase()}`;
     const deals = dip.agreements
       .filter((t) => between(t, a, b))

@@ -43,7 +43,7 @@ import type { Simulation } from './society/simulation';
 // another version is refused (SaveError 'version'), never loaded half.
 
 /** Format version of save games; see above for when to bump it. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const SAVE_MAGIC = 0x5653574d; // "MWSV" read as a little-endian u32
 export const SAVE_HEADER_BYTES = 24;
 
