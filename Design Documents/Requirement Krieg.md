@@ -1,6 +1,6 @@
 # Requirement: Krieg
 
-Stand: **Phase 0 und 1 umgesetzt, Phase 2 (Schlacht) umgesetzt, Phasen 3 bis 5 vom Nutzer entschieden, aber noch nicht simuliert** (Branch `feature/war`). Ablauf: Design → Simulation → Umsetzung. Alle Zahlen sind Startwerte; was noch gerechnet werden muss, ist mit „kalibrieren (Simulation)“ markiert. Spieltexte sind Englisch.
+Stand: **Phase 0 und 1 umgesetzt, Phase 2 (Schlacht) umgesetzt, Phasen 3 bis 5 vom Nutzer entschieden, aber noch nicht simuliert** (Branch `feature/war`). Ablauf: Design → Simulation → Umsetzung. **§8 (Aufstände) wird durch `Requirement Mandat.md` ersetzt (Entwurf, Variante B, noch nicht simuliert): Auslöser und Stärkeprüfung entfallen, der Rebellenkrieg bleibt.** Alle Zahlen sind Startwerte; was noch gerechnet werden muss, ist mit „kalibrieren (Simulation)“ markiert. Spieltexte sind Englisch.
 
 Baut auf Diplomatie (`Requirement Diplomatie.md`, Stufe 2), Zufriedenheit (`Requirement Zufriedenheit.md`), Zentralregierung (`Requirement Zentralregierung.md`), regionalen Rohstoffen (`Requirement Regionale Rohstoffe.md`, strategische Güter) und Handel auf.
 
@@ -132,14 +132,12 @@ Entschieden (Nutzer), Phase 4. Aufgeteilt: **4a** Pakte und Bündnisse entstehen
 Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **5b** Hilfe von außen und Verbündete des Mutterlands. Zahlen sind Startwerte (kalibrieren (Simulation)).
 
 **Auslöser**
-- Gilt nur für **echte Aufstände**. Abgeschnittene Gebiete bleiben unverändert (sie werden direkt ein neues Volk, ohne Krieg). Die direkte Abspaltung durch Unzufriedenheit entfällt (`Requirement Zufriedenheit.md`, Abschnitt „Abspaltung“).
-- **Unzufrieden** = Zufriedenheit der Siedlung aktuell < 0. Keine 5-Jahres-Regel, keine Mindestgröße. Die Hauptstadt wird nie unzufrieden im Sinn der Rebellion. Unzufriedene Siedlungen müssen nicht zusammenhängen und bleiben bis zur Erklärung normaler Teil des Reichs.
-- **Prüfung:** jährlich, ohne Zufallswurf. Die Rebellion beginnt, wenn die Stärke aller unzufriedenen Siedlungen des Reichs zusammen **größer ist als die Stärke des Mutterlands**.
-- **Rebellenstärke:** die Soldaten in den Rebellensiedlungen plus eine **Miliz von 2,5 % der Einwohner** der Rebellensiedlungen (Nahkampf, ohne Güterfaktor; entschieden nach der Simulation, Abschnitt 14).
-- **Mutterland:** Seine Stärke zählt Bündnisse und Pakte (wie die 2×-Prüfung), ohne die Soldaten der Rebellensiedlungen. Die Rebellen zählen nur Bündnisse.
+- **Geändert (Entscheidung Nutzer, Variante B „Mandate“, `Requirement Mandat.md`, Entwurf, noch nicht simuliert):** Die **Stärkeprüfung** (Stärke der Unzufriedenen > Stärke des Mutterlands) und die „unzufrieden = Zufriedenheit < 0“-Regel **entfallen**. Ein Aufstand entsteht über **Loyalität** (je Siedlung 0..100 aus Reichweite, Zufriedenheit, Glaube, Legitimität des Herrschers, Garnison): zusammenhängende **unruhige** Siedlungen bilden einen **Block**; wiegt er mehr als der treue Kern, läuft ein **Countdown von 5 bis 10 Jahren** (Würfel, Zeitfenster des Spielers); am Ende steht mit Würfel **Unabhängigkeit** (der Krieg dieses Abschnitts), **Autonomie** (Vasall, kein Krieg, `Requirement Mandat.md` §7) oder **Versöhnung**. Die **×0,1-Stärkeregel** der Religion entfällt ebenso.
+- Gilt nur für **echte Aufstände**. Abgeschnittene Gebiete bleiben unverändert (sie werden direkt ein neues Volk, ohne Krieg). Die direkte Abspaltung durch Unzufriedenheit entfällt (`Requirement Zufriedenheit.md`, Abschnitt „Abspaltung“). Die Hauptstadt geht nie verloren.
+- Der **bis hierhin implementierte Stand** (Stärkeprüfung: `countRestless`, `checkRebellion`, `measureRebellion`/`REBEL_CHECK`) bleibt bis zur Umsetzung von `Requirement Mandat.md` im Code. **Miliz** von 2,5 % der Einwohner der Rebellensiedlungen (Nahkampf, ohne Güterfaktor, Abschnitt 14) bleibt als Teil des Rebellenkriegs.
 
 **Erklärung**
-- Alle unzufriedenen Siedlungen beginnen die Rebellion gemeinsam und werden mit der Erklärung **sofort unabhängig**; aus jeder durch Straßen zusammenhängenden Gruppe wird ein eigenes Volk; höchstens die 8 größten Gruppen rebellieren. Die Rebellenvölker sind miteinander verbündet (Phase 4: bei Vertrauen < 65 werden sie wie jedes Bündnis auf Pakt herabgestuft). Sie kämpfen als eine Seite, jedes stellt eigene Armeen (je höchstens 4, 32 auf der Karte gesamt).
+- Alle Siedlungen der Blöcke, deren Countdown mit „Unabhängigkeit“ endet, beginnen die Rebellion gemeinsam und werden mit der Erklärung **sofort unabhängig**; aus jeder durch Straßen zusammenhängenden Gruppe wird ein eigenes Volk; höchstens die 8 größten Gruppen rebellieren. Die Rebellenvölker sind miteinander verbündet (Phase 4: bei Vertrauen < 65 werden sie wie jedes Bündnis auf Pakt herabgestuft). Sie kämpfen als eine Seite, jedes stellt eigene Armeen (je höchstens 4, 32 auf der Karte gesamt).
 - Die Rebellensiedlungen wechseln mit der Erklärung den Besitzer; ihre spätere Zufriedenheit ist für den Krieg ohne Belang. Siedlungen in einem laufenden Rebellenkrieg (auf beiden Seiten) können sich keiner weiteren Rebellion anschließen.
 - **Hauptstadt und Sitze:** Die Hauptstadt jeder Gruppe ist der Sitz mit den meisten Einwohnern, sonst die größte Siedlung (sie bekommt Sitz-Status ohne Gebäude und kann wie ein Sitz belagert werden).
 - Das Mutterland kann gleichzeitig anderswo im Krieg sein (zwei Fronten); die Obergrenze von 4 Armeen gilt für das Mutterland insgesamt (3 + 1 für die Rebellen, kalibrieren (Simulation)). Soldaten zählen nicht doppelt. Die Rebellion ist keine Kriegserklärung des Mutterlands.
@@ -155,7 +153,7 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
   - Rebellengruppen selbst können während des Rebellenkriegs nicht von Dritten angegriffen werden.
   - Simulation (12 Welten, Jahr 500): ca. 0,1 Kriege gegen ein Mutterland in einer Rebellion je Welt.
 - **Wer an einer Rebellion beteiligt ist** (Rebellen, Helfer, Verbündete des Mutterlands), beginnt keinen eigenen Krieg.
-- **Verbündete des Mutterlands** (Phase 4b: Verteidiger-Seite) treten immer bei, außer sie sind mit den Rebellen verbündet.
+- **Verbündete des Mutterlands** (Phase 4b: Verteidiger-Seite) treten immer bei, außer sie sind mit den Rebellen verbündet. **Vasallen** des Mutterlands treten immer bei, auch auf der Angreifer-Seite eines Kriegs des Mutterlands (`Requirement Mandat.md` §7: automatisch verbündet, in beide Richtungen, kein eigener Krieg des Vasallen).
 
 **Hilfe von außen (5b)**
 - Ein Volk hilft den Rebellen als Verbündeter, wenn die Gefahr des Mutterlands für es ≥ 50 ist, sein Vertrauen zum Mutterland < 50 ist, es mit dem Mutterland keinen Pakt oder Bündnis hat und die Rebellenseite dadurch stärker ist als das Mutterland. Es tritt bei der Erklärung bei.
@@ -163,6 +161,8 @@ Entschieden (Nutzer), Phase 5. Aufgeteilt: **5a** Rebellion statt Abspaltung, **
 **Anzeige und Chronik:** Eintrag „Rebellion“ (statt „Abspaltung“) mit Zahl der Siedlungen; weitere Einträge: Rebellensitz besetzt, Rebellion niedergeschlagen, Rebellen bleiben unabhängig, Hilfe von Dritten. Karte: Rebellenvölker mit eigener Farbe, rote Kriegsgrenzen wie bisher; das Kriegs-Panel zeigt die Rebellenseite.
 
 ## 9. Anzeige
+
+- Vasallen: Bündnis ohne Vertrauensschwelle und ohne Herabstufung, Tribut an das Mutterland, Grenzdarstellung siehe `Requirement Mandat.md` §7.
 
 - Kriegs-Panel („War ›“ im Völker-Panel, wie Diplomatie und Government): Stärke, Armeen, Kriege, Belagerungen, Bündnisse, Gefahr in beide Richtungen mit Teilwerten.
 - Karte: Armeen als Marker, belagerte Sitze mit Rahmen, Kriegsgrenzen farbig (kommt in Phase 3).

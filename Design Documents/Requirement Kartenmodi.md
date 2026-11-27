@@ -47,6 +47,7 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 | **War** | Seiten A/B je Krieg des gewählten Volks (`sim.war.side`/`foe`), Besetzte Hexe schraffiert (`Requirement Krieg.md` §5) | Farbliste: Seite A, Seite B, neutral, besetzt (Schraffur in der Farbe des Besetzers) | keine Zahl |
 | **Military** | Soldaten je Hex (`hexMilitary`) | sequenziell, 8 Stufen | Soldatenzahl |
 | **Government** | Entfernung zum Sitz (Hexe auf dem Weg, `Requirement Zentralregierung.md` §3 Bezirke) | sequenziell, 8 Stufen, Sitz selbst markiert | Entfernung in Hexen |
+| **Loyalty** | Loyalität 0..100 je Siedlung (`Requirement Mandat.md` §2, §9) | divergierend, 8 Stufen, untere Grenzen 10, 25, 35, 50, 65, 80, 90 (unruhig < 25 rot; Schwelle hängt am Hebel `L.rebel`) | Wert; Marker: unruhige Siedlungen roter Rand, Blöcke im Countdown Ring um den Block (der „May rebel“-Marker der Zufriedenheit zieht hierher) |
 | **Economy** | Belegte Bauplätze und Stadtstufe (`cityTier`, `Requirement Regionale Rohstoffe.md` §11); Untermodi *Slots* (belegt/nutzbar in Prozent) und *Tier* (kategorisch: Stamm, kleine, große Stadt) | sequenziell bzw. Farbliste | belegte Bauplätze (z. B. „4“) |
 
 ### Später (nicht in Runde 1 oder 2)
@@ -115,3 +116,7 @@ Alle Werte stammen aus den vorhandenen flachen Arrays der Simulation und werden 
 ## Nachtrag: Religion (Entwurf, Runde 2)
 
 Neuer Modus **„Faith“** mit Untermodi „Religions“ (Farbe je Religion, Schattierung nach Anteil) und „Your faith“ (Anteil der Religion 0), liest nur vorhandene Werte; Benchmark `modes` bekommt die Untermodi. Siehe `Requirement Religion.md` §9, §11.
+
+## Nachtrag: Mandat (Entwurf, Runde 2)
+
+Neuer Modus **„Loyalty“** (siehe Tabelle Runde 2); der „May rebel“-Marker im Modus „Satisfaction“ (Wert < 0) entfällt, weil die Stärkeprüfung entfällt (`Requirement Mandat.md` §9). Vasallengrenzen (äußere Linie in der Farbe des Mutterlands) betreffen die politische Karte. Benchmark `modes` bekommt „Loyalty“; Buckets aus `tools/modeBucketStats.ts`.

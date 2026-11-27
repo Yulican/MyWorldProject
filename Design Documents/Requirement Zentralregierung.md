@@ -46,6 +46,8 @@ Schwerpunkte dazu (Krieg und andere Mechaniken).
 
 ## 4. Steuern
 
+*Vasallen (`Requirement Mandat.md` §7, Entwurf): 15 % der jährlichen Steuern der Sitze eines Vasallen gehen als Tribut in die Kasse der Hauptstadt des Mutterlands; Regierungssitze verkürzen außerdem die „Reichweite“ der Loyalität (`Requirement Mandat.md` §2).*
+
 Jeder Bezirk setzt einmal im Jahr zwei Steuersätze, so hoch, dass seine
 **schwächste Siedlung** noch loyal bleibt, mit einem **Sicherheitsabstand
 von 5** Zufriedenheitspunkten. Solange das Volk einen Regierungssitz

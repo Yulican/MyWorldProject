@@ -322,3 +322,7 @@ dem Ziel von 1,3.
 ## Nachtrag: Religion (Entwurf)
 
 Religions-Eigenschaften verschieben Vertrauen, Grenzschwellen, Zoll und Handelsmengen über die Hebel `L` (Open Gates, Peacemakers, Pilgrim Roads, Inquisition …), siehe `Requirement Religion.md` §4.2. Der Glaube der Abwanderer bleibt unverändert; Siedler, Händler und Soldaten tragen ihn weiter (`carry`, Religion §5). „Glaubensunterschiede ändern das Vertrauen“ (oben, Stufe 2 notiert) steht jetzt als Entwurf in `Requirement Religion.md` §6a: neuer Vertrauens-Teilwert „Faith“ (gleiche Religion +8, verwandte +2, fremde −8, nach Gläubigenanteilen, Deckel ±12, durch Eigenschaften skaliert); Zahlen vorläufig, Einzelheiten vom Nutzer noch zu bestätigen.
+
+## Nachtrag: Mandat und Vasallen (Entwurf)
+
+`Requirement Mandat.md` §7: Ein **Vasall** (Autonomie nach einem Aufstand) ist mit seinem Mutterland **dauerhaft verbündet**, unabhängig von Vertrauen (keine Herabstufung); zwischen beiden offene Grenzen, Freihandel ohne Zoll, freie Migration; Tribut 15 % der Steuern. Der Vasall führt **keine Diplomatie außer mit dem Mutterland**: Beziehungen zu Dritten (Vertrauen, Gefahr, Abkommen, Pakte, Bündnisse) bestehen nicht; seine Grenzen und sein Handel mit Dritten **folgen der Beziehung des Dritten zum Mutterland** (Zoll und Vertrauen mit dem Mutterland, Zoll geht an den Vasallen). Ein Dritter im Krieg mit dem Mutterland ist es auch mit dem Vasallen. Alle Zahlen Startwerte.
