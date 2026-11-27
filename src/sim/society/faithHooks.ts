@@ -30,8 +30,10 @@ export const FAITH: {
   joinSide: ((sim: Simulation, s: number, p: number) => number) | null;
   /** Per-cell Heresy part (mode 1). */
   heresyCell: Float32Array | null;
+  /** Per-cell satisfaction part "Unrest" (unrest.ts). */
+  unrest: Float32Array | null;
   /** Tools: a rebel war `s` is about to end with `type` (EndType). */
   rebelEnd: ((sim: Simulation, s: number, type: number) => void) | null;
   /** Cells (mask) of war `s` changed hands to `att`. */
   conquered: ((sim: Simulation, s: number, mask: Uint8Array, att: number) => void) | null;
-} = { on: false, lev: null, creed: null, heresy: null, trust: null, rel: new Uint8Array(0), added: null, step: null, holyRatio: null, warStarted: null, holy: null, joinSide: null, heresyCell: null, conquered: null, rebelEnd: null };
+} = { on: false, lev: null, creed: null, heresy: null, trust: null, rel: new Uint8Array(0), added: null, step: null, holyRatio: null, warStarted: null, holy: null, joinSide: null, heresyCell: null, unrest: null, conquered: null, rebelEnd: null };

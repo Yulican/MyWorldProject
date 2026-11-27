@@ -1,5 +1,5 @@
 import { advanceWar, createWar, reconcileWar, resetWarCiv, runWarYearStep, type WarState } from './war';
-import { createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
+import { MIL, createMilitary, soldiersAt, threatened, updateMilitary, TROOP_TYPES, type Military } from './military';
 import {
   advanceGovernment,
   createGovernment,
@@ -771,7 +771,7 @@ function updateInhabitant(sim: Simulation, i: number): void {
 
   // Full birth rate up to half the hex's capacity, none once it is overfull;
   // satisfied settlements have more children, unhappy ones fewer.
-  const birth = 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1) * birthFactor(sim.satisfaction[cell]) * sim.leaders.lev[civId * LEVERS + L.birth];
+  const birth = 0.17 * clamp((1.1 - crowding) / 0.6, 0, 1) * birthFactor(sim.satisfaction[cell]) * sim.leaders.lev[civId * LEVERS + L.birth] * (MIL.standing > 0 ? 1 - MIL.standingCost : 1);
   if (age >= 16 && age <= 42 && rng() < birth) {
     const childFaith = clamp(faith * 0.9 + neighborFaith * 0.1 + (rng() - 0.5) * 0.1, 0, 1);
     if (childFaith >= BELIEVER_FAITH) ledger.born++;

@@ -6,24 +6,26 @@ import { TICKS_PER_YEAR, createSimulation, generateWorld, stepSimulation, type S
 import { DIRECTION_COUNT } from '../src/sim/hex';
 import { MIL, TROOP_TYPES } from '../src/sim/society/military';
 import { WAR } from '../src/sim/society/war';
+import { UNREST, installUnrest, removeUnrest, unrestYear } from '../src/sim/society/unrest';
 import { REBEL_CHECK, measureRebellion } from '../src/sim/society/rebellion';
 import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
 import { FAITH_SCALE_TRAIT, MAXR, RELIGION, installReligion, onUprising, religionOf, religionYear, removeReligion } from '../src/sim/society/religion';
 
 const worlds = Number(process.argv[2] ?? 12);
-const variant = process.argv[3] ?? 'off';
+const spec = process.argv[3] ?? 'off';
+const [variant, specKeys] = spec.split(':');
 const CP = [100, 300, 500];
-const rects: Record<string, number> = { newProgress: 60, idle: -0.5, counter: -4, deathShare: 0.005, ageEvent: 0, holyMission: 1, holyForeign: 1, tradeScale: 0.5, heresyMode: 1, heresyRebel: 0.5 };
-const m15: Record<string, number> = { ...rects, heresyRelative: 1, heresyMargin: -15, heresyRebel: 0.1 };
-for (const kv of (process.argv[4] ?? '').split(',').filter(Boolean)) {
-  const [key, v] = kv.split('=');
-  if (key in WAR) (WAR as Record<string, number>)[key] = Number(v);
-  else if (key in MIL) (MIL as Record<string, number>)[key] = Number(v);
-}
 if (variant !== 'off') {
-  Object.assign(RELIGION, variant === 'm15f1' ? m15 : rects);
-  for (const t of [7, 8, 9, 21]) FAITH_SCALE_TRAIT[t] = 0.5;
+  for (const kv of (specKeys ?? '').split(',').filter(Boolean)) {
+    const [k, v] = kv.split('=');
+    const dot = k.indexOf('.');
+    if (dot > 0) {
+      const target = ({ mil: MIL, war: WAR, unrest: UNREST } as Record<string, Record<string, number>>)[k.slice(0, dot)];
+      target[k.slice(dot + 1)] = Number(v);
+    } else if (k === 'halve') for (const t of v.split('+')) FAITH_SCALE_TRAIT[Number(t)] = 0.5;
+    else (RELIGION as Record<string, number>)[k] = Number(v);
+  }
 }
 
 const acc = new Map<string, number[]>();
@@ -195,6 +197,7 @@ function report(sim: Simulation, y: number, run: Int16Array): void {
 for (let seed = 1; seed <= worlds; seed++) {
   const sim = createSimulation(generateWorld({ seed }));
   const st = variant === 'off' ? null : installReligion(sim);
+  if (UNREST.enabled) installUnrest(sim);
   const run = new Int16Array(sim.world.cellCount);
   const blocked: number[] = [];
   passed = [];
@@ -205,6 +208,7 @@ for (let seed = 1; seed <= worlds; seed++) {
     stepSimulation(sim);
     if (sim.tick % TICKS_PER_YEAR !== 0) continue;
     if (st) religionYear(sim);
+    unrestYear(sim);
     const y = sim.tick / TICKS_PER_YEAR;
     sample(sim, y, run, blocked);
     if (st && y % 1 === 0) {
@@ -241,9 +245,10 @@ for (let seed = 1; seed <= worlds; seed++) {
   for (const v of blocked) add('rebel check blocked (year samples): ratio rebels/mother', v);
   add('rebels declared per world', passed.length);
   if (st) removeReligion();
+  removeUnrest();
   process.stderr.write(`seed ${seed}\n`);
 }
-console.log(`== ${variant}, ${worlds} worlds (means over samples; "per world" = per world)`);
+console.log(`== ${spec}, ${worlds} worlds (means over samples; "per world" = per world)`);
 for (const [key, vals] of [...acc].sort((a, b) => a[0].localeCompare(b[0]))) {
   const ratio = key.includes('ratio');
   const perWorldSum = key.includes('per world') && !key.includes('rebels declared') ? vals.length / worlds : NaN;

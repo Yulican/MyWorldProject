@@ -16,7 +16,12 @@ import { satisfactionTerms } from '../src/sim/society/satisfaction';
 import { UPRISING_HOOK } from '../src/sim/society/simulation';
 import { FAITH_MUTE, FAITH_MUTE_TRAIT, FAITH_SCALE_TRAIT, MAXR, RELIGION, TRAITS, TRAIT_COUNT, installReligion, onUprising, religionOf, religionYear, removeReligion, type ReligionState } from '../src/sim/society/religion';
 import { FAITH } from '../src/sim/society/faithHooks';
-import { EndType } from '../src/sim/society/war';
+import { EndType, WAR } from '../src/sim/society/war';
+import { MIL } from '../src/sim/society/military';
+import { UNREST, installUnrest, removeUnrest, unrestYear } from '../src/sim/society/unrest';
+const milDefaults = { ...MIL };
+const warDefaults = { ...WAR };
+const unrestDefaults = { ...UNREST };
 
 // Outcomes of rebel wars per world, faith rebellions (F) apart from normal ones (N).
 type Rw = { n: number; mother: number; indep: number; years: number; retaken: number; kept: number; peoples: number; civs: { id: number; obj: object }[] };
@@ -320,11 +325,21 @@ function measure(sim: Simulation, st: ReligionState | null, year: number, overYe
 for (const variant of variants) {
   const [name, spec] = variant.split(':');
   Object.assign(RELIGION, defaults);
+  Object.assign(MIL, milDefaults);
+  Object.assign(WAR, warDefaults);
+  Object.assign(UNREST, unrestDefaults);
   FAITH_MUTE.fill(0);
   FAITH_MUTE_TRAIT.fill(0);
   FAITH_SCALE_TRAIT.fill(1);
   if (spec) for (const kv of spec.split(',')) {
     const [k, v] = kv.split('=');
+    const dot = k.indexOf('.');
+    if (dot > 0) {
+      const target = ({ mil: MIL, war: WAR, unrest: UNREST } as Record<string, Record<string, number>>)[k.slice(0, dot)];
+      if (!target || !(k.slice(dot + 1) in target)) throw new Error(`unknown key ${k}`);
+      target[k.slice(dot + 1)] = Number(v);
+      continue;
+    }
     if (k === 'halve') {
       for (const t of v.split('+')) FAITH_SCALE_TRAIT[Number(t)] = 0.5;
       continue;
@@ -352,6 +367,7 @@ for (const variant of variants) {
     rw.F = newRw();
     rw.N = newRw();
     const st = on ? installReligion(sim) : null;
+    if (UNREST.enabled) installUnrest(sim);
     let overYear = 0;
     const line: number[] = [];
     for (const year of checkpoints) {
@@ -359,6 +375,7 @@ for (const variant of variants) {
         stepSimulation(sim);
         if (st && sim.tick % TICKS_PER_YEAR === 0) {
           religionYear(sim);
+          unrestYear(sim);
           if (sim.tick % (50 * TICKS_PER_YEAR) === 0) line.push(sim.believers);
         } else if (!st && sim.tick % (50 * TICKS_PER_YEAR) === 0) line.push(sim.believers);
       }
@@ -367,6 +384,7 @@ for (const variant of variants) {
     }
     series.push(line);
     if (st) removeReligion();
+    removeUnrest();
     process.stderr.write(`${name} seed ${seed} done${overYear ? ` (game over year ${overYear})` : ''} ${(Date.now() - t0) / 1000}s\n`);
   }
   void religionOf;

@@ -142,6 +142,12 @@ export const RELIGION = {
   /** A people losing this share of its people in a year counts a Disaster event (proxy for fires, droughts, famine). */
   disaster: 1,
   disasterDrop: 0.03,
+  /** Exploratory: faith contagion between neighboring settlements (0 = off): share kappa x pull of the neighbors' believers above the own, held back by the dominant faith's hold, x inqCure against an Inquisition faith. */
+  contagion: 0,
+  kappa: 0.1,
+  inqCure: 0.3,
+  /** Exploratory: Holy War and Martyrs' Creed raise recruitment (lever trainShare +0.1 at level 2). */
+  trainTraits: 0,
   /** Experiment: every religion may declare holy wars (upper bound of their number). */
   holyAll: 0,
   heresy: 1,
@@ -883,6 +889,7 @@ function computeCivLevers(st: ReligionState): void {
           const f = lf(st.traitLvl[r * SLOTS + k]) * RELIGION.effect * s;
           creed += d.sat * f * RELIGION.creedScale;
           const g = f * RELIGION.leverScale;
+          if (RELIGION.trainTraits && (t === 1 || t === 3)) adds[L.trainShare] += 0.1 * g;
           for (const [lever, v] of d.lev) {
             if (FAITH_MUTE[lever] || FAITH_MUTE_TRAIT[t]) continue;
             const g2 = (TRADE_LEVERS[lever] ? g * RELIGION.tradeScale : g) * FAITH_SCALE_TRAIT[t];
@@ -1561,6 +1568,64 @@ function deaths(st: ReligionState): void {
   }
 }
 
+/** Exploratory faith contagion: believers' share spreads into neighboring settlements (converting a share of their people). */
+function contagion(st: ReligionState): void {
+  const sim = st.sim;
+  const w = sim.world;
+  const cells = w.cellCount;
+  const planR = new Int8Array(cells).fill(-1);
+  const planP = new Float32Array(cells);
+  for (let c = 0; c < cells; c++) {
+    const people = sim.cellPop[c];
+    if (people === 0) continue;
+    let dom = -1;
+    let domN = 0;
+    for (let r = 0; r < MAXR; r++) if (st.alive[r] && st.cellBel[c * MAXR + r] > domN) {
+      domN = st.cellBel[c * MAXR + r];
+      dom = r;
+    }
+    let bestR = -1;
+    let bestD = 0;
+    for (let r = 0; r < MAXR; r++) {
+      if (!st.alive[r] || r === dom) continue;
+      let sum = 0;
+      let k = 0;
+      for (let d = 0; d < DIRECTION_COUNT; d++) {
+        const x = w.neighbors[c * DIRECTION_COUNT + d];
+        if (x >= 0 && sim.cellPop[x] > 0) {
+          sum += st.cellBel[x * MAXR + r] / sim.cellPop[x];
+          k++;
+        }
+      }
+      if (k === 0) continue;
+      let d = RELIGION.kappa * st.rPull[r] * Math.max(0, sum / k - st.cellBel[c * MAXR + r] / people);
+      if (dom >= 0) {
+        d /= st.rHold[dom];
+        if (st.rSup[dom] > 0) d *= RELIGION.inqCure;
+      }
+      if (d > bestD) {
+        bestD = d;
+        bestR = r;
+      }
+    }
+    if (bestR >= 0) {
+      planR[c] = bestR;
+      planP[c] = Math.min(1, (bestD * people) / Math.max(1, people - st.cellBel[c * MAXR + bestR]));
+    }
+  }
+  const pop = sim.pop;
+  const rel = FAITH.rel;
+  for (let i = 0; i < pop.end; i++) {
+    if (!pop.alive[i]) continue;
+    const c = pop.cell[i];
+    const r = planR[c];
+    if (r < 0 || rel[i] === r || st.rng() >= planP[c]) continue;
+    if (rel[i] !== 255) st.lostOut[rel[i]]++;
+    rel[i] = r;
+    pop.faith[i] = RELIGION.convertFaith;
+  }
+}
+
 /** The yearly religion step; call after every year's last tick (`sim.tick % TICKS_PER_YEAR === 0`). */
 export function religionYear(sim: Simulation): void {
   const st = ACTIVE;
@@ -1583,6 +1648,10 @@ export function religionYear(sim: Simulation): void {
   followHysteresis(st);
   merges(st);
   countAll(st);
+  if (RELIGION.contagion) {
+    contagion(st);
+    countAll(st);
+  }
   followHysteresis(st);
   // War ages (holy wars; the longest war of all).
   const w = sim.war;

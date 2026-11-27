@@ -2,7 +2,7 @@ import { DIRECTION_COUNT } from '../hex';
 import { hasRoad } from '../world/roads';
 import { BIOMES } from '../world/biomes';
 import { hasSeat } from './satisfaction';
-import { MIL, TROOP_TYPES, Troop } from './military';
+import { MIL, TROOP_TYPES, Troop, standingMilitia } from './military';
 import { Pact } from './pacts';
 import { L, LEVERS } from './leaders';
 import { PAIRS } from './diplomacy';
@@ -66,7 +66,7 @@ function cellStrength(sim: Simulation, c: number): number {
 
 /** Militia a settlement raises at a rebellion: WAR.militia of its people, at most its adults. */
 export function militiaOf(sim: Simulation, c: number): number {
-  return Math.max(0, Math.min(Math.floor(WAR.militia * sim.cellPop[c]), sim.cellAdults[c]));
+  return Math.max(0, Math.min(Math.floor(WAR.militia * sim.cellPop[c]) + standingMilitia(sim, c), sim.cellAdults[c]));
 }
 
 /** Whether settlement `c` of people `civ` is dissatisfied in the sense of a rebellion (satisfaction below 0, not the capital). */

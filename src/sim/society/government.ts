@@ -1,7 +1,7 @@
 import { hexDistance } from '../hex';
 import { BUILDINGS, GOV_SLOT, Good, MATERIAL_COUNT, SLOTS, SlotState, forageYield, withBuildings } from './buildings';
 import { buildingFits, capacityWith, updateCellSupply, usableSlots } from './economy';
-import { armingWanted, districtPay, pickMilitaryBuilding, prepareArming } from './military';
+import { MIL, TROOP_BUILDING, armingWanted, districtPay, districtRoom, hasBuildingOf, pickMilitaryBuilding, prepareArming } from './military';
 import { PAIRS } from './diplomacy';
 import { satisfactionTarget, seatsOf, yieldFactor } from './satisfaction';
 import type { Simulation } from './simulation';
@@ -641,7 +641,8 @@ function chooseProject(sim: Simulation, seat: number, seatOnly: boolean): boolea
       }
     }
     // 3. Military (below loyalty, above growth): one building of each type per settlement.
-    if (arm && bestScore < MILITARY_SCORE) {
+    const everyone = !seatOnly && MIL.everyPop > 0 && people >= MIL.everyPop && districtRoom(sim, seat) >= MIL.capacity && !TROOP_BUILDING.some((g) => hasBuildingOf(sim, c, g));
+    if ((arm || everyone) && bestScore < MILITARY_SCORE) {
       const t = pickMilitaryBuilding(sim, c);
       if (t >= 0) {
         [bestSite, bestSlot, bestType, bestScore] = [c, slot, t, MILITARY_SCORE];
